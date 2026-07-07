@@ -1,8 +1,10 @@
 #pragma once
 
 #include "connection.h"
+#include "../concurrent/thread_pool.h"
 #include <string>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <sys/epoll.h>
 
@@ -11,7 +13,7 @@ namespace net {
 
 class TcpServer {
 public:
-    TcpServer(uint16_t port);
+    TcpServer(uint16_t port, concurrent::ThreadPool& pool);
     ~TcpServer();
 
     // Disable copy
@@ -36,6 +38,8 @@ private:
     int epoll_fd_;
     bool running_;
 
+    concurrent::ThreadPool& pool_;
+    std::mutex connections_mutex_;  // Protects connections_ map from concurrent access
     std::unordered_map<int, std::unique_ptr<Connection>> connections_;
     static const int MAX_EVENTS = 64;
 };

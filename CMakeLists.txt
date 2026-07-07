@@ -21,6 +21,7 @@ set(SOURCES
     src/core/logger.cpp
     src/net/connection.cpp
     src/net/tcp_server.cpp
+    src/concurrent/thread_pool.cpp
 )
 
 # Executable

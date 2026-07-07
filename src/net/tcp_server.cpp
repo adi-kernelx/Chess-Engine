@@ -11,8 +11,8 @@
 namespace chess {
 namespace net {
 
-TcpServer::TcpServer(uint16_t port) 
-    : port_(port), server_fd_(-1), epoll_fd_(-1), running_(false) {}
+TcpServer::TcpServer(uint16_t port, concurrent::ThreadPool& pool) 
+    : port_(port), server_fd_(-1), epoll_fd_(-1), running_(false), pool_(pool) {}
 
 TcpServer::~TcpServer() {
     stop();
@@ -86,7 +86,10 @@ bool TcpServer::start() {
 
 void TcpServer::stop() {
     running_ = false;
-    connections_.clear(); // Will call destructors and close client fds
+    {
+        std::lock_guard<std::mutex> lock(connections_mutex_);
+        connections_.clear();
+    }
     
     if (server_fd_ >= 0) {
         close(server_fd_);
@@ -107,7 +110,7 @@ void TcpServer::handle_new_connection() {
 
         if (client_fd < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                break; // Processed all incoming connections
+                break;
             } else {
                 core::Logger::error("net", "TcpServer", "Accept error: " + std::string(strerror(errno)));
                 break;
@@ -121,8 +124,11 @@ void TcpServer::handle_new_connection() {
 
         char ip_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &(client_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
-        
-        connections_[client_fd] = std::make_unique<Connection>(client_fd, std::string(ip_str));
+
+        {
+            std::lock_guard<std::mutex> lock(connections_mutex_);
+            connections_[client_fd] = std::make_unique<Connection>(client_fd, std::string(ip_str));
+        }
 
         struct epoll_event event;
         event.events = EPOLLIN | EPOLLOUT | EPOLLET;
@@ -136,23 +142,24 @@ void TcpServer::handle_new_connection() {
 }
 
 void TcpServer::handle_client_data(int client_fd) {
+    std::lock_guard<std::mutex> lock(connections_mutex_);
     auto it = connections_.find(client_fd);
     if (it == connections_.end()) return;
     
     Connection* conn = it->second.get();
     
+    // Read all available data from the socket
     while (true) {
         int bytes = conn->read_from_socket();
         
         if (bytes < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                break; // Read all available data
+                break;
             } else {
                 close_connection(client_fd);
                 return;
             }
         } else if (bytes == 0) {
-            // Client disconnected
             close_connection(client_fd);
             return;
         }
@@ -165,23 +172,22 @@ void TcpServer::handle_client_data(int client_fd) {
         conn->consume_read_buffer(read_buf.size());
     }
     
-    // Try to write if we have data
-    if (conn->has_data_to_write()) {
-        while (conn->has_data_to_write()) {
-            int written = conn->write_to_socket();
-            if (written < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    break;
-                } else {
-                    close_connection(client_fd);
-                    return;
-                }
+    // Flush write buffer to socket
+    while (conn->has_data_to_write()) {
+        int written = conn->write_to_socket();
+        if (written < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            } else {
+                close_connection(client_fd);
+                return;
             }
         }
     }
 }
 
 void TcpServer::close_connection(int client_fd) {
+    // Note: caller must already hold connections_mutex_
     connections_.erase(client_fd);
 }
 
@@ -192,27 +198,32 @@ void TcpServer::run() {
         int num_events = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
         
         if (num_events < 0) {
-            if (errno == EINTR) continue; // Interrupted by signal
+            if (errno == EINTR) continue;
             core::Logger::error("net", "TcpServer", "epoll_wait error");
             break;
         }
 
         for (int i = 0; i < num_events; ++i) {
             if (events[i].data.fd == server_fd_) {
+                // Accept new connections on main thread (fast, no blocking)
                 handle_new_connection();
             } else {
                 int client_fd = events[i].data.fd;
-                
-                if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+                uint32_t ev = events[i].events;
+
+                if (ev & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+                    std::lock_guard<std::mutex> lock(connections_mutex_);
                     close_connection(client_fd);
-                } else if (events[i].events & EPOLLIN) {
-                    handle_client_data(client_fd);
-                } else if (events[i].events & EPOLLOUT) {
-                    // We might need to write remaining data
-                    auto it = connections_.find(client_fd);
-                    if (it != connections_.end() && it->second->has_data_to_write()) {
-                        handle_client_data(client_fd); // Reuse logic to write
-                    }
+                } else if (ev & EPOLLIN) {
+                    // Offload data processing to the thread pool.
+                    // The epoll loop stays free to handle other events.
+                    pool_.submit([this, client_fd]() {
+                        handle_client_data(client_fd);
+                    });
+                } else if (ev & EPOLLOUT) {
+                    pool_.submit([this, client_fd]() {
+                        handle_client_data(client_fd);
+                    });
                 }
             }
         }

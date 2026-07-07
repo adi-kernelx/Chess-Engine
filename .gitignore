@@ -32,3 +32,11 @@ Thumbs.db
 *.sqlite3
 *-wal
 *-shm
+
+# Document and Temporary Files
+new_things_to_learn.docx
+# LibreOffice lock files
+.~lock.*#
+# MS Office lock files
+~$*.doc*
+*.tmp
