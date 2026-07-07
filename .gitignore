@@ -1,0 +1,34 @@
+# Build artifacts
+build/
+bin/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+
+# IDEs and editors
+.vscode/
+.vs/
+*.swp
+*.swo
+.idea/
+compile_commands.json
+
+# Dependencies
+third_party/*
+!third_party/json.hpp
+!third_party/README.md
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*-wal
+*-shm
