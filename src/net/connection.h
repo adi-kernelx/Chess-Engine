@@ -38,9 +38,14 @@ public:
 
     bool has_data_to_write() const { return !write_buffer_.empty(); }
 
+    // WebSocket state
+    bool is_upgraded() const { return upgraded_; }
+    void set_upgraded(bool val) { upgraded_ = val; }
+
 private:
     int fd_;
     std::string ip_;
+    bool upgraded_ = false;  // false = raw HTTP, true = WebSocket framing
     
     std::vector<uint8_t> read_buffer_;
     std::vector<uint8_t> write_buffer_;

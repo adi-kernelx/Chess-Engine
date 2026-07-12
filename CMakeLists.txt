@@ -11,6 +11,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Werror")
 # Threading
 find_package(Threads REQUIRED)
 
+# OpenSSL (for SHA1 in WebSocket handshake, HMAC for JWT later)
+find_package(OpenSSL REQUIRED)
+
 # Directories
 include_directories(src)
 include_directories(third_party)
@@ -21,9 +24,10 @@ set(SOURCES
     src/core/logger.cpp
     src/net/connection.cpp
     src/net/tcp_server.cpp
+    src/net/websocket.cpp
     src/concurrent/thread_pool.cpp
 )
 
 # Executable
 add_executable(chess_server ${SOURCES})
-target_link_libraries(chess_server PRIVATE Threads::Threads)
+target_link_libraries(chess_server PRIVATE Threads::Threads OpenSSL::SSL OpenSSL::Crypto)

@@ -40,3 +40,7 @@ new_things_to_learn.docx
 # MS Office lock files
 ~$*.doc*
 *.tmp
+docs/
+
+# Local Test Files
+test.html

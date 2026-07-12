@@ -165,13 +165,58 @@ void TcpServer::handle_client_data(int client_fd) {
         }
     }
 
-    // Echo back whatever was read (for testing)
-    const auto& read_buf = conn->get_read_buffer();
-    if (!read_buf.empty()) {
-        conn->append_to_write_buffer(read_buf.data(), read_buf.size());
-        conn->consume_read_buffer(read_buf.size());
+    // ─── Phase 1: Connection hasn't upgraded yet → try WebSocket handshake ───
+    if (!conn->is_upgraded()) {
+        if (!WebSocket::try_handshake(*conn)) {
+            // Not a valid upgrade request — could be partial data,
+            // or a plain HTTP request. Either way, wait for more data.
+            return;
+        }
+        // Handshake succeeded, 101 response is in the write buffer.
+        // Fall through to flush it.
     }
-    
+
+    // ─── Phase 2: Connection is upgraded → parse WebSocket frames ───
+    if (conn->is_upgraded()) {
+        WsFrame frame;
+        while (WebSocket::try_read_frame(*conn, frame)) {
+            switch (frame.opcode) {
+                case WsOpcode::TEXT: {
+                    // Convert payload to string and route to handler
+                    std::string message(frame.payload.begin(), frame.payload.end());
+                    core::Logger::debug("net", "WebSocket", "Received: " + message);
+                    router_.route(*conn, message);
+                    break;
+                }
+                case WsOpcode::BINARY:
+                    // We'll handle binary protocol in Phase 4
+                    core::Logger::debug("net", "WebSocket", "Received binary frame (" 
+                                       + std::to_string(frame.payload.size()) + " bytes)");
+                    break;
+                case WsOpcode::PING:
+                    WebSocket::send_pong(*conn, frame.payload);
+                    break;
+                case WsOpcode::CLOSE:
+                    core::Logger::info("net", "WebSocket", "Client " + conn->get_ip() + " sent close frame");
+                    WebSocket::send_close(*conn);
+                    // Flush the close frame, then disconnect
+                    while (conn->has_data_to_write()) {
+                        int written = conn->write_to_socket();
+                        if (written <= 0) break;
+                    }
+                    close_connection(client_fd);
+                    return;
+                case WsOpcode::PONG:
+                    // Pong received — client is alive, nothing to do
+                    break;
+                default:
+                    core::Logger::warn("net", "WebSocket", "Unknown opcode: " 
+                                       + std::to_string(static_cast<int>(frame.opcode)));
+                    break;
+            }
+        }
+    }
+
     // Flush write buffer to socket
     while (conn->has_data_to_write()) {
         int written = conn->write_to_socket();

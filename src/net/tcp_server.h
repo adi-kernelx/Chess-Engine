@@ -1,6 +1,7 @@
 #pragma once
 
 #include "connection.h"
+#include "websocket.h"
 #include "../concurrent/thread_pool.h"
 #include <string>
 #include <memory>
@@ -26,6 +27,9 @@ public:
     // Main event loop
     void run();
 
+    // Access the message router to register handlers from outside
+    MessageRouter& get_router() { return router_; }
+
 private:
     bool setup_socket();
     bool set_non_blocking(int fd);
@@ -39,10 +43,12 @@ private:
     bool running_;
 
     concurrent::ThreadPool& pool_;
-    std::mutex connections_mutex_;  // Protects connections_ map from concurrent access
+    MessageRouter router_;
+    std::mutex connections_mutex_;
     std::unordered_map<int, std::unique_ptr<Connection>> connections_;
     static const int MAX_EVENTS = 64;
 };
 
 } // namespace net
 } // namespace chess
+

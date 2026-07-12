@@ -28,6 +28,15 @@ int main() {
     chess::net::TcpServer server(9000, pool);
     g_server = &server;
 
+    // Register a default handler that echoes messages back (for testing).
+    // In later phases, we'll replace this with game-specific handlers.
+    server.get_router().set_default_handler(
+        [](chess::net::Connection& conn, const std::string& message) {
+            chess::core::Logger::info("main", "echo", "Echoing: " + message);
+            chess::net::WebSocket::write_frame(conn, chess::net::WsOpcode::TEXT, message);
+        }
+    );
+
     if (server.start()) {
         server.run();
     } else {
