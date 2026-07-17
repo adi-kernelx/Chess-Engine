@@ -87,7 +87,7 @@ bool TcpServer::start() {
 void TcpServer::stop() {
     running_ = false;
     {
-        std::lock_guard<std::mutex> lock(connections_mutex_);
+        std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
         connections_.clear();
     }
     
@@ -126,7 +126,7 @@ void TcpServer::handle_new_connection() {
         inet_ntop(AF_INET, &(client_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
 
         {
-            std::lock_guard<std::mutex> lock(connections_mutex_);
+            std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
             connections_[client_fd] = std::make_unique<Connection>(client_fd, std::string(ip_str));
         }
 
@@ -142,7 +142,7 @@ void TcpServer::handle_new_connection() {
 }
 
 void TcpServer::handle_client_data(int client_fd) {
-    std::lock_guard<std::mutex> lock(connections_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
     auto it = connections_.find(client_fd);
     if (it == connections_.end()) return;
     
@@ -233,7 +233,17 @@ void TcpServer::handle_client_data(int client_fd) {
 
 void TcpServer::close_connection(int client_fd) {
     // Note: caller must already hold connections_mutex_
+    if (disconnect_cb_) {
+        disconnect_cb_(client_fd);
+    }
     connections_.erase(client_fd);
+}
+
+Connection* TcpServer::get_connection(int fd) {
+    std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
+    auto it = connections_.find(fd);
+    if (it != connections_.end()) return it->second.get();
+    return nullptr;
 }
 
 void TcpServer::run() {
@@ -257,7 +267,7 @@ void TcpServer::run() {
                 uint32_t ev = events[i].events;
 
                 if (ev & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
-                    std::lock_guard<std::mutex> lock(connections_mutex_);
+                    std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
                     close_connection(client_fd);
                 } else if (ev & EPOLLIN) {
                     // Offload data processing to the thread pool.
