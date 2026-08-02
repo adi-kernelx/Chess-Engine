@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Multiplayer chess platform with real-time gameplay, AI opponent, and tournaments.">
+    <title>Chess Platform</title>
+
+    <!-- Google Fonts: Inter for UI, JetBrains Mono for clocks/move list -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <!-- ============================================================
+         LOBBY PAGE — Phase 5.3
+         The landing page: Quick Play, Create Game, Open Games list.
+         ============================================================ -->
+    <section class="lobby-page page-active" id="lobby-page">
+
+        <!-- ── Lobby Header ── -->
+        <header class="lobby-header">
+            <div class="lobby-brand">
+                <div>
+                    <h1>♟ Chess Platform</h1>
+                    <div class="brand-subtitle">Real-time multiplayer chess</div>
+                </div>
+            </div>
+            <div class="lobby-header-right">
+                <div class="connection-status" id="lobby-connection-status">
+                    <div class="connection-dot" id="lobby-connection-dot"></div>
+                    <span id="lobby-connection-text">Connecting...</span>
+                </div>
+                <div class="lobby-username">
+                    <label for="lobby-username-input">Username</label>
+                    <input type="text" id="lobby-username-input" class="input" value="Player1" placeholder="Username">
+                </div>
+            </div>
+        </header>
+
+        <!-- ── Lobby Grid ── -->
+        <div class="lobby-grid">
+
+            <!-- Quick Play Card -->
+            <div class="card quick-play-card" id="quick-play-card">
+                <div class="card-title">⚡ Quick Play</div>
+                <div class="card-desc">Find a random opponent and start playing instantly</div>
+                <button class="btn-quick-play-big" id="lobby-btn-quick-play" disabled>
+                    ⚡ Find Match
+                </button>
+                <div class="card-desc" id="lobby-queue-status" style="display:none;"></div>
+            </div>
+
+            <!-- Create Game Card -->
+            <div class="card" id="create-game-card">
+                <div class="card-header">
+                    <span class="icon">➕</span>
+                    <span>Create Game</span>
+                </div>
+                <div style="margin-bottom: var(--gap-sm);">
+                    <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:var(--gap-sm);">Time Control</div>
+                    <div class="time-presets" id="time-presets">
+                        <button class="time-preset-btn" data-base="60" data-inc="0">1+0</button>
+                        <button class="time-preset-btn" data-base="180" data-inc="2">3+2</button>
+                        <button class="time-preset-btn" data-base="300" data-inc="3">5+3</button>
+                        <button class="time-preset-btn active" data-base="600" data-inc="5">10+5</button>
+                        <button class="time-preset-btn" data-base="900" data-inc="10">15+10</button>
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="lobby-btn-create" disabled style="width:100%;">
+                    ➕ Create Game
+                </button>
+            </div>
+
+            <!-- Open Games Table -->
+            <div class="card card-full" id="open-games-card">
+                <div class="card-header">
+                    <span class="icon">🎯</span>
+                    <span>Open Games</span>
+                    <span style="margin-left:auto; font-size:0.78rem; color:var(--text-muted);" id="lobby-game-count">0 games</span>
+                </div>
+                <div class="games-table-wrapper">
+                    <table class="games-table" id="games-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Host</th>
+                                <th>Time</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="games-table-body">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="games-empty" id="games-empty">No open games. Create one or use Quick Play!</div>
+            </div>
+
+        </div>
+    </section>
+
+
+    <!-- ============================================================
+         BOARD PAGE — Game View
+         Three-column layout: board (center) + side panel (right).
+         Status bars above/below the board show player info and clocks.
+         ============================================================ -->
+    <section class="board-page page-hidden" id="board-page">
+
+        <!-- ── Center column: Board ── -->
+        <div class="board-column">
+
+            <!-- Opponent status bar (top) -->
+            <div class="status-bar" id="opponent-bar">
+                <div>
+                    <span class="player-name" id="opponent-name">Opponent</span>
+                    <span class="player-rating" id="opponent-rating"></span>
+                </div>
+                <div class="clock" id="opponent-clock">10:00</div>
+            </div>
+
+            <!-- Game status banner -->
+            <div class="game-status info" id="game-status">
+                Waiting for game...
+            </div>
+
+            <!-- Chessboard canvas -->
+            <div class="board-container" id="board-container">
+                <canvas id="board-canvas"></canvas>
+            </div>
+
+            <!-- Player status bar (bottom) -->
+            <div class="status-bar" id="player-bar">
+                <div>
+                    <span class="player-name" id="player-name">You</span>
+                    <span class="player-rating" id="player-rating"></span>
+                </div>
+                <div class="clock" id="player-clock">10:00</div>
+            </div>
+
+            <!-- Board controls -->
+            <div class="board-controls" id="board-controls">
+                <button id="btn-flip" title="Flip board">🔄 Flip</button>
+                <button id="btn-theme-classic" title="Classic theme" class="active">Classic</button>
+                <button id="btn-theme-dark" title="Dark theme">Dark</button>
+                <button id="btn-theme-tournament" title="Tournament theme">Tournament</button>
+            </div>
+
+        </div>
+
+        <!-- ── Right side panel: Move list + Resign ── -->
+        <div class="side-panel" id="side-panel">
+
+            <!-- Back to lobby link -->
+            <button class="game-back-link" id="btn-back-lobby">← Back to Lobby</button>
+
+            <!-- Move list -->
+            <div class="move-list-container">
+                <div class="move-list-header">
+                    <span>Moves</span>
+                    <span id="move-count">0</span>
+                </div>
+                <div class="move-list" id="move-list">
+                    <div class="move-list-empty">No moves yet</div>
+                </div>
+            </div>
+
+            <!-- Game actions (resign only) -->
+            <div class="game-actions" id="game-actions">
+                <button class="btn btn-danger" id="btn-resign" disabled>🏳️ Resign</button>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- ============================================================
+         Game Over Modal
+         ============================================================ -->
+    <div class="modal-backdrop" id="game-over-modal">
+        <div class="modal">
+            <div class="modal-icon" id="modal-icon">♔</div>
+            <div class="modal-title" id="modal-title">Game Over</div>
+            <div class="modal-subtitle" id="modal-subtitle">by checkmate</div>
+            <div class="modal-actions">
+                <button id="btn-modal-new-game" class="btn btn-primary">New Game</button>
+                <button id="btn-modal-close" class="btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ============================================================
+         Scripts — loaded in dependency order
+         ============================================================ -->
+    <script src="js/board_theme.js"></script>
+    <script src="js/board.js"></script>
+    <script src="js/pieces.js"></script>
+    <script src="js/websocket.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/router.js"></script>
+
+    <!-- Initialization script -->
+    <script>
+        /**
+         * Phase 5.3 — Full application initialization.
+         * Sets up the page router, board renderer, interaction handler,
+         * WebSocket client, and game controller. Auto-connects.
+         */
+        (async function init() {
+            // ── Page Router ──
+            const router = new PageRouter();
+
+            // ── Canvas setup with high-DPI support ──
+            const canvas = document.getElementById('board-canvas');
+            const container = document.getElementById('board-container');
+
+            function setupCanvas() {
+                const rect = container.getBoundingClientRect();
+                const size = Math.floor(Math.min(rect.width, rect.height));
+                const dpr = window.devicePixelRatio || 1;
+                canvas.style.width = size + 'px';
+                canvas.style.height = size + 'px';
+                canvas.width = size * dpr;
+                canvas.height = size * dpr;
+                const ctx = canvas.getContext('2d');
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            }
+
+            // Need the board page visible briefly to measure the canvas container
+            const boardPage = document.getElementById('board-page');
+            boardPage.style.display = 'flex';
+            boardPage.style.visibility = 'hidden';
+            boardPage.style.position = 'absolute';
+            setupCanvas();
+            boardPage.style.display = '';
+            boardPage.style.visibility = '';
+            boardPage.style.position = '';
+
+            // ── Create core objects ──
+            const renderer = new BoardRenderer(canvas, BoardTheme.classic());
+            const interaction = new BoardInteraction(canvas, renderer);
+            const ws = new ChessWebSocket('ws://localhost:9000');
+
+            // Load piece SVGs
+            try {
+                await renderer.loadPieces('assets/pieces/pieces.svg');
+            } catch (err) {
+                console.error('Failed to load pieces:', err);
+            }
+
+            // Set starting position
+            renderer.setPosition('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+
+            // ── Create and init the game controller ──
+            const game = new GameController({
+                renderer: renderer,
+                interaction: interaction,
+                ws: ws
+            });
+            game.router = router;  // Give the controller access to the router
+            game.init();
+
+            // ── WebSocket connection status (updates both lobby and game page) ──
+            const lobbyDot = document.getElementById('lobby-connection-dot');
+            const lobbyText = document.getElementById('lobby-connection-text');
+            const lobbyQuickPlay = document.getElementById('lobby-btn-quick-play');
+            const lobbyCreate = document.getElementById('lobby-btn-create');
+
+            ws.onConnectionChange = (connected) => {
+                // Lobby indicators
+                if (connected) {
+                    lobbyDot.classList.add('connected');
+                    lobbyText.textContent = 'Connected';
+                    lobbyQuickPlay.disabled = false;
+                    lobbyCreate.disabled = false;
+                } else {
+                    lobbyDot.classList.remove('connected');
+                    lobbyText.textContent = 'Disconnected';
+                    lobbyQuickPlay.disabled = true;
+                    lobbyCreate.disabled = true;
+                }
+            };
+
+            // Auto-connect on page load
+            ws.connect();
+
+            // ── Time Control Presets ──
+            let selectedTimeBase = 600;
+            let selectedTimeInc = 5;
+            const presetContainer = document.getElementById('time-presets');
+
+            presetContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.time-preset-btn');
+                if (!btn) return;
+                presetContainer.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedTimeBase = parseInt(btn.dataset.base);
+                selectedTimeInc = parseInt(btn.dataset.inc);
+            });
+
+            // ── Helper: get username ──
+            const getUsername = () => document.getElementById('lobby-username-input').value || 'Player1';
+
+            // ── Lobby: Quick Play ──
+            lobbyQuickPlay.addEventListener('click', () => {
+                game.quickPlay(getUsername(), 1200, selectedTimeBase, selectedTimeInc);
+                const queueStatus = document.getElementById('lobby-queue-status');
+                queueStatus.style.display = 'block';
+                queueStatus.textContent = 'Searching for opponent...';
+                lobbyQuickPlay.disabled = true;
+                lobbyQuickPlay.textContent = '⏳ Searching...';
+            });
+
+            // ── Lobby: Create Game ──
+            lobbyCreate.addEventListener('click', () => {
+                game.createGame(getUsername(), selectedTimeBase, selectedTimeInc);
+            });
+
+            // ── Lobby: Open Games List ──
+            function refreshGamesList() {
+                if (ws.connected && router.currentPage === 'lobby') {
+                    ws.listGames();
+                }
+            }
+
+            ws.on('game_list', (data) => {
+                const tbody = document.getElementById('games-table-body');
+                const emptyMsg = document.getElementById('games-empty');
+                const countEl = document.getElementById('lobby-game-count');
+                const games = data.games || [];
+
+                countEl.textContent = games.length + (games.length === 1 ? ' game' : ' games');
+
+                if (games.length === 0) {
+                    tbody.innerHTML = '';
+                    emptyMsg.style.display = 'block';
+                    return;
+                }
+
+                emptyMsg.style.display = 'none';
+                tbody.innerHTML = games.map(g => {
+                    const tc = g.time_control || '10+5';
+                    const host = g.white || g.host || 'Unknown';
+                    return `<tr>
+                        <td class="game-id-cell">#${g.game_id}</td>
+                        <td>${host}</td>
+                        <td class="tc-cell">${tc}</td>
+                        <td><button class="btn btn-sm btn-primary" onclick="window._joinLobbyGame(${g.game_id})">Join</button></td>
+                    </tr>`;
+                }).join('');
+            });
+
+            // Global function for inline onclick in the games table
+            window._joinLobbyGame = (gameId) => {
+                game.joinGame(getUsername(), gameId);
+            };
+
+            // Refresh games list every 5 seconds
+            setInterval(refreshGamesList, 5000);
+            // Initial fetch after connection
+            setTimeout(refreshGamesList, 1000);
+
+            // ── Game Page: Resign ──
+            document.getElementById('btn-resign').addEventListener('click', () => {
+                if (confirm('Are you sure you want to resign?')) {
+                    game.resign();
+                }
+            });
+
+            // ── Game Page: Back to Lobby ──
+            document.getElementById('btn-back-lobby').addEventListener('click', () => {
+                if (game.gameActive) {
+                    if (!confirm('Leave the game? You can rejoin later.')) return;
+                }
+                router.showLobby();
+                // Reset the quick play button state
+                lobbyQuickPlay.disabled = !ws.connected;
+                lobbyQuickPlay.textContent = '⚡ Find Match';
+                document.getElementById('lobby-queue-status').style.display = 'none';
+                // Refresh the games list
+                refreshGamesList();
+            });
+
+            // ── Modal buttons ──
+            document.getElementById('btn-modal-close').addEventListener('click', () => {
+                game._hideGameOverModal();
+            });
+
+            document.getElementById('btn-modal-new-game').addEventListener('click', () => {
+                game._hideGameOverModal();
+                renderer.setPosition('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+                renderer.clearLastMove();
+                renderer.clearCheck();
+                renderer.clearSelection();
+                router.showLobby();
+                // Reset the quick play button state
+                lobbyQuickPlay.disabled = !ws.connected;
+                lobbyQuickPlay.textContent = '⚡ Find Match';
+                document.getElementById('lobby-queue-status').style.display = 'none';
+                refreshGamesList();
+            });
+
+            // ── Theme switching ──
+            const themeButtons = {
+                'btn-theme-classic':    BoardTheme.classic,
+                'btn-theme-dark':       BoardTheme.dark,
+                'btn-theme-tournament': BoardTheme.tournament,
+            };
+
+            Object.entries(themeButtons).forEach(([btnId, themeFn]) => {
+                document.getElementById(btnId).addEventListener('click', () => {
+                    document.querySelectorAll('.board-controls button[id^="btn-theme"]')
+                        .forEach(b => b.classList.remove('active'));
+                    document.getElementById(btnId).classList.add('active');
+                    renderer.setTheme(themeFn());
+                });
+            });
+
+            // ── Flip button ──
+            document.getElementById('btn-flip').addEventListener('click', () => {
+                renderer.flip();
+            });
+
+            // ── Handle window resize ──
+            let resizeTimer;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => {
+                    if (router.currentPage === 'game') {
+                        setupCanvas();
+                        const dpr = window.devicePixelRatio || 1;
+                        renderer.logicalWidth = canvas.width / dpr;
+                        renderer.logicalHeight = canvas.height / dpr;
+                        renderer.squareSize = renderer.logicalWidth / 8;
+                        renderer.dpr = dpr;
+                        renderer.loadPieces('assets/pieces/pieces.svg');
+                    }
+                }, 150);
+            });
+
+            // ── Expose for debugging ──
+            window.boardRenderer = renderer;
+            window.gameController = game;
+            window.chessWs = ws;
+            window.pageRouter = router;
+
+        })();
+    </script>
+
+</body>
+</html>

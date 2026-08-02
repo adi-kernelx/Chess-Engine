@@ -1,24 +1,28 @@
 /**
- * matchmaker.cpp — ELO-based matchmaking implementation
+ * matchmaker.cpp — Bucketed ELO-tree matchmaking implementation
  *
- * Matching algorithm:
- *   1. Sort the queue by ELO (ascending).
- *   2. Walk through adjacent pairs. For each pair (A, B):
- *      a. Check if |A.elo - B.elo| is within BOTH players' acceptable range.
- *      b. Check if their time controls are compatible.
- *      c. If yes, remove both from the queue and create a GameRoom.
- *   3. Return all matches found.
+ * Architecture:
+ *   Primary index:  unordered_map<TimeControl, multimap<int, QueueEntry>>
+ *   Reverse index:  unordered_map<int, QueueLocation>
  *
- * Sorting by ELO ensures adjacent players are the closest in rating,
- * which makes the greedy pairing optimal for minimizing ELO difference.
+ * Matching algorithm (per bucket):
+ *   The multimap (Red-Black Tree) keeps players sorted by ELO at all times.
+ *   try_match() performs a single linear pass through each bucket's tree,
+ *   checking adjacent pairs for ELO compatibility. No sorting is ever needed.
  *
- * Time controls must match exactly (same base time and increment).
- * A future improvement could group by time control category (bullet/blitz/rapid).
+ *   This is analogous to a ride-sharing app: players are grouped by their
+ *   "ride type" (TimeControl), then matched to the nearest neighbor within
+ *   an expanding "fence" (ELO range that widens over time).
+ *
+ * Complexity:
+ *   enqueue:    O(log N) — Red-Black Tree insert
+ *   dequeue:    O(1)     — stored iterator erase
+ *   is_queued:  O(1)     — hash map lookup
+ *   try_match:  O(N)     — linear pass, no sorting
  */
 
 #include "game/matchmaker.h"
 #include "core/logger.h"
-#include <algorithm>
 #include <cmath>
 
 namespace chess {
@@ -28,7 +32,7 @@ Matchmaker::Matchmaker(RoomManager& room_mgr)
     : room_mgr_(room_mgr) {}
 
 // ============================================================
-// Enqueue — add a player to the matchmaking queue
+// Enqueue — O(log N) insert into the correct ELO tree
 // ============================================================
 
 bool Matchmaker::enqueue(int connection_fd, PlayerId player_id,
@@ -36,13 +40,12 @@ bool Matchmaker::enqueue(int connection_fd, PlayerId player_id,
                          const TimeControl& tc) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Check for duplicates
-    for (const auto& entry : queue_) {
-        if (entry.connection_fd == connection_fd) {
-            return false;  // Already queued
-        }
+    // O(1) duplicate check via the reverse index
+    if (fd_index_.count(connection_fd)) {
+        return false;  // Already queued
     }
 
+    // Build the queue entry
     QueueEntry entry;
     entry.connection_fd = connection_fd;
     entry.player_id     = player_id;
@@ -51,139 +54,143 @@ bool Matchmaker::enqueue(int connection_fd, PlayerId player_id,
     entry.time_control  = tc;
     entry.enqueue_time  = std::chrono::steady_clock::now();
 
-    queue_.push_back(entry);
+    // Insert into the ELO tree for this time control bucket — O(log N)
+    // multimap::insert returns an iterator to the inserted element
+    auto& bucket = buckets_[tc];
+    auto it = bucket.insert({elo, entry});
+
+    // Store reverse index: fd → {TimeControl, iterator} — O(1) amortized
+    fd_index_[connection_fd] = {tc, it};
+    total_size_++;
 
     core::Logger::info("game", "Matchmaker",
         username + " (ELO " + std::to_string(elo) + ") joined queue. Queue size: " +
-        std::to_string(queue_.size()));
+        std::to_string(total_size_));
 
     return true;
 }
 
 // ============================================================
-// Dequeue — remove a player (disconnect or cancel)
+// Dequeue — O(1) removal using stored iterator
 // ============================================================
 
 bool Matchmaker::dequeue(int connection_fd) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    auto it = std::find_if(queue_.begin(), queue_.end(),
-        [connection_fd](const QueueEntry& e) {
-            return e.connection_fd == connection_fd;
-        });
+    // O(1) lookup via the reverse index
+    auto idx_it = fd_index_.find(connection_fd);
+    if (idx_it == fd_index_.end()) return false;
 
-    if (it != queue_.end()) {
-        core::Logger::info("game", "Matchmaker",
-            it->username + " left queue. Queue size: " +
-            std::to_string(queue_.size() - 1));
-        queue_.erase(it);
-        return true;
+    const auto& loc = idx_it->second;
+    std::string name = loc.it->second.username;
+
+    // Erase from the ELO tree using the stored iterator — O(1)
+    auto bucket_it = buckets_.find(loc.tc);
+    if (bucket_it != buckets_.end()) {
+        bucket_it->second.erase(loc.it);
+        // Clean up empty buckets to avoid stale hash entries
+        if (bucket_it->second.empty()) {
+            buckets_.erase(bucket_it);
+        }
     }
-    return false;
+
+    // Remove from reverse index — O(1)
+    fd_index_.erase(idx_it);
+    total_size_--;
+
+    core::Logger::info("game", "Matchmaker",
+        name + " left queue. Queue size: " + std::to_string(total_size_));
+
+    return true;
 }
 
 // ============================================================
-// try_match — scan the queue and pair compatible players
+// try_match — O(N) linear sweep through pre-sorted ELO trees
 // ============================================================
 
 std::vector<MatchResult> Matchmaker::try_match() {
     std::lock_guard<std::mutex> lock(mutex_);
-    std::vector<MatchResult> matches;
+    std::vector<MatchResult> results;
 
-    if (queue_.size() < 2) return matches;
+    // Iterate over each time control bucket independently.
+    // Players in the "10+5" bucket will never be matched with "3+2" players.
+    for (auto& [tc, bucket] : buckets_) {
+        if (bucket.size() < 2) continue;
 
-    // Sort by ELO so adjacent players are closest in rating
-    std::sort(queue_.begin(), queue_.end(),
-        [](const QueueEntry& a, const QueueEntry& b) {
-            return a.elo < b.elo;
-        });
+        // The multimap is already sorted by ELO (Red-Black Tree property).
+        // Walk adjacent pairs: the closest ELO neighbors are always adjacent.
+        auto it = bucket.begin();
+        while (it != bucket.end()) {
+            auto next = std::next(it);
+            if (next == bucket.end()) break;
 
-    // Track which indices have been matched (to avoid double-matching)
-    std::vector<bool> matched(queue_.size(), false);
+            auto& a = it->second;
+            auto& b = next->second;
 
-    for (size_t i = 0; i + 1 < queue_.size(); ++i) {
-        if (matched[i]) continue;
-
-        for (size_t j = i + 1; j < queue_.size(); ++j) {
-            if (matched[j]) continue;
-
-            const auto& a = queue_[i];
-            const auto& b = queue_[j];
-
-            // Check ELO compatibility (both players must accept each other)
             int elo_diff = std::abs(a.elo - b.elo);
-            if (elo_diff > a.acceptable_range() || elo_diff > b.acceptable_range()) {
-                continue;
+
+            // Both players must accept the ELO difference (fence check)
+            if (elo_diff <= a.acceptable_range() &&
+                elo_diff <= b.acceptable_range()) {
+
+                // ── Match found! Create a game room. ──
+                auto room = room_mgr_.create_room(
+                    a.player_id, a.username, a.connection_fd, a.time_control);
+                room->join(b.player_id, b.username, b.connection_fd);
+
+                MatchResult result;
+                result.white_fd     = a.connection_fd;
+                result.black_fd     = b.connection_fd;
+                result.white_id     = a.player_id;
+                result.black_id     = b.player_id;
+                result.white_name   = a.username;
+                result.black_name   = b.username;
+                result.game_id      = room->get_id();
+                result.time_control = a.time_control;
+
+                core::Logger::info("game", "Matchmaker",
+                    "Matched: " + a.username + " (" + std::to_string(a.elo) + ") vs " +
+                    b.username + " (" + std::to_string(b.elo) + ") → Game " +
+                    std::to_string(result.game_id));
+
+                // Remove both from the reverse index — O(1) each
+                fd_index_.erase(a.connection_fd);
+                fd_index_.erase(b.connection_fd);
+                total_size_ -= 2;
+
+                // Erase both from the tree.
+                // multimap::erase(iterator) returns the next valid iterator.
+                it = bucket.erase(it);   // erases 'a', returns iterator to 'b'
+                it = bucket.erase(it);   // erases 'b', returns iterator to next
+
+                results.push_back(result);
+
+                // Fire the callback (e.g., send WebSocket notifications)
+                if (match_cb_) {
+                    match_cb_(result);
+                }
+            } else {
+                // No match — advance to the next pair
+                ++it;
             }
-
-            // Check time control compatibility (must be exact match)
-            if (a.time_control.base_time_ms != b.time_control.base_time_ms ||
-                a.time_control.increment_ms != b.time_control.increment_ms) {
-                continue;
-            }
-
-            // Match found! Create a game room.
-            // Higher-rated player gets a random color; for simplicity,
-            // the first player in the queue gets White.
-            auto room = room_mgr_.create_room(
-                a.player_id, a.username, a.connection_fd, a.time_control);
-
-            room->join(b.player_id, b.username, b.connection_fd);
-
-            MatchResult result;
-            result.white_fd    = a.connection_fd;
-            result.black_fd    = b.connection_fd;
-            result.white_id    = a.player_id;
-            result.black_id    = b.player_id;
-            result.white_name  = a.username;
-            result.black_name  = b.username;
-            result.game_id     = room->get_id();
-            result.time_control = a.time_control;
-
-            matches.push_back(result);
-
-            matched[i] = true;
-            matched[j] = true;
-
-            core::Logger::info("game", "Matchmaker",
-                "Matched: " + a.username + " (" + std::to_string(a.elo) + ") vs " +
-                b.username + " (" + std::to_string(b.elo) + ") → Game " +
-                std::to_string(room->get_id()));
-
-            // Fire the callback if set
-            if (match_cb_) {
-                match_cb_(result);
-            }
-
-            break;  // Move to next unmatched player
         }
     }
 
-    // Remove matched entries from the queue (iterate in reverse to preserve indices)
-    for (int i = static_cast<int>(queue_.size()) - 1; i >= 0; --i) {
-        if (matched[static_cast<size_t>(i)]) {
-            queue_.erase(queue_.begin() + i);
-        }
-    }
-
-    return matches;
+    return results;
 }
 
 // ============================================================
-// Queries
+// Queries — O(1) via reverse index and cached size
 // ============================================================
 
 bool Matchmaker::is_queued(int connection_fd) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& entry : queue_) {
-        if (entry.connection_fd == connection_fd) return true;
-    }
-    return false;
+    return fd_index_.count(connection_fd) > 0;
 }
 
 size_t Matchmaker::queue_size() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return queue_.size();
+    return total_size_;
 }
 
 } // namespace game

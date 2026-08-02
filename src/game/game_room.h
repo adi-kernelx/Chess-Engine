@@ -52,6 +52,10 @@ struct TimeControl {
     TimeControl() : base_time_ms(600000), increment_ms(5000) {}
     TimeControl(int base_ms, int inc_ms) : base_time_ms(base_ms), increment_ms(inc_ms) {}
 
+    bool operator==(const TimeControl& other) const {
+        return base_time_ms == other.base_time_ms && increment_ms == other.increment_ms;
+    }
+
     /// Format as "600+5" string (seconds)
     std::string to_string() const;
 };

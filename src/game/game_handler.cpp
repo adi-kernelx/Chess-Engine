@@ -333,6 +333,7 @@ void GameHandler::handle_list_games(net::Connection& conn, const std::string& /*
     for (const auto& info : open_rooms) {
         json room_info;
         room_info["game_id"]      = info.id;
+        room_info["host"]         = info.white_name;
         room_info["time_control"] = info.time_control;
         response["games"].push_back(room_info);
     }
