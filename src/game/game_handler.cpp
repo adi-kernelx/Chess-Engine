@@ -44,6 +44,8 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
         [this](net::Connection& c, const std::string& m) { handle_list_games(c, m); });
     router.register_handler("game_state",
         [this](net::Connection& c, const std::string& m) { handle_game_state(c, m); });
+    router.register_handler("play_ai",
+        [this](net::Connection& c, const std::string& m) { handle_play_ai(c, m); });
 }
 
 // ============================================================
@@ -279,6 +281,11 @@ void GameHandler::handle_make_move(net::Connection& conn, const std::string& mes
             core::Logger::info("game", "GameHandler",
                 "Game " + std::to_string(room->get_id()) + " ended: " +
                 room->get_result_string() + " (" + status_to_reason(result.game_status) + ")");
+        }
+
+        // If this is an AI game and the game is still going, trigger AI's response
+        if (result.success && result.game_status == GameStatus::ONGOING && room->is_ai_game()) {
+            trigger_ai_move(room, conn.get_fd());
         }
 
     } catch (const json::exception& e) {
@@ -519,6 +526,123 @@ void GameHandler::on_player_disconnect(int connection_fd) {
     auto room = room_mgr_.find_room_by_fd(connection_fd);
     if (room) {
         room->on_disconnect(connection_fd);
+    }
+}
+
+// ============================================================
+// play_ai — Player starts a game against the AI
+// ============================================================
+// Request:  { "type": "play_ai", "username": "Alice", "difficulty": "medium", "time_base": 600, "time_inc": 5 }
+// Response: { "type": "game_start", "game_id": 1, "color": "white", "opponent": "AI (Medium)", ... }
+
+void GameHandler::handle_play_ai(net::Connection& conn, const std::string& message) {
+    try {
+        auto msg = json::parse(message);
+
+        std::string username   = msg.value("username", "Player");
+        std::string diff_str   = msg.value("difficulty", "medium");
+        int time_base_sec      = msg.value("time_base", 600);
+        int time_inc_sec       = msg.value("time_inc", 5);
+
+        // Check if this player is already in a game
+        auto existing = room_mgr_.find_room_by_fd(conn.get_fd());
+        if (existing && existing->get_state() != RoomState::FINISHED) {
+            send_json(conn, make_error("You are already in a game (ID: " +
+                      std::to_string(existing->get_id()) + ")"));
+            return;
+        }
+
+        PlayerId pid = next_player_id_.fetch_add(1);
+        TimeControl tc(time_base_sec * 1000, time_inc_sec * 1000);
+        AIDifficulty difficulty = parse_difficulty(diff_str);
+
+        auto room = room_mgr_.create_ai_room(pid, username, conn.get_fd(), tc, difficulty);
+
+        int white_ms, black_ms;
+        room->get_remaining_times(white_ms, black_ms);
+
+        // Send game_start to the human player
+        json response;
+        response["type"]       = "game_start";
+        response["game_id"]    = room->get_id();
+        response["color"]      = "white";
+        response["opponent"]   = "AI (" + difficulty_name(difficulty) + ")";
+        response["white_time"] = white_ms;
+        response["black_time"] = black_ms;
+        response["ai_game"]    = true;
+
+        send_json(conn, response.dump());
+
+        core::Logger::info("game", "GameHandler",
+            username + " started AI game " + std::to_string(room->get_id()) +
+            " (" + difficulty_name(difficulty) + ", " + tc.to_string() + ")");
+
+    } catch (const json::exception& e) {
+        send_json(conn, make_error("Invalid JSON: " + std::string(e.what())));
+    }
+}
+
+// ============================================================
+// trigger_ai_move — Compute and submit the AI's response move
+// ============================================================
+
+void GameHandler::trigger_ai_move(std::shared_ptr<GameRoom> room, int human_fd) {
+    if (!room || !room->is_ai_game()) return;
+    if (room->get_state() != RoomState::IN_PROGRESS) return;
+
+    // Get the board and compute the AI move
+    const Board& board = room->get_board();
+    AIDifficulty diff = room->ai_difficulty();
+
+    AIMove ai_move = ai_player_.compute_move(board, diff);
+
+    // Submit the AI's move to the authoritative game room
+    auto result = room->submit_move_ai(ai_move.from, ai_move.to, ai_move.promotion);
+
+    if (!result.success) {
+        core::Logger::error("game", "GameHandler",
+            "AI move failed in game " + std::to_string(room->get_id()) +
+            ": " + result.error);
+        return;
+    }
+
+    // Build move_made message and send to the human player
+    std::string from_str = Board::square_to_algebraic(ai_move.from);
+    std::string to_str   = Board::square_to_algebraic(ai_move.to);
+
+    json move_msg;
+    move_msg["type"]       = "move_made";
+    move_msg["from"]       = from_str;
+    move_msg["to"]         = to_str;
+    move_msg["san"]        = result.san;
+    move_msg["white_time"] = result.white_time_ms;
+    move_msg["black_time"] = result.black_time_ms;
+
+    if (ai_move.promotion != PieceType::NONE) {
+        char promo_char = 'q';
+        switch (ai_move.promotion) {
+            case PieceType::ROOK:   promo_char = 'r'; break;
+            case PieceType::BISHOP: promo_char = 'b'; break;
+            case PieceType::KNIGHT: promo_char = 'n'; break;
+            default: break;
+        }
+        move_msg["promotion"] = std::string(1, promo_char);
+    }
+
+    send_json_to_fd(human_fd, move_msg.dump());
+
+    // Check if the game ended with the AI's move
+    if (result.game_status != GameStatus::ONGOING) {
+        json game_over;
+        game_over["type"]   = "game_over";
+        game_over["result"] = room->get_result_string();
+        game_over["reason"] = status_to_reason(result.game_status);
+
+        send_json_to_fd(human_fd, game_over.dump());
+
+        core::Logger::info("game", "GameHandler",
+            "AI Game " + std::to_string(room->get_id()) + " ended: " +
+            room->get_result_string() + " (" + status_to_reason(result.game_status) + ")");
     }
 }
 

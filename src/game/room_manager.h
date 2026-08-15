@@ -54,6 +54,14 @@ public:
                                           int creator_fd,
                                           const TimeControl& tc = TimeControl());
 
+    /// Create an AI game room. Human plays White, AI plays Black.
+    /// The game starts immediately in IN_PROGRESS state.
+    std::shared_ptr<GameRoom> create_ai_room(PlayerId creator_id,
+                                              const std::string& creator_name,
+                                              int creator_fd,
+                                              const TimeControl& tc,
+                                              AIDifficulty difficulty);
+
     /// Find a room by its ID. Returns nullptr if not found.
     std::shared_ptr<GameRoom> find_room(GameId id) const;
 

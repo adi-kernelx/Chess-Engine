@@ -22,6 +22,7 @@
 #include "chess/move.h"
 #include "chess/move_gen.h"
 #include "chess/notation.h"
+#include "game/ai_player.h"
 #include <string>
 #include <vector>
 #include <mutex>
@@ -98,6 +99,11 @@ public:
     GameRoom(GameId id, PlayerId creator_id, const std::string& creator_name,
              int creator_fd, const TimeControl& tc = TimeControl());
 
+    /// Create an AI game room. Human plays White, AI plays Black.
+    /// The game starts immediately (no WAITING state).
+    GameRoom(GameId id, PlayerId creator_id, const std::string& creator_name,
+             int creator_fd, const TimeControl& tc, AIDifficulty difficulty);
+
     // --------------------------------------------------------
     // Room lifecycle
     // --------------------------------------------------------
@@ -120,6 +126,11 @@ public:
     MoveResult submit_move(int connection_fd, Square from, Square to,
                            PieceType promo_type = PieceType::NONE);
 
+    /// Submit a move on behalf of the AI (bypasses connection_fd check).
+    /// Only valid in AI games when it's the AI's turn.
+    MoveResult submit_move_ai(Square from, Square to,
+                              PieceType promo_type = PieceType::NONE);
+
     /// Player resigns (identified by their connection fd).
     bool resign(int connection_fd);
 
@@ -140,6 +151,9 @@ public:
     const TimeControl&  get_time_control() const;
     std::string         get_result_string() const; // "1-0", "0-1", "1/2-1/2", "*"
     GameStatus          get_game_status()  const;
+    bool                is_ai_game()       const;
+    AIDifficulty        ai_difficulty()    const;
+    Color               ai_color()         const;
 
     /// Get the connection fd for a specific color. Returns -1 if empty.
     int  get_player_fd(Color color)  const;
@@ -194,6 +208,11 @@ private:
     TimeControl         time_control_;
     std::string         result_;       // "1-0", "0-1", "1/2-1/2", "*"
     GameStatus          game_status_  = GameStatus::ONGOING;
+
+    // AI game fields
+    bool                is_ai_        = false;
+    AIDifficulty        ai_difficulty_ = AIDifficulty::MEDIUM;
+    Color               ai_color_     = Color::BLACK;
 
     PlayerSlot          white_;
     PlayerSlot          black_;

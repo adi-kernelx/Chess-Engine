@@ -14,6 +14,7 @@
  *     { "type": "resign" }
  *     { "type": "quick_play",  "username": "Alice", "elo": 1200, "time_base": 600, "time_inc": 5 }
  *     { "type": "cancel_queue" }
+ *     { "type": "play_ai",     "username": "Alice", "difficulty": "medium", "time_base": 600, "time_inc": 5 }
  *     { "type": "list_games" }
  *     { "type": "game_state" }
  *
@@ -62,6 +63,10 @@ private:
     void handle_cancel_queue(net::Connection& conn, const std::string& message);
     void handle_list_games(net::Connection& conn, const std::string& message);
     void handle_game_state(net::Connection& conn, const std::string& message);
+    void handle_play_ai(net::Connection& conn, const std::string& message);
+
+    /// After a human makes a move in an AI game, compute and submit the AI's response.
+    void trigger_ai_move(std::shared_ptr<GameRoom> room, int human_fd);
 
     // ── Helpers ──
 
@@ -86,6 +91,7 @@ private:
 
     RoomManager&  room_mgr_;
     Matchmaker&   matchmaker_;
+    AIPlayer      ai_player_;
     std::atomic<PlayerId> next_player_id_{1}; // Temporary player IDs (until auth is added)
 
     // Callback to look up a Connection by fd (set by TcpServer integration)

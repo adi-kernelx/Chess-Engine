@@ -75,6 +75,36 @@
                 </button>
             </div>
 
+            <!-- Play vs AI Card -->
+            <div class="card" id="play-ai-card">
+                <div class="card-header">
+                    <span class="icon">🤖</span>
+                    <span>Play vs AI</span>
+                </div>
+                <div style="margin-bottom: var(--gap-sm);">
+                    <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:var(--gap-sm);">Difficulty</div>
+                    <div class="time-presets" id="ai-difficulty-presets">
+                        <button class="time-preset-btn" data-diff="easy">Easy</button>
+                        <button class="time-preset-btn active" data-diff="medium">Medium</button>
+                        <button class="time-preset-btn" data-diff="hard">Hard</button>
+                        <button class="time-preset-btn" data-diff="max">Max</button>
+                    </div>
+                </div>
+                <div style="margin-bottom: var(--gap-sm);">
+                    <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:var(--gap-sm);">Time Control</div>
+                    <div class="time-presets" id="ai-time-presets">
+                        <button class="time-preset-btn" data-base="60" data-inc="0">1+0</button>
+                        <button class="time-preset-btn" data-base="180" data-inc="2">3+2</button>
+                        <button class="time-preset-btn" data-base="300" data-inc="3">5+3</button>
+                        <button class="time-preset-btn active" data-base="600" data-inc="5">10+5</button>
+                        <button class="time-preset-btn" data-base="900" data-inc="10">15+10</button>
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="lobby-btn-play-ai" disabled style="width:100%;">
+                    🤖 Start AI Game
+                </button>
+            </div>
+
             <!-- Open Games Table -->
             <div class="card card-full" id="open-games-card">
                 <div class="card-header">
@@ -270,6 +300,7 @@
             const lobbyText = document.getElementById('lobby-connection-text');
             const lobbyQuickPlay = document.getElementById('lobby-btn-quick-play');
             const lobbyCreate = document.getElementById('lobby-btn-create');
+            const lobbyPlayAI = document.getElementById('lobby-btn-play-ai');
 
             ws.onConnectionChange = (connected) => {
                 // Lobby indicators
@@ -278,18 +309,20 @@
                     lobbyText.textContent = 'Connected';
                     lobbyQuickPlay.disabled = false;
                     lobbyCreate.disabled = false;
+                    lobbyPlayAI.disabled = false;
                 } else {
                     lobbyDot.classList.remove('connected');
                     lobbyText.textContent = 'Disconnected';
                     lobbyQuickPlay.disabled = true;
                     lobbyCreate.disabled = true;
+                    lobbyPlayAI.disabled = true;
                 }
             };
 
             // Auto-connect on page load
             ws.connect();
 
-            // ── Time Control Presets ──
+            // ── Time Control Presets (Create Game) ──
             let selectedTimeBase = 600;
             let selectedTimeInc = 5;
             const presetContainer = document.getElementById('time-presets');
@@ -301,6 +334,32 @@
                 btn.classList.add('active');
                 selectedTimeBase = parseInt(btn.dataset.base);
                 selectedTimeInc = parseInt(btn.dataset.inc);
+            });
+
+            // ── AI Difficulty Presets ──
+            let selectedAIDifficulty = 'medium';
+            const aiDiffContainer = document.getElementById('ai-difficulty-presets');
+
+            aiDiffContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.time-preset-btn');
+                if (!btn) return;
+                aiDiffContainer.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedAIDifficulty = btn.dataset.diff;
+            });
+
+            // ── AI Time Control Presets ──
+            let selectedAITimeBase = 600;
+            let selectedAITimeInc = 5;
+            const aiTimeContainer = document.getElementById('ai-time-presets');
+
+            aiTimeContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.time-preset-btn');
+                if (!btn) return;
+                aiTimeContainer.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedAITimeBase = parseInt(btn.dataset.base);
+                selectedAITimeInc = parseInt(btn.dataset.inc);
             });
 
             // ── Helper: get username ──
@@ -319,6 +378,11 @@
             // ── Lobby: Create Game ──
             lobbyCreate.addEventListener('click', () => {
                 game.createGame(getUsername(), selectedTimeBase, selectedTimeInc);
+            });
+
+            // ── Lobby: Play vs AI ──
+            lobbyPlayAI.addEventListener('click', () => {
+                game.playAI(getUsername(), selectedAIDifficulty, selectedAITimeBase, selectedAITimeInc);
             });
 
             // ── Lobby: Open Games List ──

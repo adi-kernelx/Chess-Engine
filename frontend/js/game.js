@@ -106,6 +106,18 @@ class GameController {
     }
 
     /**
+     * Start a game against the AI
+     * @param {string} username 
+     * @param {string} difficulty  'easy', 'medium', 'hard', or 'max'
+     * @param {number} timeBase 
+     * @param {number} timeInc 
+     */
+    playAI(username, difficulty, timeBase, timeInc) {
+        this.ws.send({ type: 'play_ai', username: username, difficulty: difficulty, time_base: timeBase, time_inc: timeInc });
+        this._updateStatusBar('Starting AI game...', 'waiting');
+    }
+
+    /**
      * Resign current game
      */
     resign() {

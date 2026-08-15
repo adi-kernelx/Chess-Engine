@@ -7,6 +7,7 @@
  */
 
 #include "chess/board.h"
+#include "chess/zobrist.h"
 #include <sstream>
 #include <cctype>
 #include <cassert>
@@ -125,6 +126,11 @@ void Board::clear() {
     en_passant_sq_   = NO_SQUARE;
     halfmove_clock_  = 0;
     fullmove_number_ = 1;
+    zobrist_key_     = zobrist::compute_hash(*this);
+}
+
+void Board::recompute_zobrist_key() {
+    zobrist_key_ = zobrist::compute_hash(*this);
 }
 
 // ============================================================
@@ -214,6 +220,7 @@ bool Board::set_from_fen(const std::string& fen) {
     halfmove_clock_  = halfmove;
     fullmove_number_ = fullmove;
 
+    recompute_zobrist_key();
     return true;
 }
 
@@ -283,11 +290,13 @@ Piece Board::piece_at(Square sq) const {
 void Board::set_piece(Square sq, Piece piece) {
     assert(sq < NUM_SQUARES);
     squares_[sq] = piece;
+    recompute_zobrist_key();
 }
 
 void Board::clear_square(Square sq) {
     assert(sq < NUM_SQUARES);
     squares_[sq] = Piece();
+    recompute_zobrist_key();
 }
 
 Square Board::find_king(Color color) const {
@@ -320,8 +329,16 @@ Board::UndoInfo Board::make_move(const Move& move) {
     undo.castling_rights = castling_rights_;
     undo.en_passant_sq   = en_passant_sq_;
     undo.halfmove_clock  = halfmove_clock_;
+    undo.zobrist_key     = zobrist_key_;
 
     Piece moving_piece = squares_[move.from];
+    const auto& k = zobrist::get_keys();
+
+    const int c = static_cast<int>(moving_piece.color);
+    const int t = static_cast<int>(moving_piece.type);
+
+    // ── Incremental Zobrist update: remove moving piece from origin square ──
+    zobrist_key_ ^= k.pieces[c][t][move.from];
 
     // --- 1. Handle castling: move the rook ---
     if (move.is_kingside_castle()) {
@@ -331,6 +348,10 @@ Board::UndoInfo Board::make_move(const Move& move) {
         Square rook_to   = make_square(rank, 5);  // f-file
         squares_[rook_to]   = squares_[rook_from];
         squares_[rook_from] = Piece();
+
+        const int rook_type = static_cast<int>(PieceType::ROOK);
+        zobrist_key_ ^= k.pieces[c][rook_type][rook_from]
+                      ^ k.pieces[c][rook_type][rook_to];
     } else if (move.is_queenside_castle()) {
         // King moves e1->c1 (white) or e8->c8 (black); rook moves a->d
         int rank = rank_of(move.from);
@@ -338,6 +359,10 @@ Board::UndoInfo Board::make_move(const Move& move) {
         Square rook_to   = make_square(rank, 3);  // d-file
         squares_[rook_to]   = squares_[rook_from];
         squares_[rook_from] = Piece();
+
+        const int rook_type = static_cast<int>(PieceType::ROOK);
+        zobrist_key_ ^= k.pieces[c][rook_type][rook_from]
+                      ^ k.pieces[c][rook_type][rook_to];
     }
 
     // --- 2. Handle en passant: remove the captured pawn ---
@@ -346,9 +371,17 @@ Board::UndoInfo Board::make_move(const Move& move) {
         // rank the moving pawn came from (one rank behind the destination).
         int direction = (moving_piece.color == Color::WHITE) ? -1 : 1;
         Square captured_sq = make_square(rank_of(move.to) + direction, file_of(move.to));
-        // Store the en passant captured pawn in undo as well
         undo.captured = squares_[captured_sq];
         squares_[captured_sq] = Piece();
+
+        const int cap_c = static_cast<int>(undo.captured.color);
+        const int cap_t = static_cast<int>(undo.captured.type);
+        zobrist_key_ ^= k.pieces[cap_c][cap_t][captured_sq];
+    } else if (!undo.captured.is_none()) {
+        // Normal capture: remove captured piece on 'to' square
+        const int cap_c = static_cast<int>(undo.captured.color);
+        const int cap_t = static_cast<int>(undo.captured.type);
+        zobrist_key_ ^= k.pieces[cap_c][cap_t][move.to];
     }
 
     // --- 3. Move the piece ---
@@ -358,19 +391,28 @@ Board::UndoInfo Board::make_move(const Move& move) {
     // --- 4. Handle promotion: replace pawn with promoted piece ---
     if (move.is_promotion()) {
         squares_[move.to] = Piece(move.promo_type, moving_piece.color);
+        zobrist_key_ ^= k.pieces[c][static_cast<int>(move.promo_type)][move.to];
+    } else {
+        zobrist_key_ ^= k.pieces[c][t][move.to];
     }
 
     // --- 5. Update en passant square ---
+    if (undo.en_passant_sq != NO_SQUARE) {
+        zobrist_key_ ^= k.en_passant[file_of(undo.en_passant_sq)];
+    }
     if (move.is_double_pawn_push()) {
         // The en passant target is the square the pawn "passed through"
         int direction = (moving_piece.color == Color::WHITE) ? -1 : 1;
         en_passant_sq_ = make_square(rank_of(move.to) + direction, file_of(move.to));
+        zobrist_key_ ^= k.en_passant[file_of(en_passant_sq_)];
     } else {
         en_passant_sq_ = NO_SQUARE;
     }
 
     // --- 6. Update castling rights ---
     update_castling_rights(move.from, move.to);
+    zobrist_key_ ^= k.castling[undo.castling_rights & CastlingRights::ALL]
+                  ^ k.castling[castling_rights_ & CastlingRights::ALL];
 
     // --- 7. Update halfmove clock ---
     if (moving_piece.type == PieceType::PAWN || !undo.captured.is_none()) {
@@ -386,6 +428,7 @@ Board::UndoInfo Board::make_move(const Move& move) {
 
     // --- 9. Toggle side to move ---
     side_to_move_ = opposite_color(side_to_move_);
+    zobrist_key_ ^= k.side_to_move;
 
     return undo;
 }
@@ -442,6 +485,9 @@ void Board::undo_move(const Move& move, const UndoInfo& undo) {
         squares_[rook_to]   = squares_[rook_from];
         squares_[rook_from] = Piece();
     }
+
+    // --- 8. Restore exact Zobrist hash ---
+    zobrist_key_ = undo.zobrist_key;
 }
 
 /// Revoke castling rights when a king or rook moves, or when a rook is captured.

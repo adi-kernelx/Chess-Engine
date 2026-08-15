@@ -31,6 +31,20 @@ std::shared_ptr<GameRoom> RoomManager::create_room(PlayerId creator_id,
     return room;
 }
 
+std::shared_ptr<GameRoom> RoomManager::create_ai_room(PlayerId creator_id,
+                                                       const std::string& creator_name,
+                                                       int creator_fd,
+                                                       const TimeControl& tc,
+                                                       AIDifficulty difficulty) {
+    GameId id = next_id_.fetch_add(1);
+
+    auto room = std::make_shared<GameRoom>(id, creator_id, creator_name, creator_fd, tc, difficulty);
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    rooms_[id] = room;
+    return room;
+}
+
 std::shared_ptr<GameRoom> RoomManager::find_room(GameId id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = rooms_.find(id);

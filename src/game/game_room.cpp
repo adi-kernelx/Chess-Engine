@@ -44,6 +44,36 @@ GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_na
     white_.connected     = true;
 }
 
+GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_name,
+                   int creator_fd, const TimeControl& tc, AIDifficulty difficulty)
+    : id_(id)
+    , state_(RoomState::IN_PROGRESS)  // AI games start immediately
+    , board_(Board::starting_position())
+    , time_control_(tc)
+    , result_("*")
+    , is_ai_(true)
+    , ai_difficulty_(difficulty)
+    , ai_color_(Color::BLACK)
+{
+    // Human is seated as White
+    white_.connection_fd = creator_fd;
+    white_.player_id     = creator_id;
+    white_.username      = creator_name;
+    white_.remaining_ms  = tc.base_time_ms;
+    white_.connected     = true;
+
+    // AI is seated as Black with a sentinel fd
+    black_.connection_fd = -2;  // Sentinel: -2 = AI player (distinct from -1 = empty)
+    black_.player_id     = 0;
+    black_.username      = "AI (" + difficulty_name(difficulty) + ")";
+    black_.remaining_ms  = tc.base_time_ms;
+    black_.connected     = true;
+
+    // Start White's clock
+    game_start_time_ = std::chrono::steady_clock::now();
+    white_.clock_start = game_start_time_;
+}
+
 // ============================================================
 // Join — Second player enters the room
 // ============================================================
@@ -185,6 +215,100 @@ GameRoom::MoveResult GameRoom::submit_move(int connection_fd, Square from, Squar
 }
 
 // ============================================================
+// Submit Move (AI) — bypasses connection_fd check
+// ============================================================
+
+GameRoom::MoveResult GameRoom::submit_move_ai(Square from, Square to,
+                                               PieceType promo_type) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    MoveResult result;
+    result.success = false;
+    result.game_status = game_status_;
+
+    if (state_ != RoomState::IN_PROGRESS) {
+        result.error = "Game is not in progress";
+        return result;
+    }
+
+    if (!is_ai_) {
+        result.error = "Not an AI game";
+        return result;
+    }
+
+    if (board_.side_to_move() != ai_color_) {
+        result.error = "It is not the AI's turn";
+        return result;
+    }
+
+    // Find the matching legal move
+    std::vector<Move> legal_moves = move_gen::generate_legal_moves(board_);
+    Move matched_move;
+    bool found = false;
+
+    for (const Move& candidate : legal_moves) {
+        if (candidate.from != from || candidate.to != to) continue;
+        if (candidate.is_promotion()) {
+            PieceType pt = (promo_type == PieceType::NONE) ? PieceType::QUEEN : promo_type;
+            if (candidate.promo_type != pt) continue;
+        }
+        matched_move = candidate;
+        found = true;
+        break;
+    }
+
+    if (!found) {
+        result.error = "AI produced illegal move";
+        return result;
+    }
+
+    // Generate SAN before making the move
+    std::string san = notation::move_to_san(board_, matched_move);
+
+    // Calculate think time for the AI
+    auto now = std::chrono::steady_clock::now();
+    PlayerSlot& ai_slot = (ai_color_ == Color::WHITE) ? white_ : black_;
+    int think_time_ms = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - ai_slot.clock_start).count()
+    );
+
+    // Execute the move
+    board_.make_move(matched_move);
+    move_history_.push_back({matched_move, san, think_time_ms});
+    switch_clock();
+
+    // Check game status
+    GameStatus status = move_gen::get_game_status(board_);
+    if (status != GameStatus::ONGOING) {
+        std::string game_result;
+        switch (status) {
+            case GameStatus::CHECKMATE:
+                game_result = (board_.side_to_move() == Color::WHITE) ? "0-1" : "1-0";
+                break;
+            case GameStatus::STALEMATE:
+            case GameStatus::DRAW_FIFTY_MOVE:
+            case GameStatus::DRAW_INSUFFICIENT_MATERIAL:
+            case GameStatus::DRAW_THREEFOLD_REPETITION:
+                game_result = "1/2-1/2";
+                break;
+            default:
+                game_result = "*";
+                break;
+        }
+        finish_game(status, game_result);
+    }
+
+    result.success      = true;
+    result.san          = san;
+    result.game_status  = status;
+    result.white_time_ms = white_.remaining_ms;
+    result.black_time_ms = black_.remaining_ms;
+
+    return result;
+}
+
+// ============================================================
 // Resign
 // ============================================================
 
@@ -277,6 +401,21 @@ std::string GameRoom::get_result_string() const {
 GameStatus GameRoom::get_game_status() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return game_status_;
+}
+
+bool GameRoom::is_ai_game() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return is_ai_;
+}
+
+AIDifficulty GameRoom::ai_difficulty() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return ai_difficulty_;
+}
+
+Color GameRoom::ai_color() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return ai_color_;
 }
 
 int GameRoom::get_player_fd(Color color) const {

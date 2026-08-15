@@ -74,6 +74,10 @@ public:
     Square   en_passant_square()   const { return en_passant_sq_; }
     int      halfmove_clock()      const { return halfmove_clock_; }
     int      fullmove_number()     const { return fullmove_number_; }
+    uint64_t zobrist_key()         const { return zobrist_key_; }
+
+    /// Recompute the 64-bit Zobrist hash from scratch.
+    void recompute_zobrist_key();
 
     /// Find the square of the king for the given color.
     /// Returns NO_SQUARE if no king is found (should never happen in a valid game).
@@ -83,9 +87,9 @@ public:
     // Board state mutators
     // ============================================================
 
-    void set_side_to_move(Color c)        { side_to_move_ = c; }
-    void set_castling_rights(uint8_t cr)  { castling_rights_ = cr; }
-    void set_en_passant_square(Square sq) { en_passant_sq_ = sq; }
+    void set_side_to_move(Color c)        { side_to_move_ = c; recompute_zobrist_key(); }
+    void set_castling_rights(uint8_t cr)  { castling_rights_ = cr; recompute_zobrist_key(); }
+    void set_en_passant_square(Square sq) { en_passant_sq_ = sq; recompute_zobrist_key(); }
     void set_halfmove_clock(int hmc)      { halfmove_clock_ = hmc; }
     void set_fullmove_number(int fmn)     { fullmove_number_ = fmn; }
 
@@ -97,10 +101,11 @@ public:
     /// undo_move() can restore the exact previous state.
     /// This avoids deep-copying the board during AI search.
     struct UndoInfo {
-        Piece    captured       = Piece();     // Piece that was on the 'to' square (or NONE)
+        Piece    captured        = Piece();     // Piece that was on the 'to' square (or NONE)
         uint8_t  castling_rights = CastlingRights::NONE;
         Square   en_passant_sq  = NO_SQUARE;
         int      halfmove_clock = 0;
+        uint64_t zobrist_key    = 0;
     };
 
     /// Execute a move on the board.  Updates all state: piece positions,
@@ -149,6 +154,7 @@ private:
     Square   en_passant_sq_   = NO_SQUARE;
     int      halfmove_clock_  = 0;
     int      fullmove_number_ = 1;
+    uint64_t zobrist_key_     = 0;
 
     /// Clear the board to all NONE pieces and reset state to defaults
     void clear();
