@@ -7,12 +7,12 @@
  *   = 0  → roughly equal
  *
  * Evaluation components:
- *   1. Material balance (weighted piece values)              — Phase 6.1
- *   2. Piece-square tables (reward good piece placement)     — Phase 6.1
- *   3. King safety (pawn shield, exposed king penalty)       — Phase 6.2
- *   4. Pawn structure (doubled, isolated, backward pawns)    — Phase 6.2
- *   5. Mobility (pseudo-legal move count bonus)              — Phase 6.2
- *   6. Bishop pair bonus                                     — Phase 6.2
+ *   1. Material balance (weighted piece values)              
+ *   2. Piece-square tables (reward good piece placement)     
+ *   3. King safety (pawn shield, exposed king penalty)       
+ *   4. Pawn structure (doubled, isolated, backward pawns)    
+ *   5. Mobility (pseudo-legal move count bonus)              
+ *   6. Bishop pair bonus                                     
  *
  * Centipawn values: pawn=100, knight=320, bishop=330, rook=500, queen=900
  */

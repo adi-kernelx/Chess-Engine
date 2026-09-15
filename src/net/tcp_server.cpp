@@ -179,7 +179,19 @@ void TcpServer::handle_client_data(int client_fd) {
     // ─── Phase 2: Connection is upgraded → parse WebSocket frames ───
     if (conn->is_upgraded()) {
         WsFrame frame;
-        while (WebSocket::try_read_frame(*conn, frame)) {
+        // Phase 7.9 hardening: read_next_frame checks the announced payload
+        // length against MAX_FRAME_PAYLOAD BEFORE any bytes are copied into
+        // frame.payload. An oversized frame drops the connection instead of
+        // waiting for gigabytes of bytes to arrive.
+        for (;;) {
+            const ReadFrameResult r = WebSocket::read_next_frame(*conn, frame);
+            if (r == ReadFrameResult::NeedMore) break;
+            if (r == ReadFrameResult::TooLarge) {
+                core::Logger::warn("net", "WebSocket",
+                    "Oversized frame from " + conn->get_ip() + " — closing");
+                close_connection(client_fd);
+                return;
+            }
             switch (frame.opcode) {
                 case WsOpcode::TEXT: {
                     // Convert payload to string and route to handler

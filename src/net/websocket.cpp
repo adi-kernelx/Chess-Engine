@@ -182,6 +182,42 @@ bool WebSocket::try_handshake(Connection& conn) {
 // ──────────────────────────────────────────────
 // WebSocket Frame Reader
 // ──────────────────────────────────────────────
+ReadFrameResult WebSocket::read_next_frame(Connection& conn, WsFrame& frame) {
+    // Peek at just enough of the header to learn the payload length WITHOUT
+    // resizing anything. If the length exceeds the cap, we bail before the
+    // payload has finished arriving — that is what makes this a defence
+    // against memory exhaustion rather than just an after-the-fact rejection.
+    const auto& buf = conn.get_read_buffer();
+    if (buf.size() < 2) return ReadFrameResult::NeedMore;
+
+    size_t pos = 2;
+    uint64_t payload_length = buf[1] & 0x7F;
+    if (payload_length == 126) {
+        if (buf.size() < pos + 2) return ReadFrameResult::NeedMore;
+        payload_length = (static_cast<uint64_t>(buf[pos]) << 8) |
+                          static_cast<uint64_t>(buf[pos + 1]);
+    } else if (payload_length == 127) {
+        if (buf.size() < pos + 8) return ReadFrameResult::NeedMore;
+        payload_length = 0;
+        for (int i = 0; i < 8; ++i) {
+            payload_length = (payload_length << 8) |
+                             static_cast<uint64_t>(buf[pos + i]);
+        }
+    }
+
+    if (payload_length > MAX_FRAME_PAYLOAD) {
+        // The connection is about to be closed by the caller — do NOT
+        // consume any bytes here so the read buffer stays untouched for the
+        // audit log or a future close-frame diagnostic.
+        return ReadFrameResult::TooLarge;
+    }
+
+    // Length is safe. Delegate to the existing full parser, which now
+    // cannot allocate more than MAX_FRAME_PAYLOAD.
+    return try_read_frame(conn, frame) ? ReadFrameResult::Frame
+                                        : ReadFrameResult::NeedMore;
+}
+
 bool WebSocket::try_read_frame(Connection& conn, WsFrame& frame) {
     const auto& buf = conn.get_read_buffer();
     
@@ -353,7 +389,28 @@ void MessageRouter::route(Connection& conn, const std::string& message) {
     if (quote_end == std::string::npos) return;
     
     std::string type = message.substr(quote_start + 1, quote_end - quote_start - 1);
-    
+
+    // Pre-dispatch hook (Phase 7.4): lets the sealed-envelope gate unwrap a
+    // sealed message, or refuse one that should have been sealed and was not,
+    // without any handler being aware of it.
+    if (pre_dispatch_) {
+        std::string rewritten;
+        switch (pre_dispatch_(conn, type, message, rewritten)) {
+            case PreDispatch::Reject:
+                return;
+            case PreDispatch::Replace:
+                dispatch(conn, type, rewritten);
+                return;
+            case PreDispatch::Continue:
+                break;
+        }
+    }
+
+    dispatch(conn, type, message);
+}
+
+void MessageRouter::dispatch(Connection& conn, const std::string& type,
+                             const std::string& message) {
     auto it = handlers_.find(type);
     if (it != handlers_.end()) {
         it->second(conn, message);

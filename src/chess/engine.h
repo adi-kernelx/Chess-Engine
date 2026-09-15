@@ -12,9 +12,6 @@
  *   SearchResult result = engine.search(2000);  // search for 2 seconds
  *   Move best = result.best_move;
  *
- * Future phases will add:
- *   - Transposition table (Phase 6.3)
- *   - Quiescence search (Phase 6.4)
  */
 
 #pragma once

@@ -53,7 +53,7 @@ ZobristKeys init_keys() {
     return k;
 }
 
-} // anonymous namespace
+}
 
 const ZobristKeys& get_keys() {
     static const ZobristKeys keys = init_keys();

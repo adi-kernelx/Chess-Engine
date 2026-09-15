@@ -4,32 +4,32 @@
  * SIX evaluation components, each explained in detail:
  *
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- * 1. MATERIAL BALANCE (Phase 6.1)
+ * 1. MATERIAL BALANCE 
  *    Standard centipawn values. King gets a sentinel value (20000)
  *    so material imbalances involving the king dominate the score.
  *
- * 2. PIECE-SQUARE TABLES (Phase 6.1)
+ * 2. PIECE-SQUARE TABLES 
  *    64-entry tables per piece type based on Michniewski's Simplified
  *    Evaluation Function. Mirrored for Black via sq^56.
  *
- * 3. KING SAFETY (Phase 6.2)
+ * 3. KING SAFETY
  *    Counts the pawn shield around the king. A castled king behind
  *    3 pawns gets a bonus; each missing pawn in the shield is penalized.
  *    Also penalizes kings on open/semi-open files (no friendly pawn).
  *
- * 4. PAWN STRUCTURE (Phase 6.2)
+ * 4. PAWN STRUCTURE
  *    Detects three structural weaknesses:
  *    - Doubled pawns: two+ pawns of same color on one file (-15cp each)
  *    - Isolated pawns: no friendly pawns on adjacent files (-20cp)
  *    - Passed pawns: no opposing pawn can block/capture (+20cp, scaled by rank)
  *
- * 5. MOBILITY (Phase 6.2)
+ * 5. MOBILITY
  *    Counts pseudo-legal moves for each side. More mobility = more
  *    options = better position. Weighted at 4cp per move difference.
  *    Uses pseudo-legal (not legal) for speed, since generating legal
  *    moves would call make/undo internally.
  *
- * 6. BISHOP PAIR (Phase 6.2)
+ * 6. BISHOP PAIR
  *    Having both bishops gives a +30cp bonus. Two bishops cover all
  *    64 squares and complement each other in open positions.
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
