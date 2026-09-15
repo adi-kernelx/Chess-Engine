@@ -1,6 +1,10 @@
 # Build artifacts
 build/
 bin/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
 *.o
 *.a
 *.so
@@ -44,3 +48,16 @@ docs/
 
 # Local Test Files
 test.html
+# Phase 7 — cryptographic secrets. gen_server_identity writes here by default.
+# A committed ML-DSA identity key is a permanent compromise: the pin in
+# config.js can no longer distinguish the real server from anyone with the repo.
+secrets/
+*.key
+*.pem
+.env
+
+# AI-assistant tool configuration and per-phase plan drafts —
+# these are working notes, not something the repo should carry.
+.claude/
+CLAUDE.md
+implementation_phase_*.md
