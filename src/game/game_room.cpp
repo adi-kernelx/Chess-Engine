@@ -11,9 +11,23 @@
 
 #include "game/game_room.h"
 #include <sstream>
+#include <iomanip>
+#include <ctime>
 
 namespace chess {
 namespace game {
+
+namespace {
+/// Format a system_clock time_point as ISO 8601 UTC string.
+std::string format_iso8601(const std::chrono::system_clock::time_point& tp) {
+    auto time_t_val = std::chrono::system_clock::to_time_t(tp);
+    std::tm tm_val{};
+    gmtime_r(&time_t_val, &tm_val);
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_val);
+    return std::string(buf);
+}
+} // namespace
 
 // ============================================================
 // TimeControl
@@ -29,7 +43,8 @@ std::string TimeControl::to_string() const {
 // ============================================================
 
 GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_name,
-                   int creator_fd, const TimeControl& tc)
+                   int creator_fd, const TimeControl& tc,
+                   int64_t db_player_id, int elo)
     : id_(id)
     , state_(RoomState::WAITING)
     , board_(Board::starting_position())
@@ -37,11 +52,13 @@ GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_na
     , result_("*")
 {
     // Creator is seated as White
-    white_.connection_fd = creator_fd;
-    white_.player_id     = creator_id;
-    white_.username      = creator_name;
-    white_.remaining_ms  = tc.base_time_ms;
-    white_.connected     = true;
+    white_.connection_fd  = creator_fd;
+    white_.player_id      = creator_id;
+    white_.db_player_id   = db_player_id;
+    white_.username       = creator_name;
+    white_.elo            = elo;
+    white_.remaining_ms   = tc.base_time_ms;
+    white_.connected      = true;
 }
 
 GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_name,
@@ -71,6 +88,7 @@ GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_na
 
     // Start White's clock
     game_start_time_ = std::chrono::steady_clock::now();
+    wall_start_ = std::chrono::system_clock::now();
     white_.clock_start = game_start_time_;
 }
 
@@ -78,22 +96,26 @@ GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_na
 // Join — Second player enters the room
 // ============================================================
 
-bool GameRoom::join(PlayerId player_id, const std::string& player_name, int connection_fd) {
+bool GameRoom::join(PlayerId player_id, const std::string& player_name, int connection_fd,
+                    int64_t db_player_id, int elo) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (state_ != RoomState::WAITING) return false;
     if (!black_.is_empty()) return false;
 
     // Seat the joiner as Black
-    black_.connection_fd = connection_fd;
-    black_.player_id     = player_id;
-    black_.username      = player_name;
-    black_.remaining_ms  = time_control_.base_time_ms;
-    black_.connected     = true;
+    black_.connection_fd  = connection_fd;
+    black_.player_id      = player_id;
+    black_.db_player_id   = db_player_id;
+    black_.username       = player_name;
+    black_.elo            = elo;
+    black_.remaining_ms   = time_control_.base_time_ms;
+    black_.connected      = true;
 
     // Start the game — White's clock begins ticking
     state_ = RoomState::IN_PROGRESS;
     game_start_time_ = std::chrono::steady_clock::now();
+    wall_start_ = std::chrono::system_clock::now();
     white_.clock_start = game_start_time_;
 
     return true;
@@ -478,6 +500,44 @@ std::vector<MoveRecord> GameRoom::get_move_history() const {
     return move_history_;
 }
 
+PlayerId GameRoom::get_player_id(Color color) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (color == Color::WHITE) return white_.player_id;
+    if (color == Color::BLACK) return black_.player_id;
+    return 0;
+}
+
+int64_t GameRoom::get_db_player_id(Color color) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (color == Color::WHITE) return white_.db_player_id;
+    if (color == Color::BLACK) return black_.db_player_id;
+    return 0;
+}
+
+std::string GameRoom::get_username(Color color) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (color == Color::WHITE) return white_.username;
+    if (color == Color::BLACK) return black_.username;
+    return "";
+}
+
+int GameRoom::get_elo(Color color) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (color == Color::WHITE) return white_.elo;
+    if (color == Color::BLACK) return black_.elo;
+    return 0;
+}
+
+std::string GameRoom::get_started_at_iso() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return format_iso8601(wall_start_);
+}
+
+std::string GameRoom::get_ended_at_iso() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return format_iso8601(wall_end_);
+}
+
 // ============================================================
 // PGN Export
 // ============================================================
@@ -518,6 +578,7 @@ void GameRoom::finish_game(GameStatus status, const std::string& result) {
     state_       = RoomState::FINISHED;
     game_status_ = status;
     result_      = result;
+    wall_end_    = std::chrono::system_clock::now();
 }
 
 void GameRoom::switch_clock() {

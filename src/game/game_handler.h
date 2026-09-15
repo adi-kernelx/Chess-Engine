@@ -39,6 +39,8 @@
 #include "game/matchmaker.h"
 #include "net/websocket.h"
 #include "net/connection.h"
+#include "storage/database.h"
+#include "auth/token.h"
 #include <string>
 #include <atomic>
 
@@ -64,6 +66,8 @@ private:
     void handle_list_games(net::Connection& conn, const std::string& message);
     void handle_game_state(net::Connection& conn, const std::string& message);
     void handle_play_ai(net::Connection& conn, const std::string& message);
+    void handle_get_profile(net::Connection& conn, const std::string& message);
+    void handle_get_leaderboard(net::Connection& conn, const std::string& message);
 
     /// After a human makes a move in an AI game, compute and submit the AI's response.
     void trigger_ai_move(std::shared_ptr<GameRoom> room, int human_fd);
@@ -87,12 +91,19 @@ private:
     /// Returns NO_SQUARE on invalid input.
     static Square parse_square(const std::string& sq_str);
 
+    /// Persist a finished game to the database (ELO, stats, move times).
+    /// No-op if db_ is null, game is AI, or players are unauthenticated.
+    void persist_game(GameRoom* room, GameStatus status);
+
     // ── Data ──
 
     RoomManager&  room_mgr_;
     Matchmaker&   matchmaker_;
     AIPlayer      ai_player_;
     std::atomic<PlayerId> next_player_id_{1}; // Temporary player IDs (until auth is added)
+
+    storage::Database*    db_     = nullptr;   // Optional — null when DB not configured
+    auth::TokenSigner*    signer_ = nullptr;   // Optional — null when auth not configured
 
     // Callback to look up a Connection by fd (set by TcpServer integration)
     // This allows us to send messages to the opponent without having
@@ -105,6 +116,12 @@ public:
     void set_connection_lookup(std::function<net::Connection*(int fd)> lookup) {
         connection_lookup_ = std::move(lookup);
     }
+
+    /// Set the database for game persistence (optional).
+    void set_database(storage::Database* db) { db_ = db; }
+
+    /// Set the token signer for auth extraction (optional).
+    void set_signer(auth::TokenSigner* s) { signer_ = s; }
 
     /// Called when a player disconnects — cleans up queue and room state.
     void on_player_disconnect(int connection_fd);

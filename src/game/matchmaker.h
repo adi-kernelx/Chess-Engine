@@ -59,6 +59,7 @@ namespace game {
 struct QueueEntry {
     int         connection_fd;    // WebSocket fd
     PlayerId    player_id;
+    int64_t     db_player_id = 0; // Real database ID (0 = unauthenticated)
     std::string username;
     int         elo;              // Current ELO rating
     TimeControl time_control;     // Preferred time control
@@ -123,7 +124,8 @@ public:
     /// Returns false if the player is already queued — O(1) check.
     bool enqueue(int connection_fd, PlayerId player_id,
                  const std::string& username, int elo = 1200,
-                 const TimeControl& tc = TimeControl());
+                 const TimeControl& tc = TimeControl(),
+                 int64_t db_player_id = 0);
 
     /// Remove a player from the queue using the reverse index — O(1).
     /// Returns true if the player was found and removed.

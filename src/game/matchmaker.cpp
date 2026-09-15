@@ -37,7 +37,8 @@ Matchmaker::Matchmaker(RoomManager& room_mgr)
 
 bool Matchmaker::enqueue(int connection_fd, PlayerId player_id,
                          const std::string& username, int elo,
-                         const TimeControl& tc) {
+                         const TimeControl& tc,
+                         int64_t db_player_id) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     // O(1) duplicate check via the reverse index
@@ -47,12 +48,13 @@ bool Matchmaker::enqueue(int connection_fd, PlayerId player_id,
 
     // Build the queue entry
     QueueEntry entry;
-    entry.connection_fd = connection_fd;
-    entry.player_id     = player_id;
-    entry.username      = username;
-    entry.elo           = elo;
-    entry.time_control  = tc;
-    entry.enqueue_time  = std::chrono::steady_clock::now();
+    entry.connection_fd  = connection_fd;
+    entry.player_id      = player_id;
+    entry.db_player_id   = db_player_id;
+    entry.username       = username;
+    entry.elo            = elo;
+    entry.time_control   = tc;
+    entry.enqueue_time   = std::chrono::steady_clock::now();
 
     // Insert into the ELO tree for this time control bucket — O(log N)
     // multimap::insert returns an iterator to the inserted element
@@ -135,8 +137,10 @@ std::vector<MatchResult> Matchmaker::try_match() {
 
                 // ── Match found! Create a game room. ──
                 auto room = room_mgr_.create_room(
-                    a.player_id, a.username, a.connection_fd, a.time_control);
-                room->join(b.player_id, b.username, b.connection_fd);
+                    a.player_id, a.username, a.connection_fd, a.time_control,
+                    a.db_player_id, a.elo);
+                room->join(b.player_id, b.username, b.connection_fd,
+                           b.db_player_id, b.elo);
 
                 MatchResult result;
                 result.white_fd     = a.connection_fd;

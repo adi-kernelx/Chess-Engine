@@ -638,93 +638,241 @@ vs JSON equivalent: ~200 bytes. Binary = 94% bandwidth reduction.
 
 ---
 
-### Phase 7 — Authentication & Cryptography *(Days 43–49)*
+### Phase 7 — Secure Identity & Login *(Days 43–57, ~15 days)* — **REWRITTEN (rev. 3)**
 
-> **Goal**: Secure user registration, login, and session management using crypto you implemented yourself.
+> [!IMPORTANT]
+> **Full spec lives in [implementation_phase_7.md](implementation_phase_7.md).** This is a
+> rev-3 summary — rev 1 specified a full per-connection post-quantum channel (~20 days,
+> encrypting every WebSocket message including chess moves); rev 2 scoped the PQC down to the
+> password; rev 3 generalises the sealed envelope into a reusable service, fixes the HMAC width
+> at SHA-384, and delivers Google Sign-In **through Supabase Auth** rather than hand-rolling the
+> OAuth and JWKS machinery. **Read the detailed document before starting any of it** — this
+> summary is an index, not a spec.
 
-#### 7.1 Password Hashing & User Registration *(Days 43–44)*
-- [ ] Hash passwords with Argon2id (via OpenSSL/libsodium — use the library for the primitive)
-- [ ] Generate random salt per user (via OpenSSL's `RAND_bytes`)
-- [ ] Store `username + password_hash + salt` in SQLite players table
-- [ ] Registration endpoint: validate username (unique, 3-20 chars, alphanumeric)
-- [ ] **Test**: Register user, verify hash is stored, verify raw password is NOT stored
+> **Goal**: real authentication (there currently is none — usernames are unverified
+> client-supplied strings), with the one password-bearing exchange protected against
+> harvest-now-decrypt-later by a scoped, reusable post-quantum construction, plus Google Sign-In
+> as a second way in that carries no password at all.
 
-#### 7.2 JWT Token Engine *(Days 45–46)*
-- [ ] **Build JWT from scratch** (this is the educational part):
-  - Header: `{ "alg": "HS256", "typ": "JWT" }` → Base64url encode
-  - Payload: `{ "sub": player_id, "iat": timestamp, "exp": timestamp+3600 }` → Base64url encode
-  - Signature: `HMAC-SHA256(header.payload, server_secret)` (use OpenSSL for HMAC)
-  - Token: `header.payload.signature`
-- [ ] Token verification: decode, check expiry, verify HMAC signature
-- [ ] Auth middleware: every WebSocket message must include valid token (after initial login)
-- [ ] Token refresh: issue new token before expiry
-- [ ] **Test**: Create token, tamper with payload, verify server rejects it
+#### What this phase actually defends against
 
-#### 7.3 Diffie-Hellman Key Exchange *(Days 47–48)*
-- [ ] Implement DH key exchange protocol:
-  - Server and client agree on prime `p` and generator `g`
-  - Server generates secret `a`, sends `A = g^a mod p`
-  - Client generates secret `b`, sends `B = g^b mod p`
-  - Both compute shared secret `s = B^a mod p = A^b mod p`
-  - Use shared secret to derive AES key for encrypting WebSocket messages
-- [ ] Use OpenSSL's `BN_mod_exp` for modular exponentiation (big number math)
-- [ ] **Test**: Capture traffic with your packet analyzer — verify messages are encrypted, not plaintext
-- [ ] **Document**: Write `SECURITY.md` explaining the auth flow and threat model
+Two concrete threats were named: **"no attacker has advantage to login into fake account, make
+invalid move and win."** Checking both against the current codebase:
 
-#### 7.4 Rate Limiting *(Day 49)*
-- [ ] Implement token bucket algorithm:
-  - Each client gets a bucket of N tokens, refilled at rate R tokens/second
-  - Each request costs 1 token; if bucket empty → reject with "rate limited" error
-- [ ] Apply to: login (5/min), move submission (2/sec), room creation (3/min)
-- [ ] **Test**: Rapid-fire 20 login attempts, verify server rejects after 5th
-- [ ] **Commit**: `feat: JWT auth + DH key exchange + rate limiting — zero external auth libraries`
+- **"Invalid move and win" is already solved — zero new code in this phase.** Phase 4's
+  server-authoritative validator (`Board::make_move`) already rejects any illegal move regardless
+  of how it arrives. Confirmed, not touched.
+- **"Fake account login" needs everything below**, because there is currently no authentication
+  of any kind.
 
-**Deliverable**: Complete auth system with password hashing, JWT tokens, DH key exchange, and rate limiting.
+PQC is scoped to exactly the piece that benefits from it: **the password, in transit, at
+registration/login.** Passwords are long-lived secrets — harvest-now-decrypt-later is a genuine
+concern. Chess moves are not long-lived secrets, and `wss://` already protects them; encrypting
+every move again at the application layer was solving a problem nobody has. That's the
+single biggest change from the first draft.
+
+#### Hand-rolled vs. library — the rule, applied
+
+Standing instruction: minimize dependencies, hand-write anything formally studied. Applied
+concretely:
+
+| Hand-written (his coursework covers it) | Library call (not yet studied, or a known minefield) |
+|---|---|
+| SHA-256, HMAC, HKDF | **ML-KEM-768 / ML-DSA-65** — *not* for lack of theory (LWE and Module-LWE are both studied). Constant-time lattice implementation is a separate specialisation with a **silent** failure mode: weak sampling still round-trips perfectly while the keys are predictable, and even the reference Kyber code shipped a timing leak (KyberSlash, 2024) that reached many expert-written libraries. A study implementation is encouraged — it just never links into `chess_server` |
+| AES-256 (SubBytes/ShiftRows/MixColumns/key expansion) | **X25519** — ECC theory studied, but not the specific constant-time field arithmetic |
+| AES-256-**CTR** + HMAC (Encrypt-then-MAC) | **Argon2id** — built on BLAKE2b, out of syllabus |
+| Token-bucket rate limiter, JWT construction | **CSPRNG** — never hand-rolled, full stop; `RAND_bytes`/`getrandom` only |
+
+Note the mode choice: **CTR, not GCM.** GCM's GHASH multiplies in GF(2¹²⁸) with its own bit
+convention and is a well-documented minefield (nonce-reuse is a recurring real-world CVE class)
+even for experienced engineers. CTR is just AES + a counter + XOR — squarely in scope — and
+Encrypt-then-MAC with hand-rolled HMAC-SHA-384 gives the same authenticated-encryption guarantee
+without touching GHASH.
+
+#### The sealed envelope — a reusable service, PQC scoped to the password
+
+Not a persistent channel — a one-shot operation, and deliberately **payload-agnostic** so it can
+be reused later:
+
+```
+1. Server mints a ONE-TIME ML-KEM-768 + X25519 keypair, signs it with its long-term ML-DSA-65 identity
+2. Browser verifies that signature against a PINNED ARRAY of server-key hashes (never a single
+   scalar — an array makes key rotation a safe rollout instead of a flag-day outage)
+3. Browser encapsulates → hybrid shared secret → HKDF → AES-256-CTR encrypt, then HMAC-SHA-384
+4. Server consumes the one-time key, verifies the tag BEFORE decrypting, recovers the plaintext,
+   then Argon2id-hashes the password
+5. The one-time keypair is destroyed on first lookup — a captured envelope can never be replayed,
+   because the only key that could open it no longer exists
+```
+
+**Reusable by design.** The service seals and opens opaque bytes; it knows nothing about
+passwords or chess. Message types opt in through a registry, and `MessageRouter` unwraps before
+dispatch, so handlers never know an envelope was involved:
+
+```cpp
+sealed_registry.require_sealed("register");
+sealed_registry.require_sealed("login");
+sealed_registry.require_sealed("change_password");
+// future, with zero new crypto work:
+// sealed_registry.require_sealed("send_message");   // private chat
+```
+
+A type registered as sealed that arrives **unsealed is rejected**, so the envelope cannot be
+stripped and the request downgraded.
+
+`refresh`, `logout`, and `make_move` are **not** wrapped — none of them ever puts a raw password
+on the wire, and TLS already covers transit.
+
+This is end-to-end from the browser to the C++ process specifically because **Cloud Run
+terminates TLS at the Google Front End** — the process never sees the TLS handshake, so this is
+the only way to keep the password confidential from whoever terminates that connection, not just
+from an on-path eavesdropper (which TLS alone already handles).
+
+#### Sub-phases
+
+| # | Days | Content |
+|---|---|---|
+| **7.0** | 43 | Scaffolding, `SecureBuffer`, CSPRNG wrapper — no OpenSSL prerequisite anymore (see below) |
+| **7.1** | 44–46 | Hand-written SHA-256, HMAC, HKDF — validated against FIPS 180-4 / RFC 4231 / RFC 5869 vectors **plus** a differential test vs OpenSSL over 10,000 random inputs |
+| **7.2** | 47–48 | Hand-written AES-256, CTR mode, Encrypt-then-MAC AEAD |
+| **7.3** | 49 | RAII wrappers over OpenSSL's ML-KEM-768 / ML-DSA-65 / X25519 |
+| **7.4** | 50–51 | The sealed-envelope service + opt-in registry + router hook; cross-language C++/JS vector test |
+| **7.5** | 52 | Postgres via Supabase (`libpq`), minimal `players` + `sessions` schema |
+| **7.6** | 53 | Argon2id, username validation, register/login handlers |
+| **7.7** | 54 | JWT from scratch, rotating revocable refresh tokens, real `logout`/`logout_all` |
+| **7.8** | 55 | **Google Sign-In via Supabase Auth** — verify the Supabase JWT, map `sub` → account, link/unlink, never auto-link on email |
+| **7.9** | 56 | Token-bucket rate limiting (checked *before* Argon2id), CSP, message size caps, and a fix for the **live JSON-injection bug** in `main.cpp`'s `match_found` |
+| **7.10** | 57 | Frontend integration (`config.js`, auth screen PREVIEW → LIVE, Google button), Cloud Run deploy, `SECURITY.md` |
+
+#### Google Sign-In — why via Supabase, and the one real risk
+
+Google Sign-In was dropped mid-revision and then reinstated, so the reasoning is worth keeping.
+The stated reason for dropping it — *"Google uses RSA"* — **does not hold**: harvest-now-decrypt-later
+threatens **confidentiality** (record ciphertext now, decrypt later), whereas an ID-token
+*signature* is verified at login and discarded. Forging one needs RSA broken **today**, which
+would mean every TLS connection on earth is already broken.
+
+The legitimate objections were all about *hand-rolling* the OAuth machinery — an outbound HTTPS
+client the server doesn't have, JWKS caching and rotation, and a heavier frontend dependency than
+the PQC module. **Supabase Auth removes all three**: it performs the OAuth exchange server-side,
+the C++ server verifies a single Supabase-issued JWT, and the browser flow is a plain
+`window.location` redirect — **zero new frontend dependencies**. If the Supabase project signs
+with the legacy HS256 secret, verification even reuses the hand-written HMAC from §7.1.
+
+> [!WARNING]
+> **Account linking is the one genuine risk.** If a Google login arrives with an email matching an
+> existing password account, auto-merging them means anyone who can obtain a Google account at
+> that address takes over the existing account. The rule adopted: **never auto-link on email** —
+> a colliding email is refused with a message to sign in by password and link from Settings, and
+> linking is always an authenticated action.
+
+Scope boundary: Supabase is an **identity provider only**. It proves who someone is at sign-in;
+this project still issues, rotates, and revokes its own sessions. Handing all of authentication to
+Supabase would delete the Argon2id, JWT, and sealed-envelope work that is the substance of the phase.
+
+#### Environment blocker from the first draft: resolved
+
+The dev environment migrated to **Ubuntu 26.04 LTS** (Sept 2026), which ships **OpenSSL 3.5.5**
+with ML-KEM, ML-DSA, and Argon2id in the default provider. The source-build-into-`/opt`
+prerequisite and the multi-stage Dockerfile from the first draft are both gone —
+`find_package(OpenSSL)` and `apt-get install libssl-dev` just work, in WSL and in the container.
+Verified: clean build, 0 warnings under `-Werror` on GCC 15.2, all 171 existing tests still pass.
+
+#### Deliberately not built, and why
+
+| Not built | Why |
+|---|---|
+| Per-connection PQC channel for game moves | No long-term value in a move; TLS already covers the wire. This was rev 1's central mistake |
+| Move hash chain / ML-DSA game receipts | Defended against the *operator* forging a result — nobody needs protection from the operator on a personal project |
+| PSK resumption, rekeying, sequence counters | Existed only to make a *persistent* channel cheap; the sealed envelope is one-shot and doesn't need them |
+| ML-DSA-signed session tokens | 3309 B vs 48 B for zero gain in a single process that both mints and verifies its own tokens. HMAC-SHA-384 is *already* post-quantum |
+| Hand-rolled Google OAuth (JWKS fetch, token exchange, `gsi/client`) | The *feature* is kept (§7.8) but none of this machinery is written — Supabase Auth performs the exchange, so the server verifies one JWT and the browser does a plain redirect |
+| Supabase Auth as the *session* system | Deliberately not. It proves identity once at sign-in; this project issues and revokes its own tokens. One session mechanism, one `logout_all` |
+| Hand-rolled ML-KEM/ML-DSA **on the shipping path** | The theory is understood (LWE and Module-LWE both studied), so this is *not* deferred for lack of knowledge — constant-time lattice implementation is a distinct specialisation whose failure mode is silent. A study implementation in `research/kyber_reference/` is encouraged and **unblocked**, validated against NIST KAT vectors and differentially against OpenSSL; it simply never links into the server |
+
+#### Deployment (Vercel + Cloud Run)
+
+- `main.cpp` must read `$PORT` (Cloud Run injects it; hardcoded 9000 fails health checks)
+- `--min-instances=1 --max-instances=1` — game state lives in process memory; two instances would
+  silently split the lobby
+- Deploy to **`asia-south1` (Mumbai)**: ~250 ms → ~30 ms RTT from IIT Patna — a bigger latency win
+  than anything in this phase
+- `frontend/js/config.js` — environment-aware `wss://` URL + the pinned key **array**
+
+**Deliverable**: working registration/login with the password PQC-sealed against
+harvest-now-decrypt-later, delivered as a **reusable envelope service** any future message type
+can opt into; **Google Sign-In via Supabase Auth** as a second way in; revocable sessions with
+real logout; rate limiting; one existing JSON-injection bug fixed; all hand-rolled crypto
+validated against known-answer vectors *and* differentially against OpenSSL — live on Cloud Run.
 
 ---
 
-### Phase 8 — Database Integration *(Days 50–54)*
+### Phase 8 — Database Integration *(Days 58–62)* — **REVISED: Postgres via Supabase, not SQLite**
 
-> **Goal**: Persistent storage with proper schema design, indexing, and transactional integrity.
+> [!IMPORTANT]
+> **SQLite was replaced by Postgres (via Supabase) during Phase 7 planning**, not here — see
+> [implementation_phase_7.md](implementation_phase_7.md) §7.4. The reason is a hard Cloud Run
+> constraint, not a preference: Cloud Run's filesystem is ephemeral and RAM-backed, so a SQLite
+> file would be wiped on every restart *and* would count against the memory limit. Phase 7
+> already created a **minimal** `players` + `sessions` schema to support login. Phase 8 below
+> **extends** that schema — `games`, `move_times`, ELO transactions — rather than inventing a
+> database layer from scratch. This is a straight substitution in the dependency list (`libpq`
+> in place of `sqlite3`), not an addition.
+>
+> A genuine upside of the substitution, worth noting rather than treating as a compromise:
+> Postgres has real concurrent-writer support. The original SQLite plan's "connection pool or
+> serialized access (SQLite is single-writer)" concern and the `PRAGMA journal_mode=WAL` dance
+> both disappear — Postgres just handles it.
 
-#### 8.1 SQLite Integration *(Days 50–51)*
-- [ ] Create `Database` wrapper class: connection management, prepared statements, transactions
-- [ ] Execute schema.sql on first run (auto-create tables)
-- [ ] Enable WAL mode for concurrent reads during writes: `PRAGMA journal_mode=WAL`
-- [ ] Connection pool or serialized access (SQLite is single-writer)
-- [ ] Parameterized queries everywhere (prevent SQL injection)
-- [ ] **Test**: Insert 1000 players, query by ELO range, verify index is used (`EXPLAIN QUERY PLAN`)
+> **Goal**: Full game history, indexed queries, and transactional ELO updates, built on the
+> `players`/`sessions` tables Phase 7 already created.
 
-#### 8.2 Repository Layer *(Days 52–53)*
-- [ ] `PlayerRepository`: create, find by username, update ELO, get leaderboard
+#### 8.1 Schema extension *(Days 58–59)*
+- [x] Extend the Phase-7 schema (Postgres syntax: `BIGSERIAL`, `TIMESTAMPTZ`) with `games`,
+      `move_times`, and the indexes from the original design (`idx_games_white`,
+      `idx_games_black`, `idx_games_opening`)
+- [x] `src/storage/database.h/.cpp` from Phase 7 (§7.4) is extended, not replaced — same `libpq`
+      connection wrapper, same parameterized-queries-only rule
+- [x] Migration file(s) under `src/storage/migrations/` so schema changes are tracked, not
+      applied ad hoc against the live Supabase instance
+- [x] **Test**: Insert 1000 players, query by ELO range, verify the index is used
+      (`EXPLAIN ANALYZE`, the Postgres equivalent of SQLite's `EXPLAIN QUERY PLAN`)
+
+#### 8.2 Repository Layer *(Days 60–61)*
+- [ ] `PlayerRepository`: create, find by username, update ELO, get leaderboard — extends the
+      Phase-7 `players` access rather than duplicating it
 - [ ] `GameRepository`: save game (moves + metadata), load game by ID, query game history by player
-- [ ] ELO update in transaction: both players' ratings update atomically
+- [ ] ELO update in a single transaction — both players' ratings update atomically:
   ```sql
-  BEGIN TRANSACTION;
-  UPDATE players SET elo_rating = ?, wins = wins + 1 WHERE id = ?;
-  UPDATE players SET elo_rating = ?, losses = losses + 1 WHERE id = ?;
+  BEGIN;
+  UPDATE players SET elo_rating = $1, wins = wins + 1 WHERE id = $2;
+  UPDATE players SET elo_rating = $3, losses = losses + 1 WHERE id = $4;
   INSERT INTO games (...) VALUES (...);
   COMMIT;
   ```
-- [ ] Query: "Get last 20 games for player X, sorted by date" (must use index)
+- [ ] Query: "Get last 20 games for player X, sorted by date" (must use the index)
 - [ ] **Test**: Simulate 500 games, verify ELO calculations are consistent, no data corruption
+      under concurrent writers (a real test now that Postgres actually allows concurrent writers —
+      this test would have been meaningless against SQLite's single-writer model)
 
-#### 8.3 Game Persistence Integration *(Day 54)*
-- [ ] On game over → save to database automatically
-- [ ] On login → load player profile from database
-- [ ] Player profile page: show ELO, win/loss/draw, game history
+#### 8.3 Game Persistence Integration *(Day 62)*
+- [ ] On game over → save to database automatically (extends the `game_over` handler Phase 7's
+      auth already gates)
+- [ ] Player profile page: ELO, win/loss/draw, game history — the `get_profile` contract already
+      specified in `docs/frontend_implementation.md`'s "Expected Backend Functions"
 - [ ] **Test**: Play a game → close browser → reopen → game appears in history
-- [ ] **Commit**: `feat: SQLite persistence with WAL mode — games, players, ELO tracked with indexed queries`
+- [ ] **Commit**: `feat: Postgres game persistence via Supabase — games, ELO transactions, indexed history queries`
 
-**Deliverable**: All game data persisted with proper schema, indexes, and transactional ELO updates.
+**Deliverable**: All game data persisted in Postgres with proper schema, indexes, and
+transactional ELO updates — extending, not duplicating, the identity store Phase 7 built.
 
 ---
 
-### Phase 9 — Advanced Features *(Days 55–65)*
+### Phase 9 — Advanced Features *(Days 63–73)*
 
 > **Goal**: Features that elevate this from "project" to "platform".
 
-#### 9.1 Spectator Mode *(Days 55–57)*
+#### 9.1 Spectator Mode *(Days 63–65)*
 - [ ] Any user can spectate a live game by game_id
 - [ ] Fan-out broadcaster: on each move, push to all spectators (non-blocking)
 - [ ] Spectator count displayed in game (and lobby)
@@ -732,7 +880,7 @@ vs JSON equivalent: ~200 bytes. Binary = 94% bandwidth reduction.
 - [ ] Handle spectator join mid-game: send full current board state first, then live stream
 - [ ] **Test**: 1 game + 20 spectators, all see moves in real-time
 
-#### 9.2 Game Replay & Analysis *(Days 58–60)*
+#### 9.2 Game Replay & Analysis *(Days 66–68)*
 - [ ] Replay any completed game move-by-move in the browser
 - [ ] Navigation: first / prev / next / last / auto-play with speed control
 - [ ] At each position, optionally show engine evaluation (+2.3, -0.5, etc.)
@@ -740,7 +888,7 @@ vs JSON equivalent: ~200 bytes. Binary = 94% bandwidth reduction.
 - [ ] Search games by opening: "Show all games starting with 1. e4 e5"
 - [ ] **Test**: Replay a 40-move game, verify every position matches
 
-#### 9.3 Anti-Cheat *(Days 61–62)*
+#### 9.3 Anti-Cheat *(Days 69–70)*
 - [ ] Record think time per move (server-side, not client-reported)
 - [ ] Statistical analysis: flag players whose move times don't correlate with position complexity
   - Engine users: complex position → instant move (suspicious)
@@ -750,7 +898,7 @@ vs JSON equivalent: ~200 bytes. Binary = 94% bandwidth reduction.
 - [ ] Flag, don't auto-ban. Store analysis results for review.
 - [ ] **Test**: Simulate a game with artificial "engine-like" move times, verify system flags it
 
-#### 9.4 Tournament System *(Days 63–65)*
+#### 9.4 Tournament System *(Days 71–73)*
 - [ ] Create tournament: name, format (Swiss), number of rounds, time control
 - [ ] Registration: players join before tournament starts
 - [ ] Swiss pairing: match players with similar scores, avoid rematches
@@ -764,11 +912,11 @@ vs JSON equivalent: ~200 bytes. Binary = 94% bandwidth reduction.
 
 ---
 
-### Phase 10 — Benchmarking, Polish & Documentation *(Days 66–72)*
+### Phase 10 — Benchmarking, Polish & Documentation *(Days 74–80)*
 
 > **Goal**: Measure everything, document everything, make it interview-ready.
 
-#### 10.1 Load Testing *(Days 66–68)*
+#### 10.1 Load Testing *(Days 74–76)*
 - [ ] Write `load_test.py`: spawn N WebSocket clients, each playing a random game
 - [ ] Measure under load (100, 250, 500 concurrent games):
   - Move round-trip latency: p50, p95, p99
@@ -779,7 +927,7 @@ vs JSON equivalent: ~200 bytes. Binary = 94% bandwidth reduction.
 - [ ] Optimize top bottleneck (at least one optimization with before/after numbers)
 - [ ] **Benchmark the engine separately**: nodes/sec, depth reached in 2s/5s/10s
 
-#### 10.2 Performance Optimization *(Days 69–70)*
+#### 10.2 Performance Optimization *(Days 77–78)*
 - [ ] Based on profiling results, optimize the top 2-3 bottlenecks
 - [ ] Document each optimization with before/after metrics
 - [ ] Example optimizations:
@@ -789,7 +937,7 @@ vs JSON equivalent: ~200 bytes. Binary = 94% bandwidth reduction.
   - Tune thread pool size vs epoll batching
 - [ ] Re-run benchmarks to verify improvements
 
-#### 10.3 Documentation & README *(Days 71–72)*
+#### 10.3 Documentation & README *(Days 79–80)*
 - [ ] **README.md**: Project overview, architecture diagram, build instructions, benchmarks
 - [ ] **ARCHITECTURE.md**: Design decisions with rationale ("Why epoll over poll? Why sharded locks? Why bitboards?")
 - [ ] **PROTOCOL.md**: Full binary protocol specification
@@ -815,15 +963,27 @@ Week 4   ████████░░░░  Phase 4: Online Game Server + Pha
          August 2026
 Week 5   ████████░░░░  Phase 5: Frontend (complete)
 Week 6   ████████░░░░  Phase 6: Chess AI Engine
-Week 7   ████████░░░░  Phase 7: Auth & Crypto
-Week 8   ████████░░░░  Phase 8: Database Integration
+Week 7   ████████░░░░  Phase 7: Secure Identity & Login (7.0–7.4 — hand-rolled crypto, sealed-envelope service)
 
          September 2026
-Week 9   ████████░░░░  Phase 9: Advanced Features (part 1)
-Week 10  ████████░░░░  Phase 9: Advanced Features (part 2) + Phase 10: Benchmarking
+Week 8   ████████░░░░  Phase 7: Secure Identity & Login (7.5–7.10 — Supabase, Argon2id, sessions, Google Sign-In, deploy)
+Week 9   ████████░░░░  Phase 8: Database (extends Phase 7's schema — games, ELO transactions)
+Week 10  ████████░░░░  Phase 9: Advanced Features (part 1)
+Week 11  ████████░░░░  Phase 9: Advanced Features (part 2)
+Week 12  ████████░░░░  Phase 10: Benchmarking & Documentation
 
-Total: ~10 weeks at 4-5 hours/day
+Total: ~12 weeks at 4-5 hours/day
 ```
+
+> [!NOTE]
+> Phase 7 was rewritten three times. Rev 1 specified a full per-connection post-quantum channel
+> (~20 days) encrypting every message, chess moves included. Rev 2 scoped the PQC down to the one
+> exchange carrying a genuinely long-lived secret — the password at registration/login — after
+> confirming the project's other stated threat (illegal moves) was already fully solved by
+> Phase 4's server-authoritative validator. Rev 3 generalised the sealed envelope into a reusable
+> service any message type can opt into, and delivered Google Sign-In **through Supabase Auth**
+> instead of hand-rolling OAuth — settling at **~15 days**. See
+> [implementation_phase_7.md](implementation_phase_7.md) for the full reasoning and spec.
 
 > [!WARNING]
 > **Semester 7 starts mid-July 2026.** You'll need to balance this with coursework. Realistic pace during semester: 2-3 hours/day, extending the timeline to ~14 weeks (finishing by mid-October).

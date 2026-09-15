@@ -28,6 +28,7 @@
 #include <mutex>
 #include <chrono>
 #include <cstdint>
+#include <ctime>
 
 namespace chess {
 namespace game {
@@ -66,11 +67,13 @@ struct TimeControl {
 // ============================================================
 
 struct PlayerSlot {
-    int         connection_fd = -1;       // File descriptor (-1 = empty slot)
-    PlayerId    player_id     = 0;        // Unique player identifier
-    std::string username;                 // Display name
-    int         remaining_ms  = 0;        // Time remaining in milliseconds
-    bool        connected     = false;    // Currently connected?
+    int         connection_fd  = -1;       // File descriptor (-1 = empty slot)
+    PlayerId    player_id      = 0;        // Unique player identifier (local atomic counter)
+    int64_t     db_player_id   = 0;        // Real database ID (0 = unauthenticated)
+    std::string username;                  // Display name
+    int         elo            = 1200;     // ELO rating snapshot at game start
+    int         remaining_ms   = 0;        // Time remaining in milliseconds
+    bool        connected      = false;    // Currently connected?
 
     /// Clock timestamp: when this player's clock started ticking
     std::chrono::steady_clock::time_point clock_start;
@@ -97,7 +100,8 @@ public:
     /// Create a new game room with the given ID and time control.
     /// The creating player is automatically seated as White.
     GameRoom(GameId id, PlayerId creator_id, const std::string& creator_name,
-             int creator_fd, const TimeControl& tc = TimeControl());
+             int creator_fd, const TimeControl& tc = TimeControl(),
+             int64_t db_player_id = 0, int elo = 1200);
 
     /// Create an AI game room. Human plays White, AI plays Black.
     /// The game starts immediately (no WAITING state).
@@ -110,7 +114,8 @@ public:
 
     /// Second player joins the room. Starts the game clock.
     /// Returns false if the room is full or already in progress.
-    bool join(PlayerId player_id, const std::string& player_name, int connection_fd);
+    bool join(PlayerId player_id, const std::string& player_name, int connection_fd,
+              int64_t db_player_id = 0, int elo = 1200);
 
     /// A player submits a move (from their connection fd).
     /// Validates legality, updates the board, toggles clocks.
@@ -174,6 +179,19 @@ public:
     /// Get the move history as a vector of MoveRecords.
     std::vector<MoveRecord> get_move_history() const;
 
+    /// Get the player ID (local) for a specific color.
+    PlayerId get_player_id(Color color) const;
+    /// Get the database player ID for a specific color (0 = unauthenticated).
+    int64_t get_db_player_id(Color color) const;
+    /// Get the username for a specific color.
+    std::string get_username(Color color) const;
+    /// Get the ELO snapshot for a specific color.
+    int get_elo(Color color) const;
+    /// Get the game start time as ISO 8601 string (UTC).
+    std::string get_started_at_iso() const;
+    /// Get the game end time as ISO 8601 string (UTC).
+    std::string get_ended_at_iso() const;
+
     /// Export the game as PGN.
     std::string to_pgn() const;
 
@@ -221,6 +239,10 @@ private:
 
     /// Timestamp when the game started (first move)
     std::chrono::steady_clock::time_point game_start_time_;
+    
+    /// Wall-clock timestamps for ISO 8601 persistence.
+    std::chrono::system_clock::time_point wall_start_;
+    std::chrono::system_clock::time_point wall_end_;
 };
 
 } // namespace game

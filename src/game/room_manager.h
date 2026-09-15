@@ -50,9 +50,11 @@ public:
 
     /// Create a new game room. Returns the room (already contains the creator as White).
     std::shared_ptr<GameRoom> create_room(PlayerId creator_id,
-                                          const std::string& creator_name,
-                                          int creator_fd,
-                                          const TimeControl& tc = TimeControl());
+                                           const std::string& creator_name,
+                                           int creator_fd,
+                                           const TimeControl& tc = TimeControl(),
+                                           int64_t db_player_id = 0,
+                                           int elo = 1200);
 
     /// Create an AI game room. Human plays White, AI plays Black.
     /// The game starts immediately in IN_PROGRESS state.

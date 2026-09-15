@@ -13,7 +13,10 @@
 
 #include "game/game_handler.h"
 #include "core/logger.h"
+#include "storage/game_repo.h"
+#include "storage/player_repo.h"
 #include <nlohmann/json.hpp>
+#include <ctime>
 
 using json = nlohmann::json;
 
@@ -46,6 +49,10 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
         [this](net::Connection& c, const std::string& m) { handle_game_state(c, m); });
     router.register_handler("play_ai",
         [this](net::Connection& c, const std::string& m) { handle_play_ai(c, m); });
+    router.register_handler("get_profile",
+        [this](net::Connection& c, const std::string& m) { handle_get_profile(c, m); });
+    router.register_handler("get_leaderboard",
+        [this](net::Connection& c, const std::string& m) { handle_get_leaderboard(c, m); });
 }
 
 // ============================================================
@@ -73,7 +80,20 @@ void GameHandler::handle_create_game(net::Connection& conn, const std::string& m
         PlayerId pid = next_player_id_.fetch_add(1);
         TimeControl tc(time_base_sec * 1000, time_inc_sec * 1000);
 
-        auto room = room_mgr_.create_room(pid, username, conn.get_fd(), tc);
+        // Extract auth if available
+        int64_t db_player_id = 0;
+        int elo = 1200;
+        if (signer_ && db_ && msg.contains("access_token")) {
+            auth::AccessClaims claims;
+            auto now_unix = static_cast<int64_t>(std::time(nullptr));
+            if (signer_->verify_access(msg["access_token"].get<std::string>(), now_unix, claims)) {
+                db_player_id = claims.player_id;
+                auto profile = storage::find_player_by_id(*db_, claims.player_id);
+                if (profile) elo = profile->elo_rating;
+            }
+        }
+
+        auto room = room_mgr_.create_room(pid, username, conn.get_fd(), tc, db_player_id, elo);
 
         json response;
         response["type"]    = "game_created";
@@ -125,7 +145,21 @@ void GameHandler::handle_join_game(net::Connection& conn, const std::string& mes
         }
 
         PlayerId pid = next_player_id_.fetch_add(1);
-        if (!room->join(pid, username, conn.get_fd())) {
+
+        // Extract auth if available
+        int64_t db_player_id = 0;
+        int elo = 1200;
+        if (signer_ && db_ && msg.contains("access_token")) {
+            auth::AccessClaims claims;
+            auto now_unix = static_cast<int64_t>(std::time(nullptr));
+            if (signer_->verify_access(msg["access_token"].get<std::string>(), now_unix, claims)) {
+                db_player_id = claims.player_id;
+                auto profile = storage::find_player_by_id(*db_, claims.player_id);
+                if (profile) elo = profile->elo_rating;
+            }
+        }
+
+        if (!room->join(pid, username, conn.get_fd(), db_player_id, elo)) {
             send_json(conn, make_error("Cannot join game " + std::to_string(game_id) +
                       " — it may be full or already started"));
             return;
@@ -238,6 +272,8 @@ void GameHandler::handle_make_move(net::Connection& conn, const std::string& mes
                 if (opp_fd >= 0 && connection_lookup_) {
                     send_json_to_fd(opp_fd, game_over.dump());
                 }
+
+                persist_game(room.get(), GameStatus::TIMEOUT);
             } else {
                 send_json(conn, reject.dump());
             }
@@ -281,6 +317,8 @@ void GameHandler::handle_make_move(net::Connection& conn, const std::string& mes
             core::Logger::info("game", "GameHandler",
                 "Game " + std::to_string(room->get_id()) + " ended: " +
                 room->get_result_string() + " (" + status_to_reason(result.game_status) + ")");
+
+            persist_game(room.get(), result.game_status);
         }
 
         // If this is an AI game and the game is still going, trigger AI's response
@@ -324,6 +362,8 @@ void GameHandler::handle_resign(net::Connection& conn, const std::string& /*mess
     core::Logger::info("game", "GameHandler",
         "Game " + std::to_string(room->get_id()) + ": player resigned → " +
         room->get_result_string());
+
+    persist_game(room.get(), GameStatus::RESIGNATION);
 }
 
 // ============================================================
@@ -480,7 +520,21 @@ void GameHandler::handle_quick_play(net::Connection& conn, const std::string& me
         PlayerId pid = next_player_id_.fetch_add(1);
         TimeControl tc(time_base_sec * 1000, time_inc_sec * 1000);
 
-        matchmaker_.enqueue(conn.get_fd(), pid, username, elo, tc);
+        // Extract auth if available (0 = unauthenticated, game won't be persisted)
+        int64_t db_player_id = 0;
+        int actual_elo = elo;
+        if (signer_ && db_ && msg.contains("access_token")) {
+            auth::AccessClaims claims;
+            auto now_unix = static_cast<int64_t>(std::time(nullptr));
+            if (signer_->verify_access(msg["access_token"].get<std::string>(), now_unix, claims)) {
+                db_player_id = claims.player_id;
+                // Look up real ELO from database
+                auto profile = storage::find_player_by_id(*db_, claims.player_id);
+                if (profile) actual_elo = profile->elo_rating;
+            }
+        }
+
+        matchmaker_.enqueue(conn.get_fd(), pid, username, actual_elo, tc, db_player_id);
 
         // Try to match immediately
         auto matches = matchmaker_.try_match();
@@ -643,6 +697,182 @@ void GameHandler::trigger_ai_move(std::shared_ptr<GameRoom> room, int human_fd) 
         core::Logger::info("game", "GameHandler",
             "AI Game " + std::to_string(room->get_id()) + " ended: " +
             room->get_result_string() + " (" + status_to_reason(result.game_status) + ")");
+
+        persist_game(room.get(), result.game_status);
+    }
+}
+
+} // namespace game
+} // namespace chess
+
+// ============================================================
+// Re-open namespace for Phase 8.3 additions (avoids rewriting
+// the entire file while keeping a clear separation of concerns).
+// ============================================================
+
+namespace chess {
+namespace game {
+
+// ============================================================
+// persist_game — atomically save a finished game to Postgres
+// ============================================================
+
+void GameHandler::persist_game(GameRoom* room, GameStatus status) {
+    if (!db_) return;                                         // No database configured
+    if (room->is_ai_game()) return;                           // AI games are not persisted
+
+    int64_t w_id = room->get_db_player_id(Color::WHITE);
+    int64_t b_id = room->get_db_player_id(Color::BLACK);
+    if (w_id <= 0 || b_id <= 0) return;                       // Unauthenticated players
+
+    // ── Assemble CompletedGame from GameRoom data ───────────
+    storage::CompletedGame game;
+    game.white_id     = w_id;
+    game.black_id     = b_id;
+    game.white_elo    = room->get_elo(Color::WHITE);
+    game.black_elo    = room->get_elo(Color::BLACK);
+    game.result       = room->get_result_string();
+    game.termination  = status_to_reason(status);
+    game.time_control = room->get_time_control().to_string();
+    game.started_at   = room->get_started_at_iso();
+    game.ended_at     = room->get_ended_at_iso();
+
+    auto history = room->get_move_history();
+    game.move_count = static_cast<int>(history.size());
+
+    // Build UCI move string and per-ply think times
+    std::string moves;
+    for (size_t i = 0; i < history.size(); ++i) {
+        if (i > 0) moves += ' ';
+        moves += history[i].move.to_uci();
+
+        game.think_times.push_back({
+            static_cast<int>(i + 1),          // 1-based ply number
+            (i % 2 == 0) ? w_id : b_id,       // White moves on odd plies (1,3,5,...)
+            history[i].think_time_ms
+        });
+    }
+    game.moves = std::move(moves);
+
+    // ── Fire the atomic transaction ─────────────────────────
+    auto result = storage::save_completed_game(*db_, game);
+
+    if (result.ok) {
+        core::Logger::info("game", "GameHandler",
+            "Game " + std::to_string(room->get_id()) +
+            " persisted (DB id=" + std::to_string(result.game_id) +
+            ", white ELO " + std::to_string(game.white_elo) + "→" + std::to_string(result.elo.white_new) +
+            ", black ELO " + std::to_string(game.black_elo) + "→" + std::to_string(result.elo.black_new) + ")");
+    } else {
+        core::Logger::error("game", "GameHandler",
+            "Failed to persist game " + std::to_string(room->get_id()) + ": " + result.error);
+    }
+}
+
+// ============================================================
+// get_profile — Player profile with recent games
+// ============================================================
+// Request:  { "type": "get_profile", "username": "alice" }
+// Response: { "type": "profile", "username": "...", "elo": ..., ... }
+
+void GameHandler::handle_get_profile(net::Connection& conn, const std::string& message) {
+    if (!db_) {
+        send_json(conn, make_error("Profiles are not available (no database)"));
+        return;
+    }
+
+    try {
+        auto msg = json::parse(message);
+        std::string username = msg.value("username", "");
+
+        if (username.empty()) {
+            send_json(conn, make_error("Missing 'username' field"));
+            return;
+        }
+
+        auto profile = storage::find_player_by_username(*db_, username);
+        if (!profile) {
+            send_json(conn, make_error("Player '" + username + "' not found"));
+            return;
+        }
+
+        int offset = msg.value("offset", 0);
+        auto recent = storage::get_player_games(*db_, profile->player_id, 20, offset);
+
+        json response;
+        response["type"]         = "profile";
+        response["username"]     = profile->username;
+        response["elo"]          = profile->elo_rating;
+        response["games_played"] = profile->games_played;
+        response["wins"]         = profile->wins;
+        response["losses"]       = profile->losses;
+        response["draws"]        = profile->draws;
+
+        response["recent_games"] = json::array();
+        for (const auto& g : recent) {
+            json entry;
+            entry["game_id"]       = g.game_id;
+            entry["opponent"]      = g.opponent_name;
+            entry["opponent_elo"]  = g.opponent_elo;
+            entry["result"]        = g.player_result;
+            entry["color"]         = g.color;
+            entry["termination"]   = g.termination;
+            entry["started_at"]    = g.started_at;
+            entry["move_count"]    = g.move_count;
+            entry["time_control"]  = g.time_control;
+            response["recent_games"].push_back(entry);
+        }
+
+        send_json(conn, response.dump());
+
+    } catch (const json::exception& e) {
+        send_json(conn, make_error("Invalid JSON: " + std::string(e.what())));
+    }
+}
+
+// ============================================================
+// get_leaderboard — Top players by ELO
+// ============================================================
+// Request:  { "type": "get_leaderboard", "limit": 50, "offset": 0 }
+// Response: { "type": "leaderboard", "players": [...] }
+
+void GameHandler::handle_get_leaderboard(net::Connection& conn, const std::string& message) {
+    if (!db_) {
+        send_json(conn, make_error("Leaderboard is not available (no database)"));
+        return;
+    }
+
+    try {
+        auto msg = json::parse(message);
+        int limit  = msg.value("limit", 50);
+        int offset = msg.value("offset", 0);
+
+        // Clamp limit to a reasonable maximum
+        if (limit > 100) limit = 100;
+        if (limit < 1)   limit = 1;
+
+        auto entries = storage::get_leaderboard(*db_, limit, offset);
+
+        json response;
+        response["type"]    = "leaderboard";
+        response["players"] = json::array();
+
+        for (const auto& e : entries) {
+            json player;
+            player["rank"]         = e.rank;
+            player["username"]     = e.username;
+            player["elo"]          = e.elo_rating;
+            player["games_played"] = e.games_played;
+            player["wins"]         = e.wins;
+            player["losses"]       = e.losses;
+            player["draws"]        = e.draws;
+            response["players"].push_back(player);
+        }
+
+        send_json(conn, response.dump());
+
+    } catch (const json::exception& e) {
+        send_json(conn, make_error("Invalid JSON: " + std::string(e.what())));
     }
 }
 

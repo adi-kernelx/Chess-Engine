@@ -21,10 +21,13 @@ namespace game {
 std::shared_ptr<GameRoom> RoomManager::create_room(PlayerId creator_id,
                                                     const std::string& creator_name,
                                                     int creator_fd,
-                                                    const TimeControl& tc) {
+                                                    const TimeControl& tc,
+                                                    int64_t db_player_id,
+                                                    int elo) {
     GameId id = next_id_.fetch_add(1);
 
-    auto room = std::make_shared<GameRoom>(id, creator_id, creator_name, creator_fd, tc);
+    auto room = std::make_shared<GameRoom>(id, creator_id, creator_name, creator_fd, tc,
+                                           db_player_id, elo);
 
     std::lock_guard<std::mutex> lock(mutex_);
     rooms_[id] = room;
