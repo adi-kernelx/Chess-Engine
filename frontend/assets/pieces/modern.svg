@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  modern.svg — Flat solid silhouettes.
+  Bolder, simpler geometry. Each piece is a single filled shape with
+  a thin rim in the opposite color for definition against same-color
+  squares.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <defs>
+
+    <!-- ─── WHITE ─── -->
+
+    <symbol id="w_king" viewBox="0 0 45 45">
+      <g fill="#f4f2ec" stroke="#1c1a17" stroke-width="0.8" stroke-linejoin="round">
+        <path d="M20 4h5v3h3v3h-3v3h5c5 0 8 4 8 9 0 4-2 7-6 9v6h4v4H9v-4h4v-6c-4-2-6-5-6-9 0-5 3-9 8-9h5v-3h-3V7h3z"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_queen" viewBox="0 0 45 45">
+      <g fill="#f4f2ec" stroke="#1c1a17" stroke-width="0.8" stroke-linejoin="round">
+        <path d="M22.5 5l3 5 4-4 1 8 6-2-2 8h5l-4 6c2 3 2 6 0 9v6h4v4H6v-4h4v-6c-2-3-2-6 0-9L6 20h5l-2-8 6 2 1-8 4 4z"/>
+        <circle cx="9"    cy="10" r="1.6"/>
+        <circle cx="16"   cy="6"  r="1.6"/>
+        <circle cx="22.5" cy="4"  r="1.8"/>
+        <circle cx="29"   cy="6"  r="1.6"/>
+        <circle cx="36"   cy="10" r="1.6"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_rook" viewBox="0 0 45 45">
+      <g fill="#f4f2ec" stroke="#1c1a17" stroke-width="0.8" stroke-linejoin="round">
+        <path d="M10 6h5v3h4V6h5v3h4V6h5v9l-3 3v13l3 3v4H8v-4l3-3V18l-3-3z"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_bishop" viewBox="0 0 45 45">
+      <g fill="#f4f2ec" stroke="#1c1a17" stroke-width="0.8" stroke-linejoin="round">
+        <circle cx="22.5" cy="6" r="2.5"/>
+        <path d="M22.5 10c-6 3-10 9-10 15 0 4 2 6 4 7l-2 5v4h16v-4l-2-5c2-1 4-3 4-7 0-6-4-12-10-15z"/>
+        <path d="M18 20h9M19 24h7" stroke="#1c1a17" fill="none"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_knight" viewBox="0 0 45 45">
+      <g fill="#f4f2ec" stroke="#1c1a17" stroke-width="0.8" stroke-linejoin="round">
+        <path d="M23 5c6 0 12 5 12 15v13l3 3v4H8v-4l4-3s-1-4 2-6l3-2c1-1 0-3-1-3s-2 2-3 3-3 3-4 2 1-6 5-9 5-6 9-6z"/>
+        <circle cx="16" cy="14" r="1.4" fill="#1c1a17" stroke="none"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_pawn" viewBox="0 0 45 45">
+      <g fill="#f4f2ec" stroke="#1c1a17" stroke-width="0.8" stroke-linejoin="round">
+        <circle cx="22.5" cy="12" r="5"/>
+        <path d="M17 17c-2 3-3 5-3 9h17c0-4-1-6-3-9z"/>
+        <path d="M12 26h21l4 15H8z"/>
+      </g>
+    </symbol>
+
+    <!-- ─── BLACK ─── -->
+
+    <symbol id="b_king" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f4f2ec" stroke-width="0.8" stroke-linejoin="round">
+        <path d="M20 4h5v3h3v3h-3v3h5c5 0 8 4 8 9 0 4-2 7-6 9v6h4v4H9v-4h4v-6c-4-2-6-5-6-9 0-5 3-9 8-9h5v-3h-3V7h3z"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_queen" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f4f2ec" stroke-width="0.8" stroke-linejoin="round">
+        <path d="M22.5 5l3 5 4-4 1 8 6-2-2 8h5l-4 6c2 3 2 6 0 9v6h4v4H6v-4h4v-6c-2-3-2-6 0-9L6 20h5l-2-8 6 2 1-8 4 4z"/>
+        <circle cx="9"    cy="10" r="1.6"/>
+        <circle cx="16"   cy="6"  r="1.6"/>
+        <circle cx="22.5" cy="4"  r="1.8"/>
+        <circle cx="29"   cy="6"  r="1.6"/>
+        <circle cx="36"   cy="10" r="1.6"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_rook" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f4f2ec" stroke-width="0.8" stroke-linejoin="round">
+        <path d="M10 6h5v3h4V6h5v3h4V6h5v9l-3 3v13l3 3v4H8v-4l3-3V18l-3-3z"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_bishop" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f4f2ec" stroke-width="0.8" stroke-linejoin="round">
+        <circle cx="22.5" cy="6" r="2.5"/>
+        <path d="M22.5 10c-6 3-10 9-10 15 0 4 2 6 4 7l-2 5v4h16v-4l-2-5c2-1 4-3 4-7 0-6-4-12-10-15z"/>
+        <path d="M18 20h9M19 24h7" stroke="#f4f2ec" fill="none"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_knight" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f4f2ec" stroke-width="0.8" stroke-linejoin="round">
+        <path d="M23 5c6 0 12 5 12 15v13l3 3v4H8v-4l4-3s-1-4 2-6l3-2c1-1 0-3-1-3s-2 2-3 3-3 3-4 2 1-6 5-9 5-6 9-6z"/>
+        <circle cx="16" cy="14" r="1.4" fill="#f4f2ec" stroke="none"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_pawn" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f4f2ec" stroke-width="0.8" stroke-linejoin="round">
+        <circle cx="22.5" cy="12" r="5"/>
+        <path d="M17 17c-2 3-3 5-3 9h17c0-4-1-6-3-9z"/>
+        <path d="M12 26h21l4 15H8z"/>
+      </g>
+    </symbol>
+
+  </defs>
+</svg>

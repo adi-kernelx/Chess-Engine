@@ -1,0 +1,127 @@
+/* ============================================================
+   tokens.css — Design tokens
+   Only file where raw color, font, or pixel values appear.
+   Every other stylesheet consumes these via var(--*).
+   ============================================================ */
+
+:root {
+    /* ── Surface ramp — neutral warm-dark ladder ──
+       Board is the most saturated element on screen; chrome recedes. */
+    --surface-0: #0f1113;   /* page background */
+    --surface-1: #17191c;   /* app frame */
+    --surface-2: #1e2125;   /* card */
+    --surface-3: #262a2f;   /* elevated card / hover */
+    --surface-4: #303540;   /* input, active row */
+
+    /* ── Borders / dividers ── */
+    --border-subtle: #2a2e34;
+    --border-normal: #3a3f47;
+    --border-strong: #4d525c;
+
+    /* ── Text ── */
+    --text-primary:   #ecedef;
+    --text-secondary: #a7abb3;
+    --text-muted:     #6c717a;
+    --text-inverse:   #0f1113;
+
+    /* ── Brand accent — warm amber, evokes polished wood ── */
+    --accent:        #e8b455;
+    --accent-hover:  #f0c473;
+    --accent-active: #d9a13d;
+    --accent-soft:   rgba(232, 180, 85, 0.12);
+    --accent-ring:   rgba(232, 180, 85, 0.35);
+    --on-accent:     #1a1408;
+
+    /* ── Semantic status ── */
+    --success:      #48b76a;
+    --success-soft: rgba(72, 183, 106, 0.15);
+    --warning:      #e2a03f;
+    --warning-soft: rgba(226, 160, 63, 0.15);
+    --danger:       #e05555;
+    --danger-soft:  rgba(224, 85, 85, 0.15);
+    --info:         #4b93e6;
+    --info-soft:    rgba(75, 147, 230, 0.15);
+
+    /* ── Board colors (used by canvas renderer via theme.js, kept here
+       so the shell can theme the board frame consistently) ── */
+    --board-frame: #171412;
+
+    /* ── Type ── */
+    --font-ui:   'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+
+    --fs-2xs: 11px;
+    --fs-xs:  12px;
+    --fs-sm:  13px;
+    --fs-md:  14px;
+    --fs-lg:  16px;
+    --fs-xl:  18px;
+    --fs-2xl: 22px;
+    --fs-3xl: 28px;
+    --fs-4xl: 36px;
+
+    --lh-tight:  1.2;
+    --lh-normal: 1.5;
+
+    --fw-regular:  400;
+    --fw-medium:   500;
+    --fw-semibold: 600;
+    --fw-bold:     700;
+
+    --tracking-tight:  -0.01em;
+    --tracking-wide:    0.02em;
+    --tracking-widest:  0.08em;
+
+    /* ── Spacing — 4px grid ── */
+    --sp-0:   0;
+    --sp-1:   4px;
+    --sp-2:   8px;
+    --sp-3:  12px;
+    --sp-4:  16px;
+    --sp-5:  20px;
+    --sp-6:  24px;
+    --sp-8:  32px;
+    --sp-10: 40px;
+    --sp-12: 48px;
+    --sp-16: 64px;
+
+    /* ── Radius ── */
+    --r-1: 3px;
+    --r-2: 6px;
+    --r-3: 10px;
+    --r-4: 14px;
+    --r-full: 999px;
+
+    /* ── Elevation ── */
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.35);
+    --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.45);
+    --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+    /* ── Motion ── */
+    --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out:   cubic-bezier(0.65, 0, 0.35, 1);
+    --dur-fast:      120ms;
+    --dur-normal:    200ms;
+    --dur-slow:      320ms;
+
+    /* ── z-index ladder ── */
+    --z-content:  1;
+    --z-sticky:   50;
+    --z-nav:      100;
+    --z-overlay:  1000;
+    --z-modal:    1100;
+    --z-toast:    1200;
+
+    /* ── Layout ── */
+    --nav-height: 56px;
+    --content-max: 1280px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --dur-fast:   0ms;
+        --dur-normal: 0ms;
+        --dur-slow:   0ms;
+    }
+}

@@ -1,0 +1,412 @@
+/* ============================================================
+   landing.css — The front door (Part G1).
+   Tier 2 hero piece, Tier 1 tilt cards. All 3D is:
+     - transform / opacity only
+     - gated behind (hover: none) + prefers-reduced-motion
+     - gated behind html[data-effects="off"] where relevant
+   ============================================================ */
+
+.landing {
+    display: grid;
+    gap: var(--sp-8, 48px);
+    padding: var(--sp-6, 32px) var(--sp-5, 24px) var(--sp-8, 48px);
+    max-width: 1120px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* ── Hero ────────────────────────────────────────────────── */
+
+.landing__hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--sp-6, 32px);
+    min-height: 420px;              /* reserve — keeps CLS < 0.1 */
+}
+
+.landing__hero-copy {
+    display: grid;
+    gap: var(--sp-5, 24px);
+}
+
+.landing__title {
+    margin: 0;
+    font-size: clamp(2rem, 4.4vw + 1rem, 3.75rem);
+    line-height: 1.05;
+    letter-spacing: var(--tracking-tight, -0.01em);
+    font-weight: var(--fw-semibold, 600);
+    color: var(--text-primary);
+}
+.landing__title-accent {
+    background: linear-gradient(180deg, var(--accent-hover) 0%, var(--accent-active) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    white-space: nowrap;
+}
+
+.landing__lede {
+    margin: 0;
+    max-width: 52ch;
+    font-size: var(--fs-lg, 16px);
+    line-height: 1.55;
+    color: var(--text-secondary);
+}
+
+/* ── CTA row ─────────────────────────────────────────────── */
+
+.landing__cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-3, 12px);
+}
+
+.btn--xl {
+    padding: 18px 28px;
+    font-size: var(--fs-lg, 16px);
+    font-weight: var(--fw-semibold, 600);
+    border-radius: var(--r-3, 12px);
+    min-height: 56px;
+}
+.btn--lg {
+    padding: 14px 22px;
+    font-size: var(--fs-md, 14px);
+    min-height: 48px;
+}
+
+.landing__play {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-3, 12px);
+    /* Slight depth via layered shadows + a top highlight border.
+       No filter, no backdrop-blur. Composes cheaply. */
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.14),
+        0 1px 0 rgba(0,0,0,0.35),
+        0 6px 18px rgba(217,161,61,0.25);
+    transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.landing__play:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.18),
+        0 2px 0 rgba(0,0,0,0.35),
+        0 10px 22px rgba(217,161,61,0.32);
+}
+.landing__play:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.10),
+        0 1px 0 rgba(0,0,0,0.35),
+        0 4px 10px rgba(217,161,61,0.20);
+}
+.landing__play.is-loading {
+    opacity: 0.75;
+    cursor: progress;
+}
+.landing__play-sub {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs, 12px);
+    padding: 2px 8px;
+    border-radius: var(--r-full, 999px);
+    background: rgba(0,0,0,0.22);
+    color: var(--on-accent);
+    letter-spacing: 0;
+    font-weight: var(--fw-medium, 500);
+}
+
+/* ── Presence line (hidden until backend B1 lands) ───────── */
+.landing__presence {
+    min-height: 20px;               /* reserved even when empty — no CLS */
+    font-size: var(--fs-sm, 13px);
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Hero piece (Tier-2 CSS-3D) ──────────────────────────── */
+
+.landing__piece-stage {
+    perspective: 900px;
+    perspective-origin: 50% 40%;
+    display: grid;
+    place-items: center;
+    min-height: 360px;
+    position: relative;
+    /* Ambient glow behind the piece — a single radial-gradient, cheap. */
+    background: radial-gradient(
+        ellipse at 50% 60%,
+        var(--accent-soft) 0%,
+        transparent 60%
+    );
+    border-radius: var(--r-4, 16px);
+}
+.landing__piece {
+    position: relative;
+    width: 220px;
+    height: 260px;
+    transform-style: preserve-3d;
+    transform:
+        rotateX(var(--rx, 0deg))
+        rotateY(var(--ry, 0deg));
+    transition: transform 220ms ease-out;
+}
+.landing__piece-layer {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    transform-style: preserve-3d;
+    pointer-events: none;
+}
+.landing__piece-svg {
+    width: 220px;
+    height: 260px;
+    color: var(--accent);              /* strokes inherit via currentColor */
+    filter: drop-shadow(0 6px 10px rgba(0,0,0,0.35));
+}
+
+/* When 3D is disabled, degrade to a single flat piece by hiding the
+   depth-only layers. The topmost layer (opacity 1) survives. */
+@media (prefers-reduced-motion: reduce) {
+    .landing__piece { transform: none; transition: none; }
+    .landing__piece-stage { perspective: none; }
+    .landing__piece-layer:not(:last-child) { display: none; }
+}
+html[data-effects="off"] .landing__piece,
+html[data-effects="off"] .landing__piece-stage {
+    perspective: none;
+    transform: none;
+    transition: none;
+}
+html[data-effects="off"] .landing__piece-layer:not(:last-child) {
+    display: none;
+}
+
+/* ── Modes strip (Tier-1 tilt) ───────────────────────────── */
+
+.landing__modes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--sp-4, 16px);
+    perspective: 900px;
+}
+
+.landing__mode {
+    all: unset;
+    display: block;
+    cursor: pointer;
+    outline: none;
+    border-radius: var(--r-4, 16px);
+    background: transparent;
+    transform-style: preserve-3d;
+    transform:
+        rotateX(var(--tilt-x, 0deg))
+        rotateY(var(--tilt-y, 0deg));
+    transition: transform 180ms ease-out;
+    will-change: auto;             /* toggled in JS on enter/leave */
+}
+.landing__mode:focus-visible {
+    box-shadow: 0 0 0 2px var(--accent-ring, rgba(232, 180, 85, 0.4));
+}
+
+.landing__mode-inner {
+    position: relative;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: var(--sp-3, 12px);
+    padding: var(--sp-5, 24px);
+    min-height: 172px;
+    background: linear-gradient(180deg,
+        var(--surface-3) 0%,
+        var(--surface-2) 100%);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-4, 16px);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        0 1px 0 rgba(0,0,0,0.35),
+        0 8px 20px rgba(0,0,0,0.25);
+    overflow: hidden;
+}
+
+.landing__mode-icon {
+    width: 40px; height: 40px;
+    display: grid; place-items: center;
+    border-radius: var(--r-3, 12px);
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+.landing__mode-title {
+    font-size: var(--fs-xl, 18px);
+    font-weight: var(--fw-semibold, 600);
+    color: var(--text-primary);
+    letter-spacing: var(--tracking-tight, -0.01em);
+}
+.landing__mode-sub {
+    font-size: var(--fs-sm, 13px);
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+.landing__mode-cta {
+    font-size: var(--fs-sm, 13px);
+    font-weight: var(--fw-semibold, 600);
+    color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.landing__mode-cta::after {
+    content: '→';
+    transform: translateX(0);
+    transition: transform 160ms ease-out;
+}
+.landing__mode:hover .landing__mode-cta::after {
+    transform: translateX(3px);
+}
+
+/* Spotlight overlay — one radial-gradient at the cursor. Cheap. */
+.landing__mode-glow {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 200ms ease-out;
+    background: radial-gradient(
+        260px circle at var(--tilt-mx, 50%) var(--tilt-my, 50%),
+        rgba(255,255,255,0.06),
+        transparent 60%
+    );
+}
+.landing__mode:hover .landing__mode-glow { opacity: 1; }
+
+/* Reduce or disable tilt everywhere it isn't a good fit */
+@media (prefers-reduced-motion: reduce) {
+    .landing__mode { transform: none; transition: none; }
+    .landing__mode-cta::after { transition: none; }
+}
+@media (hover: none) {
+    /* No hover ⇒ no tilt, no spotlight. Touch keeps the flat card. */
+    .landing__mode { transform: none; }
+    .landing__mode-glow { display: none; }
+}
+html[data-effects="off"] .landing__mode { transform: none; transition: none; }
+
+/* ── How-it-works ─────────────────────────────────────────── */
+
+.landing__how {
+    display: grid;
+    gap: var(--sp-4, 16px);
+}
+.landing__how-title {
+    margin: 0;
+    font-size: var(--fs-lg, 16px);
+    font-weight: var(--fw-semibold, 600);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-widest, 0.08em);
+}
+.landing__how-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--sp-4, 16px);
+}
+.landing__step {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    grid-template-rows: auto auto;
+    grid-template-areas:
+        'n title'
+        'n sub';
+    row-gap: 4px;
+    column-gap: var(--sp-3, 12px);
+    padding: var(--sp-4, 16px);
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-3, 12px);
+}
+.landing__step-n {
+    grid-area: n;
+    display: grid; place-items: center;
+    width: 28px; height: 28px;
+    border-radius: var(--r-full, 999px);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm, 13px);
+    font-weight: var(--fw-semibold, 600);
+}
+.landing__step-t {
+    grid-area: title;
+    font-weight: var(--fw-semibold, 600);
+    color: var(--text-primary);
+}
+.landing__step-s {
+    grid-area: sub;
+    font-size: var(--fs-sm, 13px);
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+    .landing__hero {
+        grid-template-columns: 1fr;
+        min-height: unset;
+    }
+    .landing__piece-stage {
+        min-height: 220px;
+        order: -1;                  /* piece above copy on narrow */
+    }
+    .landing__piece { width: 160px; height: 190px; }
+    .landing__piece-svg { width: 150px; height: 180px; }
+
+    .landing__modes,
+    .landing__how-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ── G3 — puzzle strip on the landing ────────────────────── */
+
+.landing__puzzle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-4);
+    padding: var(--sp-4) var(--sp-5);
+    background: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--r-3);
+}
+.landing__puzzle-body {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-width: 0;
+}
+.landing__puzzle-icon {
+    color: var(--accent);
+    display: grid; place-items: center;
+    width: 44px; height: 44px;
+    background: var(--accent-soft);
+    border-radius: var(--r-3);
+    flex: none;
+}
+.landing__puzzle-title {
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+    letter-spacing: var(--tracking-tight);
+}
+.landing__puzzle-sub {
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+@media (max-width: 600px) {
+    .landing__puzzle { flex-direction: column; align-items: stretch; }
+    .landing__puzzle .btn { width: 100%; }
+}

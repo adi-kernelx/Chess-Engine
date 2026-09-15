@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "description": "Bundled puzzle set (Part G3). Verified mate-in-1 tactics. Grows via backend §7 B6 (engine-generated positions from finished games).",
+  "puzzles": [
+    {
+      "id": "p001",
+      "fen": "6k1/5ppp/8/8/8/8/8/R6K w - - 0 1",
+      "solution": ["a1a8"],
+      "theme": "back-rank mate",
+      "rating": 800,
+      "prompt": "White to play — mate in 1."
+    },
+    {
+      "id": "p002",
+      "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+      "solution": ["h5f7"],
+      "theme": "Scholar's mate",
+      "rating": 900,
+      "prompt": "White to play — finish the classic trap."
+    },
+    {
+      "id": "p003",
+      "fen": "4k3/4P3/4K3/8/8/8/8/6Q1 w - - 0 1",
+      "solution": ["g1g8"],
+      "theme": "K+Q mate",
+      "rating": 750,
+      "prompt": "White to play — mate in 1."
+    },
+    {
+      "id": "p004",
+      "fen": "6k1/pp4pp/2p5/8/8/8/PPP2PPP/2K4R w - - 0 1",
+      "solution": ["h1h8"],
+      "theme": "back-rank mate",
+      "rating": 900,
+      "prompt": "White to play — mate in 1."
+    },
+    {
+      "id": "p005",
+      "fen": "8/8/8/8/8/2k5/8/R3K3 w Q - 0 1",
+      "solution": ["e1c1"],
+      "theme": "queenside castle safety",
+      "rating": 1100,
+      "prompt": "White to play — one move keeps the king safest. (Castle.)"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "comment": [
+    "Phase 7.9 hardening: Content Security Policy for the deployed frontend.",
+    "See implementation_phase_7.md §7.9.",
+    "",
+    "default-src 'self': every resource must come from THIS origin unless a",
+    "  more specific directive says otherwise.",
+    "script-src 'self': no inline <script> and no third-party JS. The vendored",
+    "  @noble/post-quantum bundle (frontend/js/vendor/pqc.min.js) is served",
+    "  from our own origin and is covered by 'self'.",
+    "connect-src 'self' wss://<cloud-run-host> https://<supabase-project>.supabase.co:",
+    "  XHR/fetch/WebSocket can talk only to this origin, the Cloud Run backend",
+    "  over TLS, and the Supabase Auth endpoint used by the Google Sign-In",
+    "  redirect flow (the browser POSTs the code to Supabase, which returns the",
+    "  session JWT). Replace both placeholders before deploy — a wildcard here",
+    "  would defeat the point.",
+    "object-src 'none': no <object>/<embed>/<applet>. Nothing legitimate needs them.",
+    "base-uri 'none': the <base> tag cannot be injected to rewrite relative URLs.",
+    "frame-ancestors 'none': the site cannot be embedded in an iframe — the",
+    "  operational answer to clickjacking, stronger than X-Frame-Options.",
+    "form-action 'self': a submitted form cannot POST to a third-party origin,",
+    "  which is the classical CSRF exfil vector for form-based attacks.",
+    "",
+    "REMEMBER TO REPLACE <cloud-run-host> WITH THE REAL BACKEND HOSTNAME.",
+    "A vercel deploy with this file unchanged will refuse to connect to any",
+    "backend at all, which is the correct fail-closed behaviour."
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self'; connect-src 'self' wss://<cloud-run-host> https://<supabase-project>.supabase.co; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains; preload"
+        }
+      ]
+    }
+  ]
+}

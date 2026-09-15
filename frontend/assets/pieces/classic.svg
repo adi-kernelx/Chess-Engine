@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  classic.svg — Refined Staunton-style outline set.
+  All 12 symbols in one 45×45 viewBox family. White pieces are light
+  fills with a dark stroke; black pieces are dark fills with a light
+  stroke. Uses the same base pedestal across all pieces for a unified
+  visual language.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <defs>
+
+    <!-- ─── WHITE ─── -->
+
+    <symbol id="w_king" viewBox="0 0 45 45">
+      <g fill="#f8f5ea" stroke="#1c1a17" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M22.5 3.5v4M20 5.5h5"/>
+        <path d="M22.5 8.5c-4 3-5 6-4 9 1 2 4 3 4 3s3-1 4-3c1-3 0-6-4-9z"/>
+        <path d="M11 26c2-3 6-5 11.5-5s9.5 2 11.5 5c1 2 0 4-2 5H13c-2-1-3-3-2-5z"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+        <path d="M13 31c3 1 6 1.5 9.5 1.5S29 32 32 31" fill="none"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_queen" viewBox="0 0 45 45">
+      <g fill="#f8f5ea" stroke="#1c1a17" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <circle cx="7"    cy="12" r="2"/>
+        <circle cx="14.5" cy="8"  r="2"/>
+        <circle cx="22.5" cy="6"  r="2.2"/>
+        <circle cx="30.5" cy="8"  r="2"/>
+        <circle cx="38"   cy="12" r="2"/>
+        <path d="M9 26c2-9 3-11 4-14l3 9 3-11 3 12 3-12 3 11 3-9c1 3 2 5 4 14z"/>
+        <path d="M11 32.5c4 1 6.5 1.5 11.5 1.5s7.5-.5 11.5-1.5"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_rook" viewBox="0 0 45 45">
+      <g fill="#f8f5ea" stroke="#1c1a17" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M11 8h5v3h4V8h5v3h4V8h5v6H11z"/>
+        <path d="M13 14h19v4H13z"/>
+        <path d="M14 18h17v13H14z"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_bishop" viewBox="0 0 45 45">
+      <g fill="#f8f5ea" stroke="#1c1a17" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <circle cx="22.5" cy="7"  r="2.2"/>
+        <path d="M22.5 10c-4 3-7 8-7 13s3 6 7 6 7-1 7-6-3-10-7-13z"/>
+        <path d="M18 22.5h9M20 26h5"/>
+        <path d="M14 32c2 1.5 5 2 8.5 2s6.5-.5 8.5-2z"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_knight" viewBox="0 0 45 45">
+      <g fill="#f8f5ea" stroke="#1c1a17" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M22 7c4 0 8 4 9 11 .5 4 0 6-1 8-2 3-5 4-9 4H11c-1-3 1-6 4-8 2-1 3-3 2-5-1-1-2 0-3 1s-3 3-4 2c-1-2 1-5 4-8 3-3 6-5 8-5z"/>
+        <path d="M15 15c1 0 1.5 1 1 2s-1.5.5-1.5-.5" fill="#1c1a17" stroke="none"/>
+        <path d="M18 20c-1 3-2 5-4 6"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+      </g>
+    </symbol>
+
+    <symbol id="w_pawn" viewBox="0 0 45 45">
+      <g fill="#f8f5ea" stroke="#1c1a17" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <circle cx="22.5" cy="12" r="4.5"/>
+        <path d="M18 17c-2 3-3 5-3 8h15c0-3-1-5-3-8z"/>
+        <path d="M14 25h17v6H14z"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M10 39.5h25v-4H10z"/>
+      </g>
+    </symbol>
+
+    <!-- ─── BLACK ─── -->
+
+    <symbol id="b_king" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f8f5ea" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M22.5 3.5v4M20 5.5h5" stroke-width="1.4"/>
+        <path d="M22.5 8.5c-4 3-5 6-4 9 1 2 4 3 4 3s3-1 4-3c1-3 0-6-4-9z"/>
+        <path d="M11 26c2-3 6-5 11.5-5s9.5 2 11.5 5c1 2 0 4-2 5H13c-2-1-3-3-2-5z"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+        <path d="M13 31c3 1 6 1.5 9.5 1.5S29 32 32 31" fill="none"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_queen" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f8f5ea" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <circle cx="7"    cy="12" r="2"/>
+        <circle cx="14.5" cy="8"  r="2"/>
+        <circle cx="22.5" cy="6"  r="2.2"/>
+        <circle cx="30.5" cy="8"  r="2"/>
+        <circle cx="38"   cy="12" r="2"/>
+        <path d="M9 26c2-9 3-11 4-14l3 9 3-11 3 12 3-12 3 11 3-9c1 3 2 5 4 14z"/>
+        <path d="M11 32.5c4 1 6.5 1.5 11.5 1.5s7.5-.5 11.5-1.5"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_rook" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f8f5ea" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M11 8h5v3h4V8h5v3h4V8h5v6H11z"/>
+        <path d="M13 14h19v4H13z"/>
+        <path d="M14 18h17v13H14z"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_bishop" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f8f5ea" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <circle cx="22.5" cy="7"  r="2.2"/>
+        <path d="M22.5 10c-4 3-7 8-7 13s3 6 7 6 7-1 7-6-3-10-7-13z"/>
+        <path d="M18 22.5h9M20 26h5"/>
+        <path d="M14 32c2 1.5 5 2 8.5 2s6.5-.5 8.5-2z"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_knight" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f8f5ea" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M22 7c4 0 8 4 9 11 .5 4 0 6-1 8-2 3-5 4-9 4H11c-1-3 1-6 4-8 2-1 3-3 2-5-1-1-2 0-3 1s-3 3-4 2c-1-2 1-5 4-8 3-3 6-5 8-5z"/>
+        <circle cx="15" cy="15.5" r="1" fill="#f8f5ea" stroke="none"/>
+        <path d="M18 20c-1 3-2 5-4 6"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M9 39.5h27v-4H9z"/>
+      </g>
+    </symbol>
+
+    <symbol id="b_pawn" viewBox="0 0 45 45">
+      <g fill="#1c1a17" stroke="#f8f5ea" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <circle cx="22.5" cy="12" r="4.5"/>
+        <path d="M18 17c-2 3-3 5-3 8h15c0-3-1-5-3-8z"/>
+        <path d="M14 25h17v6H14z"/>
+        <path d="M12 32.5h21v3H12z"/>
+        <path d="M10 39.5h25v-4H10z"/>
+      </g>
+    </symbol>
+
+  </defs>
+</svg>

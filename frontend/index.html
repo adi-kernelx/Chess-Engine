@@ -1,520 +1,141 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Multiplayer chess platform with real-time gameplay, AI opponent, and tournaments.">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Multiplayer chess platform — real-time games, AI opponent, tournaments." />
+    <meta name="color-scheme" content="dark" />
     <title>Chess Platform</title>
 
-    <!-- Google Fonts: Inter for UI, JetBrains Mono for clocks/move list -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/base.css" />
+    <link rel="stylesheet" href="css/components.css" />
+    <link rel="stylesheet" href="css/board.css" />
+    <link rel="stylesheet" href="css/screens.css" />
+    <link rel="stylesheet" href="css/landing.css" />
+    <link rel="stylesheet" href="css/responsive.css" />
 </head>
 <body>
 
-    <!-- ============================================================
-         LOBBY PAGE — Phase 5.3
-         The landing page: Quick Play, Create Game, Open Games list.
-         ============================================================ -->
-    <section class="lobby-page page-active" id="lobby-page">
-
-        <!-- ── Lobby Header ── -->
-        <header class="lobby-header">
-            <div class="lobby-brand">
-                <div>
-                    <h1>♟ Chess Platform</h1>
-                    <div class="brand-subtitle">Real-time multiplayer chess</div>
-                </div>
-            </div>
-            <div class="lobby-header-right">
-                <div class="connection-status" id="lobby-connection-status">
-                    <div class="connection-dot" id="lobby-connection-dot"></div>
-                    <span id="lobby-connection-text">Connecting...</span>
-                </div>
-                <div class="lobby-username">
-                    <label for="lobby-username-input">Username</label>
-                    <input type="text" id="lobby-username-input" class="input" value="Player1" placeholder="Username">
-                </div>
-            </div>
-        </header>
-
-        <!-- ── Lobby Grid ── -->
-        <div class="lobby-grid">
-
-            <!-- Quick Play Card -->
-            <div class="card quick-play-card" id="quick-play-card">
-                <div class="card-title">⚡ Quick Play</div>
-                <div class="card-desc">Find a random opponent and start playing instantly</div>
-                <button class="btn-quick-play-big" id="lobby-btn-quick-play" disabled>
-                    ⚡ Find Match
-                </button>
-                <div class="card-desc" id="lobby-queue-status" style="display:none;"></div>
-            </div>
-
-            <!-- Create Game Card -->
-            <div class="card" id="create-game-card">
-                <div class="card-header">
-                    <span class="icon">➕</span>
-                    <span>Create Game</span>
-                </div>
-                <div style="margin-bottom: var(--gap-sm);">
-                    <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:var(--gap-sm);">Time Control</div>
-                    <div class="time-presets" id="time-presets">
-                        <button class="time-preset-btn" data-base="60" data-inc="0">1+0</button>
-                        <button class="time-preset-btn" data-base="180" data-inc="2">3+2</button>
-                        <button class="time-preset-btn" data-base="300" data-inc="3">5+3</button>
-                        <button class="time-preset-btn active" data-base="600" data-inc="5">10+5</button>
-                        <button class="time-preset-btn" data-base="900" data-inc="10">15+10</button>
-                    </div>
-                </div>
-                <button class="btn btn-primary" id="lobby-btn-create" disabled style="width:100%;">
-                    ➕ Create Game
-                </button>
-            </div>
-
-            <!-- Play vs AI Card -->
-            <div class="card" id="play-ai-card">
-                <div class="card-header">
-                    <span class="icon">🤖</span>
-                    <span>Play vs AI</span>
-                </div>
-                <div style="margin-bottom: var(--gap-sm);">
-                    <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:var(--gap-sm);">Difficulty</div>
-                    <div class="time-presets" id="ai-difficulty-presets">
-                        <button class="time-preset-btn" data-diff="easy">Easy</button>
-                        <button class="time-preset-btn active" data-diff="medium">Medium</button>
-                        <button class="time-preset-btn" data-diff="hard">Hard</button>
-                        <button class="time-preset-btn" data-diff="max">Max</button>
-                    </div>
-                </div>
-                <div style="margin-bottom: var(--gap-sm);">
-                    <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:var(--gap-sm);">Time Control</div>
-                    <div class="time-presets" id="ai-time-presets">
-                        <button class="time-preset-btn" data-base="60" data-inc="0">1+0</button>
-                        <button class="time-preset-btn" data-base="180" data-inc="2">3+2</button>
-                        <button class="time-preset-btn" data-base="300" data-inc="3">5+3</button>
-                        <button class="time-preset-btn active" data-base="600" data-inc="5">10+5</button>
-                        <button class="time-preset-btn" data-base="900" data-inc="10">15+10</button>
-                    </div>
-                </div>
-                <button class="btn btn-primary" id="lobby-btn-play-ai" disabled style="width:100%;">
-                    🤖 Start AI Game
-                </button>
-            </div>
-
-            <!-- Open Games Table -->
-            <div class="card card-full" id="open-games-card">
-                <div class="card-header">
-                    <span class="icon">🎯</span>
-                    <span>Open Games</span>
-                    <span style="margin-left:auto; font-size:0.78rem; color:var(--text-muted);" id="lobby-game-count">0 games</span>
-                </div>
-                <div class="games-table-wrapper">
-                    <table class="games-table" id="games-table">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Host</th>
-                                <th>Time</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="games-table-body">
-                        </tbody>
-                    </table>
-                </div>
-                <div class="games-empty" id="games-empty">No open games. Create one or use Quick Play!</div>
-            </div>
-
-        </div>
-    </section>
-
+    <!-- Skip to main content (a11y) -->
+    <a href="#outlet" class="skip-link">Skip to content</a>
 
     <!-- ============================================================
-         BOARD PAGE — Game View
-         Three-column layout: board (center) + side panel (right).
-         Status bars above/below the board show player info and clocks.
+         Icon sprite — referenced with <use href="#i-name">.
+         All chrome icons live here so no emoji appear in the UI.
          ============================================================ -->
-    <section class="board-page page-hidden" id="board-page">
-
-        <!-- ── Center column: Board ── -->
-        <div class="board-column">
-
-            <!-- Opponent status bar (top) -->
-            <div class="status-bar" id="opponent-bar">
-                <div>
-                    <span class="player-name" id="opponent-name">Opponent</span>
-                    <span class="player-rating" id="opponent-rating"></span>
-                </div>
-                <div class="clock" id="opponent-clock">10:00</div>
-            </div>
-
-            <!-- Game status banner -->
-            <div class="game-status info" id="game-status">
-                Waiting for game...
-            </div>
-
-            <!-- Chessboard canvas -->
-            <div class="board-container" id="board-container">
-                <canvas id="board-canvas"></canvas>
-            </div>
-
-            <!-- Player status bar (bottom) -->
-            <div class="status-bar" id="player-bar">
-                <div>
-                    <span class="player-name" id="player-name">You</span>
-                    <span class="player-rating" id="player-rating"></span>
-                </div>
-                <div class="clock" id="player-clock">10:00</div>
-            </div>
-
-            <!-- Board controls -->
-            <div class="board-controls" id="board-controls">
-                <button id="btn-flip" title="Flip board">🔄 Flip</button>
-                <button id="btn-theme-classic" title="Classic theme" class="active">Classic</button>
-                <button id="btn-theme-dark" title="Dark theme">Dark</button>
-                <button id="btn-theme-tournament" title="Tournament theme">Tournament</button>
-            </div>
-
-        </div>
-
-        <!-- ── Right side panel: Move list + Resign ── -->
-        <div class="side-panel" id="side-panel">
-
-            <!-- Back to lobby link -->
-            <button class="game-back-link" id="btn-back-lobby">← Back to Lobby</button>
-
-            <!-- Move list -->
-            <div class="move-list-container">
-                <div class="move-list-header">
-                    <span>Moves</span>
-                    <span id="move-count">0</span>
-                </div>
-                <div class="move-list" id="move-list">
-                    <div class="move-list-empty">No moves yet</div>
-                </div>
-            </div>
-
-            <!-- Game actions (resign only) -->
-            <div class="game-actions" id="game-actions">
-                <button class="btn btn-danger" id="btn-resign" disabled>🏳️ Resign</button>
-            </div>
-
-        </div>
-
-    </section>
-
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <defs>
+            <!-- Chess king mark (used in the brand) -->
+            <symbol id="i-king" viewBox="0 0 24 24">
+                <path d="M12 3 v3 M10 6 h4 M12 6 v3 M8 9 c0 3 2 5 4 5 s4-2 4-5 M8 14 h8 v5 h-8 z"/>
+            </symbol>
+            <!-- Full Staunton king silhouette, used in the landing hero.
+                 45×45 viewbox, strokes inherit currentColor. -->
+            <symbol id="i-piece-king" viewBox="0 0 45 45">
+                <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+                    <path d="M22.5 3.5v4M20 5.5h5"/>
+                    <path d="M22.5 8.5c-4 3-5 6-4 9 1 2 4 3 4 3s3-1 4-3c1-3 0-6-4-9z"/>
+                    <path d="M11 26c2-3 6-5 11.5-5s9.5 2 11.5 5c1 2 0 4-2 5H13c-2-1-3-3-2-5z"/>
+                    <path d="M13 31c3 1 6 1.5 9.5 1.5S29 32 32 31"/>
+                    <path d="M12 32.5h21v3H12z"/>
+                    <path d="M9 39.5h27v-4H9z"/>
+                </g>
+            </symbol>
+            <!-- Lobby / play -->
+            <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5 v14 l11-7 z"/></symbol>
+            <!-- Spectate -->
+            <symbol id="i-eye" viewBox="0 0 24 24">
+                <path d="M2 12 s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/>
+                <circle cx="12" cy="12" r="3"/>
+            </symbol>
+            <!-- Trophy -->
+            <symbol id="i-trophy" viewBox="0 0 24 24">
+                <path d="M7 4 h10 v4 a5 5 0 0 1-10 0 z M4 5 h3 v3 a3 3 0 0 1-3-3 z M20 5 h-3 v3 a3 3 0 0 0 3-3 z M9 14 h6 v3 h-6 z M8 20 h8"/>
+            </symbol>
+            <!-- Chart -->
+            <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20 v-6 M10 20 v-11 M16 20 v-4 M22 20 h-20"/></symbol>
+            <!-- Replay -->
+            <symbol id="i-replay" viewBox="0 0 24 24">
+                <path d="M4 12 a8 8 0 1 0 3-6"/>
+                <path d="M4 4 v5 h5"/>
+            </symbol>
+            <!-- User -->
+            <symbol id="i-user" viewBox="0 0 24 24">
+                <circle cx="12" cy="8" r="4"/>
+                <path d="M4 20 c0-4 4-6 8-6 s8 2 8 6"/>
+            </symbol>
+            <!-- Settings gear -->
+            <symbol id="i-settings" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19 12 a7 7 0 0 0-.2-1.6 l2-1.5-2-3.5-2.4 1 a7 7 0 0 0-2.8-1.6 L13 2 h-2 l-.6 2.8 a7 7 0 0 0-2.8 1.6 l-2.4-1-2 3.5 2 1.5 a7 7 0 0 0 0 3.2 l-2 1.5 2 3.5 2.4-1 a7 7 0 0 0 2.8 1.6 L11 22 h2 l.6-2.8 a7 7 0 0 0 2.8-1.6 l2.4 1 2-3.5-2-1.5 a7 7 0 0 0 .2-1.6 z"/>
+            </symbol>
+            <!-- Spark (empty-state hint) -->
+            <symbol id="i-spark" viewBox="0 0 24 24">
+                <path d="M12 3 v4 M12 17 v4 M3 12 h4 M17 12 h4 M5.6 5.6 l2.8 2.8 M15.6 15.6 l2.8 2.8 M5.6 18.4 l2.8-2.8 M15.6 8.4 l2.8-2.8"/>
+            </symbol>
+            <!-- Hamburger menu -->
+            <symbol id="i-menu" viewBox="0 0 24 24">
+                <path d="M4 6 h16 M4 12 h16 M4 18 h16"/>
+            </symbol>
+            <!-- Close X -->
+            <symbol id="i-close" viewBox="0 0 24 24">
+                <path d="M18 6 L6 18 M6 6 l12 12"/>
+            </symbol>
+        </defs>
+    </svg>
 
     <!-- ============================================================
-         Game Over Modal
+         App frame
          ============================================================ -->
-    <div class="modal-backdrop" id="game-over-modal">
-        <div class="modal">
-            <div class="modal-icon" id="modal-icon">♔</div>
-            <div class="modal-title" id="modal-title">Game Over</div>
-            <div class="modal-subtitle" id="modal-subtitle">by checkmate</div>
-            <div class="modal-actions">
-                <button id="btn-modal-new-game" class="btn btn-primary">New Game</button>
-                <button id="btn-modal-close" class="btn">Close</button>
+    <div class="app">
+        <nav class="nav" role="navigation" aria-label="Primary">
+            <a href="#/" class="nav__brand" aria-label="Chess Platform home">
+                <span class="nav__brand-mark" aria-hidden="true">
+                    <svg class="icon icon--sm" style="stroke: var(--on-accent); fill: none;"><use href="#i-king"/></svg>
+                </span>
+                <span>Chess Platform</span>
+            </a>
+
+            <button id="nav-toggle" class="nav__toggle" aria-label="Open menu" aria-expanded="false" aria-controls="nav-links">
+                <svg class="icon icon--lg" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><use href="#i-menu"/></svg>
+            </button>
+
+            <div id="nav-links" class="nav__links" role="menubar">
+                <a href="#/play"         class="nav__link" role="menuitem" data-nav-key="play">Play</a>
+                <a href="#/puzzle"       class="nav__link" role="menuitem" data-nav-key="puzzle">Puzzle</a>
+                <a href="#/spectate"     class="nav__link" role="menuitem" data-nav-key="spectate">Spectate</a>
+                <a href="#/tournaments"  class="nav__link" role="menuitem" data-nav-key="tournaments">Tournaments</a>
+                <a href="#/leaderboard"  class="nav__link" role="menuitem" data-nav-key="leaderboard">Leaderboard</a>
+                <a href="#/replay"       class="nav__link" role="menuitem" data-nav-key="replay">Replays</a>
             </div>
-        </div>
+
+            <div class="nav__right">
+                <span id="nav-conn" class="conn is-offline" aria-live="polite">
+                    <span class="conn__dot" aria-hidden="true"></span>
+                    <span id="nav-conn-text">Offline</span>
+                </span>
+                <a href="#/profile" class="btn btn--ghost btn--sm" aria-label="Profile">
+                    <svg class="icon"><use href="#i-user"/></svg>
+                    <span>Profile</span>
+                </a>
+                <a href="#/settings" class="btn btn--ghost btn--sm" aria-label="Settings">
+                    <svg class="icon"><use href="#i-settings"/></svg>
+                </a>
+            </div>
+        </nav>
+
+        <main id="outlet" class="app-outlet">
+            <!-- Router mounts screens here -->
+        </main>
     </div>
 
+    <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
 
-    <!-- ============================================================
-         Scripts — loaded in dependency order
-         ============================================================ -->
-    <script src="js/board_theme.js"></script>
-    <script src="js/board.js"></script>
-    <script src="js/pieces.js"></script>
-    <script src="js/websocket.js"></script>
-    <script src="js/game.js"></script>
-    <script src="js/router.js"></script>
-
-    <!-- Initialization script -->
-    <script>
-        /**
-         * Phase 5.3 — Full application initialization.
-         * Sets up the page router, board renderer, interaction handler,
-         * WebSocket client, and game controller. Auto-connects.
-         */
-        (async function init() {
-            // ── Page Router ──
-            const router = new PageRouter();
-
-            // ── Canvas setup with high-DPI support ──
-            const canvas = document.getElementById('board-canvas');
-            const container = document.getElementById('board-container');
-
-            function setupCanvas() {
-                const rect = container.getBoundingClientRect();
-                const size = Math.floor(Math.min(rect.width, rect.height));
-                const dpr = window.devicePixelRatio || 1;
-                canvas.style.width = size + 'px';
-                canvas.style.height = size + 'px';
-                canvas.width = size * dpr;
-                canvas.height = size * dpr;
-                const ctx = canvas.getContext('2d');
-                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            }
-
-            // Need the board page visible briefly to measure the canvas container
-            const boardPage = document.getElementById('board-page');
-            boardPage.style.display = 'flex';
-            boardPage.style.visibility = 'hidden';
-            boardPage.style.position = 'absolute';
-            setupCanvas();
-            boardPage.style.display = '';
-            boardPage.style.visibility = '';
-            boardPage.style.position = '';
-
-            // ── Create core objects ──
-            const renderer = new BoardRenderer(canvas, BoardTheme.classic());
-            const interaction = new BoardInteraction(canvas, renderer);
-            const ws = new ChessWebSocket('ws://localhost:9000');
-
-            // Load piece SVGs
-            try {
-                await renderer.loadPieces('assets/pieces/pieces.svg');
-            } catch (err) {
-                console.error('Failed to load pieces:', err);
-            }
-
-            // Set starting position
-            renderer.setPosition('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
-
-            // ── Create and init the game controller ──
-            const game = new GameController({
-                renderer: renderer,
-                interaction: interaction,
-                ws: ws
-            });
-            game.router = router;  // Give the controller access to the router
-            game.init();
-
-            // ── WebSocket connection status (updates both lobby and game page) ──
-            const lobbyDot = document.getElementById('lobby-connection-dot');
-            const lobbyText = document.getElementById('lobby-connection-text');
-            const lobbyQuickPlay = document.getElementById('lobby-btn-quick-play');
-            const lobbyCreate = document.getElementById('lobby-btn-create');
-            const lobbyPlayAI = document.getElementById('lobby-btn-play-ai');
-
-            ws.onConnectionChange = (connected) => {
-                // Lobby indicators
-                if (connected) {
-                    lobbyDot.classList.add('connected');
-                    lobbyText.textContent = 'Connected';
-                    lobbyQuickPlay.disabled = false;
-                    lobbyCreate.disabled = false;
-                    lobbyPlayAI.disabled = false;
-                } else {
-                    lobbyDot.classList.remove('connected');
-                    lobbyText.textContent = 'Disconnected';
-                    lobbyQuickPlay.disabled = true;
-                    lobbyCreate.disabled = true;
-                    lobbyPlayAI.disabled = true;
-                }
-            };
-
-            // Auto-connect on page load
-            ws.connect();
-
-            // ── Time Control Presets (Create Game) ──
-            let selectedTimeBase = 600;
-            let selectedTimeInc = 5;
-            const presetContainer = document.getElementById('time-presets');
-
-            presetContainer.addEventListener('click', (e) => {
-                const btn = e.target.closest('.time-preset-btn');
-                if (!btn) return;
-                presetContainer.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                selectedTimeBase = parseInt(btn.dataset.base);
-                selectedTimeInc = parseInt(btn.dataset.inc);
-            });
-
-            // ── AI Difficulty Presets ──
-            let selectedAIDifficulty = 'medium';
-            const aiDiffContainer = document.getElementById('ai-difficulty-presets');
-
-            aiDiffContainer.addEventListener('click', (e) => {
-                const btn = e.target.closest('.time-preset-btn');
-                if (!btn) return;
-                aiDiffContainer.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                selectedAIDifficulty = btn.dataset.diff;
-            });
-
-            // ── AI Time Control Presets ──
-            let selectedAITimeBase = 600;
-            let selectedAITimeInc = 5;
-            const aiTimeContainer = document.getElementById('ai-time-presets');
-
-            aiTimeContainer.addEventListener('click', (e) => {
-                const btn = e.target.closest('.time-preset-btn');
-                if (!btn) return;
-                aiTimeContainer.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                selectedAITimeBase = parseInt(btn.dataset.base);
-                selectedAITimeInc = parseInt(btn.dataset.inc);
-            });
-
-            // ── Helper: get username ──
-            const getUsername = () => document.getElementById('lobby-username-input').value || 'Player1';
-
-            // ── Lobby: Quick Play ──
-            lobbyQuickPlay.addEventListener('click', () => {
-                game.quickPlay(getUsername(), 1200, selectedTimeBase, selectedTimeInc);
-                const queueStatus = document.getElementById('lobby-queue-status');
-                queueStatus.style.display = 'block';
-                queueStatus.textContent = 'Searching for opponent...';
-                lobbyQuickPlay.disabled = true;
-                lobbyQuickPlay.textContent = '⏳ Searching...';
-            });
-
-            // ── Lobby: Create Game ──
-            lobbyCreate.addEventListener('click', () => {
-                game.createGame(getUsername(), selectedTimeBase, selectedTimeInc);
-            });
-
-            // ── Lobby: Play vs AI ──
-            lobbyPlayAI.addEventListener('click', () => {
-                game.playAI(getUsername(), selectedAIDifficulty, selectedAITimeBase, selectedAITimeInc);
-            });
-
-            // ── Lobby: Open Games List ──
-            function refreshGamesList() {
-                if (ws.connected && router.currentPage === 'lobby') {
-                    ws.listGames();
-                }
-            }
-
-            ws.on('game_list', (data) => {
-                const tbody = document.getElementById('games-table-body');
-                const emptyMsg = document.getElementById('games-empty');
-                const countEl = document.getElementById('lobby-game-count');
-                const games = data.games || [];
-
-                countEl.textContent = games.length + (games.length === 1 ? ' game' : ' games');
-
-                if (games.length === 0) {
-                    tbody.innerHTML = '';
-                    emptyMsg.style.display = 'block';
-                    return;
-                }
-
-                emptyMsg.style.display = 'none';
-                tbody.innerHTML = games.map(g => {
-                    const tc = g.time_control || '10+5';
-                    const host = g.white || g.host || 'Unknown';
-                    return `<tr>
-                        <td class="game-id-cell">#${g.game_id}</td>
-                        <td>${host}</td>
-                        <td class="tc-cell">${tc}</td>
-                        <td><button class="btn btn-sm btn-primary" onclick="window._joinLobbyGame(${g.game_id})">Join</button></td>
-                    </tr>`;
-                }).join('');
-            });
-
-            // Global function for inline onclick in the games table
-            window._joinLobbyGame = (gameId) => {
-                game.joinGame(getUsername(), gameId);
-            };
-
-            // Refresh games list every 5 seconds
-            setInterval(refreshGamesList, 5000);
-            // Initial fetch after connection
-            setTimeout(refreshGamesList, 1000);
-
-            // ── Game Page: Resign ──
-            document.getElementById('btn-resign').addEventListener('click', () => {
-                if (confirm('Are you sure you want to resign?')) {
-                    game.resign();
-                }
-            });
-
-            // ── Game Page: Back to Lobby ──
-            document.getElementById('btn-back-lobby').addEventListener('click', () => {
-                if (game.gameActive) {
-                    if (!confirm('Leave the game? You can rejoin later.')) return;
-                }
-                router.showLobby();
-                // Reset the quick play button state
-                lobbyQuickPlay.disabled = !ws.connected;
-                lobbyQuickPlay.textContent = '⚡ Find Match';
-                document.getElementById('lobby-queue-status').style.display = 'none';
-                // Refresh the games list
-                refreshGamesList();
-            });
-
-            // ── Modal buttons ──
-            document.getElementById('btn-modal-close').addEventListener('click', () => {
-                game._hideGameOverModal();
-            });
-
-            document.getElementById('btn-modal-new-game').addEventListener('click', () => {
-                game._hideGameOverModal();
-                renderer.setPosition('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
-                renderer.clearLastMove();
-                renderer.clearCheck();
-                renderer.clearSelection();
-                router.showLobby();
-                // Reset the quick play button state
-                lobbyQuickPlay.disabled = !ws.connected;
-                lobbyQuickPlay.textContent = '⚡ Find Match';
-                document.getElementById('lobby-queue-status').style.display = 'none';
-                refreshGamesList();
-            });
-
-            // ── Theme switching ──
-            const themeButtons = {
-                'btn-theme-classic':    BoardTheme.classic,
-                'btn-theme-dark':       BoardTheme.dark,
-                'btn-theme-tournament': BoardTheme.tournament,
-            };
-
-            Object.entries(themeButtons).forEach(([btnId, themeFn]) => {
-                document.getElementById(btnId).addEventListener('click', () => {
-                    document.querySelectorAll('.board-controls button[id^="btn-theme"]')
-                        .forEach(b => b.classList.remove('active'));
-                    document.getElementById(btnId).classList.add('active');
-                    renderer.setTheme(themeFn());
-                });
-            });
-
-            // ── Flip button ──
-            document.getElementById('btn-flip').addEventListener('click', () => {
-                renderer.flip();
-            });
-
-            // ── Handle window resize ──
-            let resizeTimer;
-            window.addEventListener('resize', () => {
-                clearTimeout(resizeTimer);
-                resizeTimer = setTimeout(() => {
-                    if (router.currentPage === 'game') {
-                        setupCanvas();
-                        const dpr = window.devicePixelRatio || 1;
-                        renderer.logicalWidth = canvas.width / dpr;
-                        renderer.logicalHeight = canvas.height / dpr;
-                        renderer.squareSize = renderer.logicalWidth / 8;
-                        renderer.dpr = dpr;
-                        renderer.loadPieces('assets/pieces/pieces.svg');
-                    }
-                }, 150);
-            });
-
-            // ── Expose for debugging ──
-            window.boardRenderer = renderer;
-            window.gameController = game;
-            window.chessWs = ws;
-            window.pageRouter = router;
-
-        })();
-    </script>
-
+    <script type="module" src="js/main.js?v=g3"></script>
 </body>
 </html>

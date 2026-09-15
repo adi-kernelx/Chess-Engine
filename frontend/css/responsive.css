@@ -1,0 +1,265 @@
+/* ============================================================
+   responsive.css — Breakpoints, mobile-first reflow, and
+   accessibility helpers.
+   ============================================================ */
+
+/* ── Skip-to-content link ── */
+.skip-link {
+    position: fixed;
+    top: -100%;
+    left: var(--sp-4);
+    z-index: calc(var(--z-toast) + 10);
+    padding: var(--sp-2) var(--sp-4);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: var(--fw-semibold);
+    font-size: var(--fs-sm);
+    border-radius: var(--r-2);
+    transition: top var(--dur-fast) var(--ease-out);
+}
+.skip-link:focus {
+    top: var(--sp-3);
+    outline: 2px solid var(--accent-ring);
+    outline-offset: 2px;
+}
+
+/* ── Mobile nav toggle ── */
+.nav__toggle {
+    display: none;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--r-2);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 0;
+    place-items: center;
+}
+.nav__toggle:hover { color: var(--text-primary); background: var(--surface-2); }
+.nav__toggle svg { width: 22px; height: 22px; }
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    .queue-status__spinner { animation: none; }
+    .conn.is-connecting .conn__dot { animation: none; }
+    .clock.is-low { animation: none; }
+}
+
+/* ── Wide desktop (>1400) — let content breathe ── */
+@media (min-width: 1400px) {
+    :root { --content-max: 1400px; }
+}
+
+/* ── Laptop / small desktop (≤1200) ── */
+@media (max-width: 1200px) {
+    .game-screen { grid-template-columns: minmax(0, 1fr) 280px; }
+    .replay-grid { grid-template-columns: minmax(0, 1fr) 260px; }
+}
+
+/* ── Tablet / narrow window (≤1000) ──
+   Already handled in screens.css for grids. Here we add nav + layout tweaks. */
+@media (max-width: 1000px) {
+    .screen__header { padding: var(--sp-4) var(--sp-4) var(--sp-3); }
+    .screen__body   { padding: var(--sp-3) var(--sp-4) var(--sp-8); }
+    .game-screen    { padding: var(--sp-3) var(--sp-4) var(--sp-6); }
+    .board-test__grid { grid-template-columns: 1fr; }
+}
+
+/* ── Mobile breakpoint (≤768) ── */
+@media (max-width: 768px) {
+    :root {
+        --nav-height: 52px;
+    }
+
+    /* Show the hamburger toggle */
+    .nav__toggle { display: grid; }
+
+    /* Collapse nav links into a dropdown */
+    .nav {
+        flex-wrap: wrap;
+        padding: 0 var(--sp-3);
+        gap: var(--sp-2);
+    }
+    .nav__brand { font-size: var(--fs-md); }
+    .nav__brand span:last-child { display: none; }
+
+    .nav__links {
+        display: none;
+        flex-basis: 100%;
+        order: 10;
+        flex-direction: column;
+        gap: 0;
+        padding-bottom: var(--sp-2);
+        border-top: 1px solid var(--border-subtle);
+        padding-top: var(--sp-2);
+    }
+    .nav__links.is-open { display: flex; }
+    .nav__link {
+        padding: var(--sp-3) var(--sp-3);
+        border-radius: var(--r-2);
+        font-size: var(--fs-md);
+    }
+
+    .nav__right {
+        margin-left: auto;
+        gap: var(--sp-2);
+    }
+    .nav__right .btn span { display: none; }
+
+    /* Connection indicator compact */
+    .conn { padding: var(--sp-1) var(--sp-2); }
+    #nav-conn-text { display: none; }
+
+    /* Screen layout */
+    .screen__header {
+        padding: var(--sp-3) var(--sp-3) var(--sp-2);
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .screen__title { font-size: var(--fs-xl); }
+    .screen__body  { padding: var(--sp-2) var(--sp-3) var(--sp-6); }
+
+    /* Game screen — full-width board, side panel below */
+    .game-screen {
+        padding: var(--sp-2) var(--sp-2) var(--sp-4);
+        gap: var(--sp-3);
+    }
+    .game-board-col { max-width: 100%; }
+    .game-side { gap: var(--sp-3); }
+    .move-list { max-height: 200px; min-height: 80px; }
+    .game-actions { justify-content: center; }
+
+    /* Player bars compact */
+    .player-bar { padding: var(--sp-1) var(--sp-2); gap: var(--sp-2); }
+    .player-bar__name { font-size: var(--fs-xs); }
+    .clock { font-size: var(--fs-lg); min-width: 72px; padding: var(--sp-1) var(--sp-2); }
+
+    /* Lobby */
+    .lobby-grid { gap: var(--sp-3); }
+    .lobby-hero { grid-template-columns: 1fr; }
+
+    /* Cards compact */
+    .card__header { padding: var(--sp-3) var(--sp-3); }
+    .card__body   { padding: var(--sp-3); }
+
+    /* Modal responsive */
+    .modal-backdrop { padding: var(--sp-2); }
+    .modal {
+        max-width: 100%;
+        max-height: 90vh;
+        border-radius: var(--r-3);
+    }
+    .modal__header { padding: var(--sp-3) var(--sp-4); }
+    .modal__body   { padding: var(--sp-3) var(--sp-4); }
+    .modal__footer { padding: var(--sp-3) var(--sp-4); }
+
+    /* Toast full-width on mobile */
+    .toast-region {
+        left: var(--sp-2);
+        right: var(--sp-2);
+        max-width: none;
+    }
+
+    /* Tables: allow horizontal scroll */
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table { min-width: 520px; }
+    .table th, .table td { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-xs); }
+
+    /* Settings & profile grids already stack via screens.css @media (max-width: 1000px) */
+
+    /* Replay */
+    .replay-controls { gap: var(--sp-1); }
+    .replay-controls .btn { min-height: 32px; padding: var(--sp-1) var(--sp-2); font-size: var(--fs-xs); }
+
+    /* Auth wrap */
+    .auth-wrap { padding: 0 var(--sp-2); }
+
+    /* Pill group on mobile: allow wrap */
+    .pill-group { flex-wrap: wrap; }
+}
+
+/* ── Small phone (≤480) ── */
+@media (max-width: 480px) {
+    :root {
+        --nav-height: 48px;
+        --fs-md: 13px;
+    }
+
+    .nav { padding: 0 var(--sp-2); }
+
+    .screen__header { padding: var(--sp-2) var(--sp-2) var(--sp-2); }
+    .screen__title  { font-size: var(--fs-lg); }
+    .screen__body   { padding: var(--sp-2) var(--sp-2) var(--sp-4); }
+
+    .game-screen { padding: var(--sp-1) var(--sp-1) var(--sp-3); gap: var(--sp-2); }
+    .board-frame { padding: var(--sp-1); border-radius: var(--r-2); }
+
+    .clock { font-size: var(--fs-md); min-width: 60px; }
+    .player-bar__name { font-size: var(--fs-2xs); }
+
+    .move-list { font-size: var(--fs-xs); max-height: 160px; }
+    .move-list__num { width: 24px; }
+
+    .lobby-grid { gap: var(--sp-2); }
+    .card__header { padding: var(--sp-2); gap: var(--sp-2); }
+    .card__body { padding: var(--sp-2); gap: var(--sp-3); }
+
+    .lobby-stat__value { font-size: var(--fs-xl); }
+    .lobby-stat { padding: var(--sp-3); }
+
+    .btn--lg { min-height: 40px; padding: var(--sp-2) var(--sp-4); }
+
+    .result-card { padding: var(--sp-4) var(--sp-3); }
+    .result-card__title { font-size: var(--fs-xl); }
+
+    /* Hide less important table columns on very small screens */
+    .table .hide-mobile { display: none; }
+}
+
+/* ── Focus-visible enhancement ── */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Interactive elements that should show custom focus */
+.btn:focus-visible,
+.input:focus-visible,
+.tabs__tab:focus-visible,
+.pill-group__item:focus-visible,
+.nav__link:focus-visible,
+.move-list__san:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+/* Canvas board has a visible ring when focused */
+.board-canvas:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: -1px;
+}
+
+/* ── Landscape phone — wider board ── */
+@media (max-height: 500px) and (orientation: landscape) {
+    .nav { height: 40px; }
+    .game-screen { padding: var(--sp-1); gap: var(--sp-2); }
+    .board-frame { padding: var(--sp-1); }
+    .player-bar { padding: 2px var(--sp-2); }
+    .game-side { display: none; }
+}
+
+/* ── Print ── */
+@media print {
+    .nav, .toast-region, .game-actions, .skip-link { display: none !important; }
+    .app-outlet { padding: 0; }
+    .screen { break-inside: avoid; }
+    body { background: white; color: black; }
+}
