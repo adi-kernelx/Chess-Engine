@@ -95,13 +95,13 @@ std::vector<RoomInfo> RoomManager::list_open_rooms() const {
     for (const auto& [id, room] : rooms_) {
         if (room->get_state() == RoomState::WAITING) {
             RoomInfo info;
-            info.id           = id;
-            info.state        = RoomState::WAITING;
-            info.time_control = room->get_time_control().to_string();
-            info.move_count   = 0;
-            // White name is available; Black hasn't joined yet
-            auto history = room->get_move_history();
-            info.move_count = static_cast<int>(history.size());
+            info.id              = id;
+            info.state           = RoomState::WAITING;
+            info.time_control    = room->get_time_control().to_string();
+            info.white_name      = room->get_username(Color::WHITE);
+            info.black_name      = "";   // hasn't joined yet
+            info.move_count      = static_cast<int>(room->get_move_history().size());
+            info.spectator_count = static_cast<int>(room->spectator_count());
             result.push_back(info);
         }
     }
@@ -116,16 +116,35 @@ std::vector<RoomInfo> RoomManager::list_active_rooms() const {
     for (const auto& [id, room] : rooms_) {
         if (room->get_state() == RoomState::IN_PROGRESS) {
             RoomInfo info;
-            info.id           = id;
-            info.state        = RoomState::IN_PROGRESS;
-            info.time_control = room->get_time_control().to_string();
-            auto history = room->get_move_history();
-            info.move_count = static_cast<int>(history.size());
+            info.id              = id;
+            info.state           = RoomState::IN_PROGRESS;
+            info.time_control    = room->get_time_control().to_string();
+            info.white_name      = room->get_username(Color::WHITE);
+            info.black_name      = room->get_username(Color::BLACK);
+            info.move_count      = static_cast<int>(room->get_move_history().size());
+            info.spectator_count = static_cast<int>(room->spectator_count());
             result.push_back(info);
         }
     }
 
     return result;
+}
+
+size_t RoomManager::remove_spectator_everywhere(int connection_fd) {
+    // Copy shared_ptrs under the outer lock, then act on each room using its
+    // own mutex outside — same discipline as the rest of this class (the
+    // outer lock never nests calls that could deadlock on the room mutex).
+    std::vector<std::shared_ptr<GameRoom>> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        snapshot.reserve(rooms_.size());
+        for (const auto& [_id, room] : rooms_) snapshot.push_back(room);
+    }
+    size_t removed = 0;
+    for (const auto& room : snapshot) {
+        if (room->remove_spectator(connection_fd)) ++removed;
+    }
+    return removed;
 }
 
 size_t RoomManager::room_count() const {

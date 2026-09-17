@@ -56,8 +56,12 @@ export class ReplayListScreen extends Screen {
             this.ctx.Outbound.getHistory(username, 30),
             { expect: 'history', timeout: 1500, demo: () => this._demo(username) },
         );
-        void live;
-        this._render(data.games || []);
+        // Phase 9.2 — the demo blob is already camelCase; the live payload is
+        // snake_case and needs the Inbound normalizer. Skipping normalization
+        // on the demo keeps its hand-authored shape untouched.
+        const normalized = live ? this.ctx.Inbound.normalize(data) : data;
+        if (live) this.preview = false;
+        this._render(normalized.games || []);
     }
 
     _render(games) {
@@ -92,7 +96,7 @@ export class ReplayListScreen extends Screen {
                             )
                         ),
                         h('td', { class: 'mono' }, parseAndFormatTimeControl(g.timeControl)),
-                        h('td', { class: 'mono' }, String(g.moves || '—')),
+                        h('td', { class: 'mono' }, String(g.moveCount || g.moves || '—')),
                         h('td', { style: { color: 'var(--text-muted)' } }, relativeTime(g.playedAt)),
                         h('td', { style: { textAlign: 'right' } },
                             h('button', {
@@ -202,8 +206,12 @@ export class ReplayDetailScreen extends Screen {
             this.ctx.Outbound.getGame(this._gameId),
             { expect: 'game', timeout: 1500, demo: () => this._demo() },
         );
-        void live;
-        this._game = data;
+        // Same live/demo split as the list screen — normalize only real
+        // payloads. The Scholar's / Fool's Mate demos still ship with the
+        // hand-authored snake_case positions shape that the render code
+        // has read since Phase 9 preview.
+        this._game = live ? this.ctx.Inbound.normalize(data) : data;
+        if (live) this.preview = false;
         this._renderMeta();
         this._renderMoves();
         this._goto(0);

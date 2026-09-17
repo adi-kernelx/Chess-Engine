@@ -88,9 +88,16 @@ export class JoinScreen extends Screen {
 
     _trySend() {
         if (this._sent) return;
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token) {
+            this._say('Sign in to join this game.');
+            this.ctx.toast.warning('Sign in to play.', { duration: 2800 });
+            this.ctx.router.go('/login');
+            return;
+        }
         this._sent = true;
         this._say('Asking to join…');
-        this.ctx.socket.send(this.ctx.Outbound.joinGame(this._username(), this._gameId));
+        this.ctx.socket.send(this.ctx.Outbound.joinGame(token, this._gameId));
     }
 
     _onJoined(raw) {

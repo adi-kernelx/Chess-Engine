@@ -80,7 +80,14 @@ static const char* DEFAULT_SCHEMA  = "src/storage/schema_phase7.sql";
 /// Reset to a known state before every test that touches data.
 static void reset(Database& db) {
     std::string err;
-    db.run_script("DROP TABLE IF EXISTS sessions; "
+    db.run_script("DROP TABLE IF EXISTS tournament_pairings; "
+                  "DROP TABLE IF EXISTS tournament_players; "
+                  "DROP TABLE IF EXISTS tournaments; "
+                  "DROP TABLE IF EXISTS cheat_reports; "
+                  "DROP TABLE IF EXISTS move_times; "
+                  "DROP TABLE IF EXISTS games; "
+                  "DROP TABLE IF EXISTS schema_migrations; "
+                  "DROP TABLE IF EXISTS sessions; "
                   "DROP TABLE IF EXISTS players; "
                   "DROP FUNCTION IF EXISTS assert_username_ci_matches();", err);
 

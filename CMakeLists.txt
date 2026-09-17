@@ -82,6 +82,13 @@ set(SOURCES
     # Phase 8.2 — game persistence repositories
     src/storage/player_repo.cpp
     src/storage/game_repo.cpp
+    # Phase 9.3 — statistical anti-cheat + cheat report persistence
+    src/analysis/anti_cheat.cpp
+    src/analysis/cheat_report_repo.cpp
+    # Phase 9.4 — Swiss tournament system
+    src/tournament/swiss.cpp
+    src/tournament/tournament_repo.cpp
+    src/tournament/tournament_manager.cpp
 )
 
 # Executable
@@ -422,3 +429,186 @@ add_executable(test_game_persistence
 target_include_directories(test_game_persistence PRIVATE src)
 target_compile_definitions(test_game_persistence PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_game_persistence PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
+
+# Test: Auth-mandatory game commands (Phase 9 pre-work).
+# Routes real create_game / join_game / quick_play / play_ai JSON messages
+# through the actual MessageRouter → GameHandler path and asserts every path
+# rejects an unauthenticated caller with {code: "auth_required"}. Database
+# backed; skips cleanly without DATABASE_URL, matching Phase 7/8 conventions.
+add_executable(test_auth_required
+    tests/test_auth_required.cpp
+    src/core/logger.cpp
+    src/net/connection.cpp
+    src/net/websocket.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/ai_player.cpp
+    src/game/game_room.cpp
+    src/game/room_manager.cpp
+    src/game/matchmaker.cpp
+    src/game/game_handler.cpp
+    src/storage/database.cpp
+    src/storage/player_repo.cpp
+    src/storage/game_repo.cpp
+    src/analysis/anti_cheat.cpp
+    src/analysis/cheat_report_repo.cpp
+    src/tournament/swiss.cpp
+    src/tournament/tournament_repo.cpp
+    src/tournament/tournament_manager.cpp
+    src/auth/token.cpp
+    src/auth/session.cpp
+    src/crypto/random.cpp
+    src/crypto/sha256.cpp
+    src/crypto/sha512.cpp
+    src/crypto/base64.cpp
+)
+target_include_directories(test_auth_required PRIVATE src third_party)
+target_compile_definitions(test_auth_required PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_auth_required PRIVATE
+    Threads::Threads OpenSSL::Crypto PostgreSQL::PostgreSQL)
+
+# Test: Spectator Mode (Phase 9.1).
+# Two players start a live game, a third connection spectates, and every
+# broadcast (moves and game_over) is asserted to reach the spectator alongside
+# the two seats. The disconnect sweep and stop_spectating happy paths are
+# covered by asserting the socket goes quiet after the fd is removed.
+add_executable(test_spectator
+    tests/test_spectator.cpp
+    src/core/logger.cpp
+    src/net/connection.cpp
+    src/net/websocket.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/ai_player.cpp
+    src/game/game_room.cpp
+    src/game/room_manager.cpp
+    src/game/matchmaker.cpp
+    src/game/game_handler.cpp
+    src/storage/database.cpp
+    src/storage/player_repo.cpp
+    src/storage/game_repo.cpp
+    src/analysis/anti_cheat.cpp
+    src/analysis/cheat_report_repo.cpp
+    src/tournament/swiss.cpp
+    src/tournament/tournament_repo.cpp
+    src/tournament/tournament_manager.cpp
+    src/auth/token.cpp
+    src/auth/session.cpp
+    src/crypto/random.cpp
+    src/crypto/sha256.cpp
+    src/crypto/sha512.cpp
+    src/crypto/base64.cpp
+)
+target_include_directories(test_spectator PRIVATE src third_party)
+target_compile_definitions(test_spectator PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_spectator PRIVATE
+    Threads::Threads OpenSSL::Crypto PostgreSQL::PostgreSQL)
+
+# Test: Replay + engine analysis (Phase 9.2).
+# Persists a full Scholar's Mate through the storage layer, routes get_game
+# through the actual handler, and asserts every ply's FEN matches an
+# independent replay. Also exercises analyze_position + get_history.
+add_executable(test_replay
+    tests/test_replay.cpp
+    src/core/logger.cpp
+    src/net/connection.cpp
+    src/net/websocket.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/ai_player.cpp
+    src/game/game_room.cpp
+    src/game/room_manager.cpp
+    src/game/matchmaker.cpp
+    src/game/game_handler.cpp
+    src/storage/database.cpp
+    src/storage/player_repo.cpp
+    src/storage/game_repo.cpp
+    src/analysis/anti_cheat.cpp
+    src/analysis/cheat_report_repo.cpp
+    src/tournament/swiss.cpp
+    src/tournament/tournament_repo.cpp
+    src/tournament/tournament_manager.cpp
+    src/auth/token.cpp
+    src/auth/session.cpp
+    src/crypto/random.cpp
+    src/crypto/sha256.cpp
+    src/crypto/sha512.cpp
+    src/crypto/base64.cpp
+)
+target_include_directories(test_replay PRIVATE src third_party)
+target_compile_definitions(test_replay PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_replay PRIVATE
+    Threads::Threads OpenSSL::Crypto PostgreSQL::PostgreSQL)
+
+# Test: Anti-cheat statistical analyzer (Phase 9.3).
+# Three layers: pure analyzer math (no DB, always runs), cheat_report_repo
+# round-trip (needs DB), and end-to-end via the router (needs DB). The
+# non-DB layer runs first and unconditionally; the DB layers skip cleanly
+# without DATABASE_URL, matching test_replay / test_repositories.
+add_executable(test_anti_cheat
+    tests/test_anti_cheat.cpp
+    src/core/logger.cpp
+    src/net/connection.cpp
+    src/net/websocket.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/ai_player.cpp
+    src/game/game_room.cpp
+    src/game/room_manager.cpp
+    src/game/matchmaker.cpp
+    src/game/game_handler.cpp
+    src/storage/database.cpp
+    src/storage/player_repo.cpp
+    src/storage/game_repo.cpp
+    src/analysis/anti_cheat.cpp
+    src/analysis/cheat_report_repo.cpp
+    src/tournament/swiss.cpp
+    src/tournament/tournament_repo.cpp
+    src/tournament/tournament_manager.cpp
+    src/auth/token.cpp
+    src/auth/session.cpp
+    src/crypto/random.cpp
+    src/crypto/sha256.cpp
+    src/crypto/sha512.cpp
+    src/crypto/base64.cpp
+)
+target_include_directories(test_anti_cheat PRIVATE src third_party)
+target_compile_definitions(test_anti_cheat PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_anti_cheat PRIVATE
+    Threads::Threads OpenSSL::Crypto PostgreSQL::PostgreSQL)
+
+# Test: Swiss tournament system (Phase 9.4).
+# Three layers: pure Swiss pairing (no DB, always runs), tournament_repo
+# round-trip (needs DB), and a full 8-player 4-round tournament run
+# through TournamentManager (needs DB). The non-DB layer runs first and
+# unconditionally; DB layers skip cleanly without DATABASE_URL.
+add_executable(test_tournament
+    tests/test_tournament.cpp
+    src/storage/database.cpp
+    src/tournament/swiss.cpp
+    src/tournament/tournament_repo.cpp
+    src/tournament/tournament_manager.cpp
+)
+target_include_directories(test_tournament PRIVATE src)
+target_compile_definitions(test_tournament PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_tournament PRIVATE Threads::Threads PostgreSQL::PostgreSQL)

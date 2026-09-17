@@ -38,6 +38,7 @@ struct RoomInfo {
     std::string black_name;
     std::string time_control;
     int         move_count;
+    int         spectator_count = 0;   ///< Phase 9.1 — how many watchers this room currently has
 };
 
 class RoomManager {
@@ -96,6 +97,16 @@ public:
 
     /// Remove all rooms in FINISHED state. Returns number of rooms removed.
     size_t cleanup_finished_rooms();
+
+    // --------------------------------------------------------
+    // Spectators (Phase 9.1)
+    // --------------------------------------------------------
+
+    /// Drop `fd` from every room's spectator list. Called by GameHandler on
+    /// player disconnect so a spectator who closes the tab or drops the
+    /// socket stops accumulating undelivered broadcasts in its dead write
+    /// buffer. Returns the number of rooms that actually removed the fd.
+    size_t remove_spectator_everywhere(int connection_fd);
 
 private:
     mutable std::mutex mutex_;

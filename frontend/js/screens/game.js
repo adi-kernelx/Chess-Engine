@@ -549,16 +549,22 @@ export class GameScreen extends Screen {
         // Rematch is not a native server message. Best-effort: create a fresh
         // game with the same time control, or if it was AI, restart against
         // the same difficulty and time control.
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token) {
+            this.ctx.toast.warning('Sign in to play.', { duration: 2800 });
+            this.ctx.router.go('/login');
+            return;
+        }
         this.ctx.store.setGame(null);
         if (game.isAI) {
             this.ctx.socket.send(this.ctx.Outbound.playAI(
-                this.ctx.store.session.username || 'Player',
+                token,
                 game.difficulty || 'medium',
                 game.timeBaseSec, game.timeIncSec,
             ));
         } else {
             this.ctx.socket.send(this.ctx.Outbound.createGame(
-                this.ctx.store.session.username || 'Player',
+                token,
                 game.timeBaseSec, game.timeIncSec,
             ));
             this.ctx.toast.info('Rematch is not a native server action yet — a new open game was created.',
@@ -675,13 +681,17 @@ export class GameScreen extends Screen {
     _inviteFriend() {
         // Post a fresh game and hand the link off to the user. The lobby
         // already handles the toast + copy flow when game_created lands.
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token) {
+            this.ctx.toast.warning('Sign in to play.', { duration: 2800 });
+            this.ctx.router.go('/login');
+            return;
+        }
         const game = this.ctx.store.game;
         const base = game && game.timeBaseSec ? game.timeBaseSec : 300;
         const inc  = game && game.timeIncSec  ? game.timeIncSec  : 3;
         this.ctx.store.setGame(null);
-        this.ctx.socket.send(this.ctx.Outbound.createGame(
-            this.ctx.store.session.username || 'Player', base, inc,
-        ));
+        this.ctx.socket.send(this.ctx.Outbound.createGame(token, base, inc));
         this.ctx.router.go('/play');
     }
 }

@@ -251,12 +251,24 @@ export class LandingScreen extends Screen {
         // Give guests a real handle — nothing about "Player" is memorable.
         this._ensureGuestHandle();
 
+        // Auth is required on the wire as of the Phase 9 pre-work migration;
+        // the "Play the AI" button on the landing page can no longer bypass
+        // sign-in. Bounce unauthenticated visitors to /login.
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token) {
+            this._starting = false;
+            if (this._playBtn) this._playBtn.classList.remove('is-loading');
+            this.ctx.toast.info('Sign in to play the AI.', { duration: 2800 });
+            this.ctx.router.go('/login');
+            return;
+        }
+
         // Fire the AI game. play_ai lands game_start almost immediately;
         // the router jumps to /game on receipt. Difficulty and time are
         // fixed here on purpose — this button removes decisions, it does
         // not offer them. Anyone who wants control clicks "More options".
         this._pending = { kind: 'ai', preset: DEFAULT_PRESET, difficulty: 'medium', fromLanding: true };
-        socket.send(Outbound.playAI(this._username(), 'medium', DEFAULT_PRESET.base, DEFAULT_PRESET.inc));
+        socket.send(Outbound.playAI(token, 'medium', DEFAULT_PRESET.base, DEFAULT_PRESET.inc));
 
         // Failsafe: if for any reason the server never replies, stop hanging
         // the button. 6s is generous; the AI game normally starts in <500ms.

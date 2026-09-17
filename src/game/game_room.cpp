@@ -563,6 +563,62 @@ std::string GameRoom::to_pgn() const {
 }
 
 // ============================================================
+// Spectators (Phase 9.1)
+// ============================================================
+
+bool GameRoom::add_spectator(int connection_fd) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Spectating is only meaningful once the game is live. A WAITING room
+    // has no board activity to broadcast; a FINISHED room has nothing more
+    // to send. The lobby's live-games listing already filters to
+    // IN_PROGRESS, so a client hitting either edge is either racing or
+    // misbehaving — refuse in both cases.
+    if (state_ != RoomState::IN_PROGRESS) return false;
+
+    // A player cannot spectate their own game. Silently refuse rather than
+    // creating a duplicate broadcast recipient that would double-send every
+    // move_made frame to a seat that already receives it.
+    if (connection_fd == white_.connection_fd) return false;
+    if (connection_fd == black_.connection_fd) return false;
+
+    // Idempotent: re-adding is fine. This matters for the "spectate the same
+    // game twice" corner case (a browser tab reconnecting behind a reload
+    // may re-send spectate before its previous fd has been swept).
+    for (int fd : spectator_fds_) {
+        if (fd == connection_fd) return true;
+    }
+    spectator_fds_.push_back(connection_fd);
+    return true;
+}
+
+bool GameRoom::remove_spectator(int connection_fd) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = spectator_fds_.begin(); it != spectator_fds_.end(); ++it) {
+        if (*it == connection_fd) {
+            spectator_fds_.erase(it);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<int> GameRoom::spectator_fds() const {
+    // Copy under the lock, iterate outside. The alternative — exposing a
+    // pointer/iterator under the lock — would tempt callers to fan out
+    // send_json_to_fd() while still holding the room mutex, which would
+    // block every other move on this room for the duration of the flush
+    // (each flush is a syscall per spectator).
+    std::lock_guard<std::mutex> lock(mutex_);
+    return spectator_fds_;
+}
+
+size_t GameRoom::spectator_count() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return spectator_fds_.size();
+}
+
+// ============================================================
 // Internal helpers
 // ============================================================
 

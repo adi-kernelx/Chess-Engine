@@ -263,25 +263,44 @@ export class LobbyScreen extends Screen {
 
     _username() { return (this.ctx.store.session.username || 'Player').slice(0, 24); }
 
+    /** Guard for game-starting actions: returns the access token if the caller
+     *  is signed in, or null after nudging them to /login. Auth is mandatory
+     *  on the wire as of the Phase 9 pre-work migration. */
+    _requireAuth() {
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token) {
+            this.ctx.toast.warning('Sign in to play.', { duration: 2800 });
+            if (this.ctx.router) this.ctx.router.go('/login');
+            return null;
+        }
+        return token;
+    }
+
     _onCreate() {
+        const token = this._requireAuth();
+        if (!token) return;
         const { socket, Outbound } = this.ctx;
         const preset = TIME_PRESETS[this._createPreset];
         this._pending = { kind: 'create', preset };
-        socket.send(Outbound.createGame(this._username(), preset.base, preset.inc));
+        socket.send(Outbound.createGame(token, preset.base, preset.inc));
     }
 
     _onPlayAI() {
+        const token = this._requireAuth();
+        if (!token) return;
         const { socket, Outbound } = this.ctx;
         const preset = TIME_PRESETS[this._aiPreset];
         this._pending = { kind: 'ai', preset, difficulty: this._aiDifficulty };
-        socket.send(Outbound.playAI(this._username(), this._aiDifficulty, preset.base, preset.inc));
+        socket.send(Outbound.playAI(token, this._aiDifficulty, preset.base, preset.inc));
     }
 
     _onQuickPlay() {
-        const { socket, Outbound, store } = this.ctx;
+        const token = this._requireAuth();
+        if (!token) return;
+        const { socket, Outbound } = this.ctx;
         const preset = TIME_PRESETS[this._quickPreset];
         this._pending = { kind: 'quick', preset };
-        socket.send(Outbound.quickPlay(this._username(), store.session.elo || 1200, preset.base, preset.inc));
+        socket.send(Outbound.quickPlay(token, preset.base, preset.inc));
         this._inQueue = true;
         this._renderQuickActionInto();
     }
@@ -291,9 +310,11 @@ export class LobbyScreen extends Screen {
     }
 
     _joinGame(gameId) {
+        const token = this._requireAuth();
+        if (!token) return;
         const { socket, Outbound } = this.ctx;
         this._pending = { kind: 'join' };
-        socket.send(Outbound.joinGame(this._username(), gameId));
+        socket.send(Outbound.joinGame(token, gameId));
     }
 
     _refreshGamesList() {

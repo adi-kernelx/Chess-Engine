@@ -195,6 +195,29 @@ public:
     /// Export the game as PGN.
     std::string to_pgn() const;
 
+    // --------------------------------------------------------
+    // Spectators (Phase 9.1)
+    // --------------------------------------------------------
+
+    /// Register a spectator by its connection fd. Idempotent: adding the same
+    /// fd twice is a no-op. Refuses if the fd is currently seated as one of
+    /// this room's players (a player cannot also spectate their own game).
+    /// Returns true on success, false if the fd is a player or the room is
+    /// not IN_PROGRESS.
+    bool add_spectator(int connection_fd);
+
+    /// Remove a spectator by its connection fd. Returns true if the fd was
+    /// present and removed, false otherwise. Idempotent.
+    bool remove_spectator(int connection_fd);
+
+    /// Snapshot the current spectator fds under the lock. Returned by value so
+    /// the caller can iterate outside the lock (fan-out is a foreign-fd write
+    /// that flushes inline — never hold this mutex across send_json_to_fd).
+    std::vector<int> spectator_fds() const;
+
+    /// Cheap accessor for the lobby's `spectator_count` field.
+    size_t spectator_count() const;
+
 private:
     // --------------------------------------------------------
     // Internal helpers
@@ -236,6 +259,11 @@ private:
     PlayerSlot          black_;
 
     std::vector<MoveRecord> move_history_;
+
+    /// Connection fds currently watching this room. Guarded by mutex_. Kept
+    /// as std::vector because spectator counts stay small; a set-based lookup
+    /// only wins past a few hundred watchers per room.
+    std::vector<int>    spectator_fds_;
 
     /// Timestamp when the game started (first move)
     std::chrono::steady_clock::time_point game_start_time_;
