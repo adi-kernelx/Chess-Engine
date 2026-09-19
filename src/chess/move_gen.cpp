@@ -3,11 +3,86 @@
  */
 
 #include "chess/move_gen.h"
+#include <array>
 #include <cassert>
+#include <cstdint>
 #include <iostream>
 
 namespace chess {
 namespace move_gen {
+
+// ============================================================
+// Phase 10.2 — precomputed target lists for knight and king.
+//
+// Both pieces have a fixed pattern independent of surrounding pieces, so
+// the eight bounds-checked (dr, df) probes we ran every time we generated
+// or attacked-tested from a square are replaced by iterating a short
+// precomputed list (length 2–8 for a knight, 3–8 for a king). It also
+// deduplicates the four copies of those (dr, df) tables that used to sit
+// inline in `is_square_attacked`, `generate_knight_moves`, and
+// `generate_king_moves`.
+//
+// A word on the performance impact, honestly:  Phase 10.1 measured no
+// improvement over the (dr, df) form on this codebase (388K vs 388K NPS
+// startpos, 322K vs 317K kiwipete, 388K vs 384K middlegame, all Release
+// with `-O2`, medians of three warm runs). The compiler was already
+// unrolling and predicting the 8-iteration bounds check well; the array
+// lookup does not beat what `-O2` was already producing. This lives here
+// on readability grounds — one canonical geometry, four consumers — not
+// as a performance win.
+//
+// Perft results (test_move_gen) remain the ground truth: this refactor
+// touches no semantics.
+// ============================================================
+
+namespace {
+
+struct AttackTables {
+    std::array<std::array<Square, 8>, 64> knight_targets{};
+    std::array<std::array<Square, 8>, 64> king_targets{};
+    std::array<uint8_t, 64>               knight_count{};
+    std::array<uint8_t, 64>               king_count{};
+
+    AttackTables() {
+        constexpr int kn_dr[8] = {-2, -2, -1, -1,  1,  1,  2,  2};
+        constexpr int kn_df[8] = {-1,  1, -2,  2, -2,  2, -1,  1};
+
+        for (int sq = 0; sq < 64; ++sq) {
+            const int r = sq / 8;
+            const int f = sq % 8;
+
+            uint8_t kn = 0;
+            for (int i = 0; i < 8; ++i) {
+                const int nr = r + kn_dr[i];
+                const int nf = f + kn_df[i];
+                if (nr >= 0 && nr < 8 && nf >= 0 && nf < 8) {
+                    knight_targets[sq][kn++] = static_cast<Square>(nr * 8 + nf);
+                }
+            }
+            knight_count[sq] = kn;
+
+            uint8_t kg = 0;
+            for (int dr = -1; dr <= 1; ++dr) {
+                for (int df = -1; df <= 1; ++df) {
+                    if (dr == 0 && df == 0) continue;
+                    const int nr = r + dr;
+                    const int nf = f + df;
+                    if (nr >= 0 && nr < 8 && nf >= 0 && nf < 8) {
+                        king_targets[sq][kg++] = static_cast<Square>(nr * 8 + nf);
+                    }
+                }
+            }
+            king_count[sq] = kg;
+        }
+    }
+};
+
+inline const AttackTables& attack_tables() {
+    static const AttackTables t;   // C++11: thread-safe initialization
+    return t;
+}
+
+} // namespace
 
 // ============================================================
 // Attack Detection
@@ -32,28 +107,19 @@ bool is_square_attacked(const Board& board, Square sq, Color attacker_color) {
         }
     }
 
-    // 2. Knight attacks
-    static const int knight_dr[] = {-2, -2, -1, -1,  1,  1,  2,  2};
-    static const int knight_df[] = {-1,  1, -2,  2, -2,  2, -1,  1};
-    for (int i = 0; i < 8; ++i) {
-        int nr = r + knight_dr[i];
-        int nf = f + knight_df[i];
-        if (nr >= 0 && nr < 8 && nf >= 0 && nf < 8) {
-            Piece p = board.piece_at(make_square(nr, nf));
-            if (p.type == PieceType::KNIGHT && p.color == attacker_color) return true;
-        }
+    // 2. Knight attacks — precomputed target list (Phase 10.2).
+    const auto& tbl = attack_tables();
+    const uint8_t kn_n = tbl.knight_count[sq];
+    for (uint8_t i = 0; i < kn_n; ++i) {
+        Piece p = board.piece_at(tbl.knight_targets[sq][i]);
+        if (p.type == PieceType::KNIGHT && p.color == attacker_color) return true;
     }
 
-    // 3. King attacks (for adjacent squares)
-    static const int king_dr[] = {-1, -1, -1,  0,  0,  1,  1,  1};
-    static const int king_df[] = {-1,  0,  1, -1,  1, -1,  0,  1};
-    for (int i = 0; i < 8; ++i) {
-        int nr = r + king_dr[i];
-        int nf = f + king_df[i];
-        if (nr >= 0 && nr < 8 && nf >= 0 && nf < 8) {
-            Piece p = board.piece_at(make_square(nr, nf));
-            if (p.type == PieceType::KING && p.color == attacker_color) return true;
-        }
+    // 3. King attacks (for adjacent squares) — precomputed target list.
+    const uint8_t kg_n = tbl.king_count[sq];
+    for (uint8_t i = 0; i < kg_n; ++i) {
+        Piece p = board.piece_at(tbl.king_targets[sq][i]);
+        if (p.type == PieceType::KING && p.color == attacker_color) return true;
     }
 
     // 4. Ray attacks (Bishops, Rooks, Queens)
@@ -144,20 +210,15 @@ static void generate_pawn_moves(const Board& board, Square sq, Color color, std:
 }
 
 static void generate_knight_moves(const Board& board, Square sq, Color color, std::vector<Move>& moves) {
-    int r = rank_of(sq);
-    int f = file_of(sq);
-    static const int dr[] = {-2, -2, -1, -1,  1,  1,  2,  2};
-    static const int df[] = {-1,  1, -2,  2, -2,  2, -1,  1};
-
-    for (int i = 0; i < 8; ++i) {
-        int nr = r + dr[i];
-        int nf = f + df[i];
-        if (nr >= 0 && nr < 8 && nf >= 0 && nf < 8) {
-            Square to_sq = make_square(nr, nf);
-            Piece target = board.piece_at(to_sq);
-            if (target.is_none() || target.color != color) {
-                moves.emplace_back(sq, to_sq);
-            }
+    // Phase 10.2: iterate the precomputed target list instead of running
+    // eight bounds-checked (dr, df) probes on every call.
+    const auto& tbl = attack_tables();
+    const uint8_t n = tbl.knight_count[sq];
+    for (uint8_t i = 0; i < n; ++i) {
+        const Square to_sq = tbl.knight_targets[sq][i];
+        const Piece target = board.piece_at(to_sq);
+        if (target.is_none() || target.color != color) {
+            moves.emplace_back(sq, to_sq);
         }
     }
 }
@@ -192,20 +253,14 @@ static void generate_ray_moves(const Board& board, Square sq, Color color, bool 
 }
 
 static void generate_king_moves(const Board& board, Square sq, Color color, std::vector<Move>& moves) {
-    int r = rank_of(sq);
-    int f = file_of(sq);
-    static const int dr[] = {-1, -1, -1,  0,  0,  1,  1,  1};
-    static const int df[] = {-1,  0,  1, -1,  1, -1,  0,  1};
-
-    for (int i = 0; i < 8; ++i) {
-        int nr = r + dr[i];
-        int nf = f + df[i];
-        if (nr >= 0 && nr < 8 && nf >= 0 && nf < 8) {
-            Square to_sq = make_square(nr, nf);
-            Piece target = board.piece_at(to_sq);
-            if (target.is_none() || target.color != color) {
-                moves.emplace_back(sq, to_sq);
-            }
+    // Phase 10.2: precomputed 8-direction list.
+    const auto& tbl = attack_tables();
+    const uint8_t n = tbl.king_count[sq];
+    for (uint8_t i = 0; i < n; ++i) {
+        const Square to_sq = tbl.king_targets[sq][i];
+        const Piece target = board.piece_at(to_sq);
+        if (target.is_none() || target.color != color) {
+            moves.emplace_back(sq, to_sq);
         }
     }
 

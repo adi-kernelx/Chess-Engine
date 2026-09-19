@@ -1,5 +1,6 @@
 # Build artifacts
 build/
+build_release/
 bin/
 CMakeFiles/
 CMakeCache.txt
@@ -44,7 +45,16 @@ new_things_to_learn.docx
 # MS Office lock files
 ~$*.doc*
 *.tmp
-docs/
+
+# The docs/ folder mixes formal, checked-in documentation with a local
+# working log (implementation_log.md) that is kept out of the repo on
+# purpose. Ignore the folder wholesale, then whitelist the formal docs
+# by name — anything else added under docs/ stays local unless it is
+# explicitly listed below.
+docs/*
+!docs/ARCHITECTURE.md
+!docs/BENCHMARKS.md
+!docs/.gitkeep
 
 # Local Test Files
 test.html

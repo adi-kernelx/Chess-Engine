@@ -276,6 +276,41 @@ add_executable(gen_seal_vectors
 target_include_directories(gen_seal_vectors PRIVATE src)
 target_link_libraries(gen_seal_vectors PRIVATE OpenSSL::Crypto)
 
+# Tool: Phase 10.1 engine microbenchmark. Standalone (no server, no DB): loads
+# a small position suite, runs Engine::search at 2s/5s/10s each, prints a
+# Markdown table for BENCHMARKS.md.
+add_executable(bench_engine
+    tools/bench_engine.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+)
+target_include_directories(bench_engine PRIVATE src)
+target_link_libraries(bench_engine PRIVATE Threads::Threads)
+
+# Tool: pre-provision N test accounts + HS384 access tokens for the Phase-10.1
+# load test. Load_test.py cannot easily replay the sealed-envelope registration
+# path from Python, and sealed-envelope confidentiality only protects the
+# password on the wire — nothing on the make_move hot path involves it, so
+# bypassing it does not distort the load measurements. Reads DATABASE_URL and
+# JWT_SIGNING_KEY from env (the SAME env vars the server reads), inserts N
+# players via `ON CONFLICT DO UPDATE`, and emits JSON on stdout.
+add_executable(bench_provision
+    tools/bench_provision.cpp
+    src/auth/token.cpp
+    src/crypto/random.cpp
+    src/crypto/sha256.cpp
+    src/crypto/sha512.cpp
+    src/crypto/base64.cpp
+    src/storage/database.cpp
+)
+target_include_directories(bench_provision PRIVATE src third_party)
+target_link_libraries(bench_provision PRIVATE OpenSSL::Crypto PostgreSQL::PostgreSQL)
+
 # Tool: generate the server's long-lived ML-DSA-65 identity key (Phase 7.3).
 # Run once per deployment; prints the SHA-384 pin for frontend/js/config.js.
 add_executable(gen_server_identity
