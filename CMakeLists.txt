@@ -74,6 +74,9 @@ set(SOURCES
     src/crypto/sealed_registry.cpp
     # Phase 7.5 — storage layer
     src/storage/database.cpp
+    # LLD-3.1 — typed storage failures + RAII transactions
+    src/storage/storage_error.cpp
+    src/storage/transaction.cpp
     # Phase 7.6 — password + username + auth service
     src/auth/username.cpp
     src/auth/password.cpp
@@ -354,6 +357,18 @@ add_executable(test_schema_phase8
 target_include_directories(test_schema_phase8 PRIVATE src)
 target_compile_definitions(test_schema_phase8 PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_schema_phase8 PRIVATE PostgreSQL::PostgreSQL)
+
+# Test: LLD-3.1 — Transaction RAII + typed StorageError classification.
+# Requires a live Postgres cluster (DATABASE_URL). Skips cleanly otherwise,
+# matching every other DB-backed suite.
+add_executable(test_transaction
+    tests/test_transaction.cpp
+    src/storage/database.cpp
+    src/storage/storage_error.cpp
+    src/storage/transaction.cpp
+)
+target_include_directories(test_transaction PRIVATE src)
+target_link_libraries(test_transaction PRIVATE PostgreSQL::PostgreSQL)
 
 # Test: Argon2id, username validation, auth service (Phase 7.6)
 # Purely-crypto tests always run; service tests require $DATABASE_URL, which
