@@ -60,10 +60,12 @@
 #include <nlohmann/json.hpp>
 
 #include "application/auth/identity_extractor.h"
+#include "application/game_query_service.h"
 #include "application/gameplay_service.h"
 #include "auth/token.h"
 #include "game/ai_player.h"
 #include "game/handlers/gameplay_handler.h"
+#include "game/handlers/query_handler.h"
 #include "game/matchmaker.h"
 #include "game/room_manager.h"
 #include "net/connection.h"
@@ -101,15 +103,6 @@ public:
 
 private:
     // ── Un-migrated family handlers (LLD-2.2 / 2.3 / 2.4 targets) ──
-
-    // Query / spectator / replay family (LLD-2.2 target)
-    void handle_get_profile(net::Connection& conn, const std::string& message);
-    void handle_get_leaderboard(net::Connection& conn, const std::string& message);
-    void handle_spectate(net::Connection& conn, const std::string& message);
-    void handle_stop_spectating(net::Connection& conn, const std::string& message);
-    void handle_list_live_games(net::Connection& conn, const std::string& message);
-    void handle_get_game(net::Connection& conn, const std::string& message);
-    void handle_get_history(net::Connection& conn, const std::string& message);
 
     // Analysis family (LLD-2.3 target)
     void handle_analyze_position(net::Connection& conn, const std::string& message);
@@ -161,6 +154,11 @@ private:
     std::unique_ptr<application::auth::IdentityExtractor> identity_;
     std::unique_ptr<application::GameplayService>         gameplay_service_;
     std::unique_ptr<handlers::GameplayHandler>            gameplay_handler_;
+
+    // ── LLD-2.2 objects, constructed on register_handlers ──
+
+    std::unique_ptr<application::GameQueryService>        query_service_;
+    std::unique_ptr<handlers::QueryHandler>               query_handler_;
 };
 
 } // namespace game

@@ -50,6 +50,8 @@ set(SOURCES
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/game/handlers/query_handler.cpp
+    src/application/game_query_service.cpp
     src/game/matchmaker.cpp
     src/game/ai_player.cpp
     # Phase 7 — hand-written cryptographic primitives
@@ -500,6 +502,8 @@ add_executable(test_auth_required
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/game/handlers/query_handler.cpp
+    src/application/game_query_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -547,6 +551,8 @@ add_executable(test_spectator
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/game/handlers/query_handler.cpp
+    src/application/game_query_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -593,6 +599,8 @@ add_executable(test_replay
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/game/handlers/query_handler.cpp
+    src/application/game_query_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -640,6 +648,8 @@ add_executable(test_anti_cheat
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/game/handlers/query_handler.cpp
+    src/application/game_query_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -730,3 +740,32 @@ add_executable(test_gameplay_service
 )
 target_include_directories(test_gameplay_service PRIVATE src third_party)
 target_link_libraries(test_gameplay_service PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
+
+# Test: LLD-2.2 GameQueryService.
+# Seam-level tests over the extracted service: a fake MessageSink captures
+# caller-side frames, a real RoomManager backs spectator + live-game
+# routes, and Database* is null for DB-unavailable paths. DB-backed
+# routes (get_profile / get_leaderboard / get_history / get_game) are
+# covered end-to-end by test_replay / test_repositories; here we test
+# only what the seam exposes without a live cluster.
+add_executable(test_game_query_service
+    tests/test_game_query_service.cpp
+    src/core/logger.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/ai_player.cpp
+    src/game/game_room.cpp
+    src/game/room_manager.cpp
+    src/game/matchmaker.cpp
+    src/application/game_query_service.cpp
+    src/storage/database.cpp
+    src/storage/game_repo.cpp
+    src/storage/player_repo.cpp
+)
+target_include_directories(test_game_query_service PRIVATE src third_party)
+target_link_libraries(test_game_query_service PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
