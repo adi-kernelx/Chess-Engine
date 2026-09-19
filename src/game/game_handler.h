@@ -1,14 +1,21 @@
 /**
- * game_handler.h — WebSocket API handler.
+ * game_handler.h — WebSocket API registration facade.
  *
- * As of LLD-2.1 this class is transitioning to a REGISTRATION FACADE.
- * The gameplay + matchmaking family (create_game / join_game / make_move /
- * resign / game_state / quick_play / cancel_queue / list_games / play_ai)
- * has been extracted into `application::GameplayService` +
- * `game::handlers::GameplayHandler`. GameHandler still owns the router
- * hookup for the three families that have not yet been extracted
- * (query/spectator/replay, analysis, tournaments) — they migrate in
- * LLD-2.2, 2.3, and 2.4 respectively.
+ * As of LLD-2.4 this class is a PURE REGISTRATION FACADE. Every route
+ * has moved into its own service + handler pair:
+ *
+ *   gameplay + matchmaking (LLD-2.1)   → GameplayService  + GameplayHandler
+ *   query / spectator / replay (2.2)   → GameQueryService + QueryHandler
+ *   analysis (2.3)                     → AnalysisService  + AnalysisHandler
+ *   tournaments (2.4)                  → TournamentService + TournamentHandler
+ *
+ * `register_handlers` builds those four (service, handler) pairs and
+ * asks each to install its routes on the router.
+ * `on_player_disconnect` forwards to the gameplay handler (which owns
+ * the room + matchmaker + spectator sweep).
+ * `send_json_to_fd` and `broadcast_to_spectators` are the fan-out
+ * callables that GameplayService receives at construction —
+ * ForeignSender and SpectatorBroadcaster respectively.
  *
  * WebSocket JSON API (unchanged from the pre-refactor contract):
  *
@@ -63,11 +70,13 @@
 #include "application/auth/identity_extractor.h"
 #include "application/game_query_service.h"
 #include "application/gameplay_service.h"
+#include "application/tournament_service.h"
 #include "auth/token.h"
 #include "game/ai_player.h"
 #include "game/handlers/analysis_handler.h"
 #include "game/handlers/gameplay_handler.h"
 #include "game/handlers/query_handler.h"
+#include "game/handlers/tournament_handler.h"
 #include "game/matchmaker.h"
 #include "game/room_manager.h"
 #include "net/connection.h"
@@ -106,35 +115,18 @@ public:
 private:
     // ── Un-migrated family handlers (LLD-2.2 / 2.3 / 2.4 targets) ──
 
-    // Tournament family (LLD-2.4 target)
-    void handle_create_tournament(net::Connection& conn, const std::string& message);
-    void handle_join_tournament(net::Connection& conn, const std::string& message);
-    void handle_start_tournament(net::Connection& conn, const std::string& message);
-    void handle_tournament_state(net::Connection& conn, const std::string& message);
-    void handle_list_tournaments(net::Connection& conn, const std::string& message);
-    void handle_report_tournament_result(net::Connection& conn, const std::string& message);
+    // ── Helpers used by the injected fan-out callables ──
 
-    // ── Helpers still used by the un-migrated families ──
-
-    void send_json(net::Connection& conn, const std::string& json);
+    /// WebSocket write to a foreign fd (opponent seat, spectator,
+    /// notification target). Resolves the current Connection via
+    /// `connection_lookup_`, writes the frame, then drains the write
+    /// buffer inline — EPOLLET only notifies once when the socket
+    /// becomes writable, so a foreign-fd send without an inline flush
+    /// would sit in RAM until the recipient wrote back. Both
+    /// GameplayService's ForeignSender and its SpectatorBroadcaster
+    /// funnel through this.
     void send_json_to_fd(int fd, const std::string& json);
     void broadcast_to_spectators(GameRoom& room, const std::string& json_str);
-    static std::string make_error(const std::string& message);
-    static std::string status_to_reason(GameStatus status);
-    void send_error_code(net::Connection& conn,
-                         const std::string& code,
-                         const std::string& message);
-
-    /// Legacy identity-extraction path used by the un-migrated families.
-    /// A thin wrapper around `application::auth::IdentityExtractor::extract`
-    /// that preserves the old out-parameter shape so we don't rewrite
-    /// every un-migrated handler in this slice — LLD-2.2/.3/.4 will
-    /// switch them to the shared helper directly and delete this shim.
-    bool extract_identity(net::Connection& conn,
-                          const nlohmann::json& msg,
-                          int64_t& out_db_player_id,
-                          std::string& out_username,
-                          int& out_elo);
 
     // ── Data ──
 
@@ -162,6 +154,11 @@ private:
 
     std::unique_ptr<application::AnalysisService>         analysis_service_;
     std::unique_ptr<handlers::AnalysisHandler>            analysis_handler_;
+
+    // ── LLD-2.4 objects, constructed on register_handlers ──
+
+    std::unique_ptr<application::TournamentService>       tournament_service_;
+    std::unique_ptr<handlers::TournamentHandler>          tournament_handler_;
 };
 
 } // namespace game

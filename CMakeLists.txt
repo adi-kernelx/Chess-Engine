@@ -54,6 +54,8 @@ set(SOURCES
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
     src/application/analysis_service.cpp
+    src/game/handlers/tournament_handler.cpp
+    src/application/tournament_service.cpp
     src/game/matchmaker.cpp
     src/game/ai_player.cpp
     # Phase 7 — hand-written cryptographic primitives
@@ -508,6 +510,8 @@ add_executable(test_auth_required
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
     src/application/analysis_service.cpp
+    src/game/handlers/tournament_handler.cpp
+    src/application/tournament_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -559,6 +563,8 @@ add_executable(test_spectator
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
     src/application/analysis_service.cpp
+    src/game/handlers/tournament_handler.cpp
+    src/application/tournament_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -609,6 +615,8 @@ add_executable(test_replay
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
     src/application/analysis_service.cpp
+    src/game/handlers/tournament_handler.cpp
+    src/application/tournament_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -660,6 +668,8 @@ add_executable(test_anti_cheat
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
     src/application/analysis_service.cpp
+    src/game/handlers/tournament_handler.cpp
+    src/application/tournament_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -805,3 +815,24 @@ add_executable(test_analysis_service
 )
 target_include_directories(test_analysis_service PRIVATE src third_party)
 target_link_libraries(test_analysis_service PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
+
+# Test: LLD-2.4 TournamentService.
+# Seam-level tests: a fake MessageSink captures caller-side frames.
+# Every DB-backed route responds with "Tournaments require a database"
+# when Database* is null, and every non-DB validation branch (name
+# empty / too long, rounds/time-control out of range, missing
+# tournament_id, list_tournaments empty listing behind null-db)
+# is exercisable without a live cluster. The DB-backed happy paths
+# are already covered end-to-end by test_tournament (27/27) against
+# the real cluster.
+add_executable(test_tournament_service
+    tests/test_tournament_service.cpp
+    src/core/logger.cpp
+    src/application/tournament_service.cpp
+    src/tournament/swiss.cpp
+    src/tournament/tournament_repo.cpp
+    src/tournament/tournament_manager.cpp
+    src/storage/database.cpp
+)
+target_include_directories(test_tournament_service PRIVATE src third_party)
+target_link_libraries(test_tournament_service PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
