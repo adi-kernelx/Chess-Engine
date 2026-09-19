@@ -75,7 +75,11 @@ static std::string read_file(const std::string& path) {
 // ============================================================
 
 static const char* SCHEMA_ENV      = "SCHEMA_PATH";
+#ifdef CHESS_SOURCE_DIR
+static const char* DEFAULT_SCHEMA  = CHESS_SOURCE_DIR "/src/storage/schema_phase7.sql";
+#else
 static const char* DEFAULT_SCHEMA  = "src/storage/schema_phase7.sql";
+#endif
 
 /// Reset to a known state before every test that touches data.
 static void reset(Database& db) {

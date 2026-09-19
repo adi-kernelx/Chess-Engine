@@ -330,6 +330,7 @@ add_executable(test_database
     src/storage/database.cpp
 )
 target_include_directories(test_database PRIVATE src)
+target_compile_definitions(test_database PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_database PRIVATE PostgreSQL::PostgreSQL)
 
 # Test: Phase 8.1 tracked migration, game-history schema, and index plan.
@@ -354,6 +355,7 @@ add_executable(test_password
     src/storage/database.cpp
 )
 target_include_directories(test_password PRIVATE src)
+target_compile_definitions(test_password PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_password PRIVATE OpenSSL::Crypto PostgreSQL::PostgreSQL)
 
 # Test: JWT (HS384) + refresh rotation + logout_all (Phase 7.7)
@@ -368,6 +370,7 @@ add_executable(test_token
     src/storage/database.cpp
 )
 target_include_directories(test_token PRIVATE src third_party)
+target_compile_definitions(test_token PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_token PRIVATE OpenSSL::Crypto PostgreSQL::PostgreSQL)
 
 # Test: Google Sign-In via Supabase Auth — HS256 verifier + service (Phase 7.8)
@@ -385,6 +388,7 @@ add_executable(test_oauth
     src/storage/database.cpp
 )
 target_include_directories(test_oauth PRIVATE src third_party)
+target_compile_definitions(test_oauth PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_oauth PRIVATE OpenSSL::Crypto PostgreSQL::PostgreSQL)
 
 # Test: rate limiter + WS frame-size cap (Phase 7.9)

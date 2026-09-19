@@ -54,6 +54,7 @@ new_things_to_learn.docx
 docs/*
 !docs/ARCHITECTURE.md
 !docs/BENCHMARKS.md
+!docs/lld_baseline.md
 !docs/.gitkeep
 
 # Local Test Files

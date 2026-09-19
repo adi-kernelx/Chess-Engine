@@ -192,7 +192,11 @@ static void test_password_primitive() {
 // ============================================================
 
 static const char* SCHEMA_ENV     = "SCHEMA_PATH";
+#ifdef CHESS_SOURCE_DIR
+static const char* DEFAULT_SCHEMA = CHESS_SOURCE_DIR "/src/storage/schema_phase7.sql";
+#else
 static const char* DEFAULT_SCHEMA = "src/storage/schema_phase7.sql";
+#endif
 
 static std::string read_file(const std::string& path) {
     std::ifstream f(path);
@@ -202,8 +206,18 @@ static std::string read_file(const std::string& path) {
 }
 
 static void reset(Database& db) {
+    // Drop every table that references players (Phase 8 games/move_times, Phase
+    // 9 cheat_reports/tournaments) before dropping players itself, or the FK
+    // constraints leave the schema half-loaded and later inserts fail.
     std::string err;
-    db.run_script("DROP TABLE IF EXISTS sessions; "
+    db.run_script("DROP TABLE IF EXISTS tournament_pairings; "
+                  "DROP TABLE IF EXISTS tournament_players; "
+                  "DROP TABLE IF EXISTS tournaments; "
+                  "DROP TABLE IF EXISTS cheat_reports; "
+                  "DROP TABLE IF EXISTS move_times; "
+                  "DROP TABLE IF EXISTS games; "
+                  "DROP TABLE IF EXISTS schema_migrations; "
+                  "DROP TABLE IF EXISTS sessions; "
                   "DROP TABLE IF EXISTS players; "
                   "DROP FUNCTION IF EXISTS assert_username_ci_matches();", err);
     const char* path = std::getenv(SCHEMA_ENV);
