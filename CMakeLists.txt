@@ -47,6 +47,9 @@ set(SOURCES
     src/game/game_room.cpp
     src/game/room_manager.cpp
     src/game/game_handler.cpp
+    src/game/handlers/gameplay_handler.cpp
+    src/application/gameplay_service.cpp
+    src/application/auth/identity_extractor.cpp
     src/game/matchmaker.cpp
     src/game/ai_player.cpp
     # Phase 7 — hand-written cryptographic primitives
@@ -494,6 +497,9 @@ add_executable(test_auth_required
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
+    src/game/handlers/gameplay_handler.cpp
+    src/application/gameplay_service.cpp
+    src/application/auth/identity_extractor.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -538,6 +544,9 @@ add_executable(test_spectator
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
+    src/game/handlers/gameplay_handler.cpp
+    src/application/gameplay_service.cpp
+    src/application/auth/identity_extractor.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -581,6 +590,9 @@ add_executable(test_replay
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
+    src/game/handlers/gameplay_handler.cpp
+    src/application/gameplay_service.cpp
+    src/application/auth/identity_extractor.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -625,6 +637,9 @@ add_executable(test_anti_cheat
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
+    src/game/handlers/gameplay_handler.cpp
+    src/application/gameplay_service.cpp
+    src/application/auth/identity_extractor.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -687,3 +702,31 @@ add_executable(test_tournament
 target_include_directories(test_tournament PRIVATE src)
 target_compile_definitions(test_tournament PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_tournament PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
+
+# Test: LLD-2.1 GameplayService.
+# Seam-level tests over the extracted service: a fake MessageSink
+# captures caller-side frames, two capturing callables stand in for the
+# transport foreign-send / spectator-broadcast paths, and a real
+# RoomManager + Matchmaker back the state transitions. Pure — no DB,
+# no sockets — so it runs everywhere.
+add_executable(test_gameplay_service
+    tests/test_gameplay_service.cpp
+    src/core/logger.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/ai_player.cpp
+    src/game/game_room.cpp
+    src/game/room_manager.cpp
+    src/game/matchmaker.cpp
+    src/application/gameplay_service.cpp
+    src/storage/database.cpp
+    src/storage/game_repo.cpp
+    src/protocol/json_codec.cpp
+)
+target_include_directories(test_gameplay_service PRIVATE src third_party)
+target_link_libraries(test_gameplay_service PRIVATE Threads::Threads PostgreSQL::PostgreSQL)

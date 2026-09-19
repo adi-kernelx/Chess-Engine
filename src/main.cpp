@@ -151,11 +151,15 @@ int main() {
         }
     });
 
-    game_handler.register_handlers(server.get_router());
-
     server.set_disconnect_callback([&game_handler](int fd) {
         game_handler.on_player_disconnect(fd);
     });
+
+    // LLD-2.1 note: `game_handler.register_handlers` is called AFTER the
+    // auth block below so that `set_database` / `set_signer` are settled
+    // by the time GameHandler builds its internal IdentityExtractor +
+    // GameplayService. Registering earlier would produce a service that
+    // sees a null DB even when auth ends up enabled.
 
     // ── Auth layer (optional; graceful skip if not configured) ──
     //
@@ -252,6 +256,9 @@ int main() {
         game_handler.set_signer(signer.get());
         core::Logger::info("main", "startup", "Game persistence enabled");
     }
+
+    // LLD-2.1: register AFTER db/signer are wired (see note above).
+    game_handler.register_handlers(server.get_router());
 
     server.get_router().set_default_handler(
         [](net::Connection& conn, const std::string& message) {

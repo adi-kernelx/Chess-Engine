@@ -9,7 +9,23 @@ SocketMessageSink::SocketMessageSink(ConnectionHandle handle,
                                      ConnectionLookup  lookup)
     : handle_(handle), lookup_(std::move(lookup)) {}
 
+SocketMessageSink::SocketMessageSink(Connection& conn)
+    : handle_(conn.handle()), direct_conn_(&conn) {}
+
 bool SocketMessageSink::send(std::string frame) {
+    // Direct-connection path (LLD-2.1): we already own the target
+    // connection. No lookup, no generation check — the caller is
+    // answering the request that arrived on this exact socket. The
+    // event-loop thread will drain the write buffer when it returns
+    // from the handler; unlike the foreign-fd path, we do NOT
+    // manually drain here, because doing so would double-drain on
+    // the caller side of every request.
+    if (direct_conn_ != nullptr) {
+        WebSocket::write_frame(*direct_conn_, WsOpcode::TEXT, frame);
+        return true;
+    }
+
+    // Foreign-fd path: resolve, generation-check, write, drain inline.
     if (!handle_.valid() || !lookup_) return false;
 
     Connection* conn = lookup_(handle_.fd);

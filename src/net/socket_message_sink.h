@@ -37,7 +37,23 @@ using ConnectionLookup = std::function<Connection*(int fd)>;
 
 class SocketMessageSink final : public application::MessageSink {
 public:
+    /// Foreign-fd path: the caller has only an fd (opponent seat,
+    /// spectator, notification target). `lookup` resolves the current
+    /// `Connection*` at send time, and the generation guard prevents
+    /// delivery to a reused fd. Returns false when the recipient is
+    /// gone.
     SocketMessageSink(ConnectionHandle handle, ConnectionLookup lookup);
+
+    /// Direct path (LLD-2.1): the caller already holds a `Connection&`
+    /// — typically the handler's own request-side connection. This
+    /// mirrors what the pre-refactor `GameHandler::send_json(conn, …)`
+    /// did: write straight to the known socket, no lookup, no
+    /// generation check (the callee is talking to the sender of the
+    /// request it is answering, so the handle is trivially current).
+    /// The lifetime of `conn` must exceed the sink's; construct the
+    /// sink per-request on the worker thread that owns the connection
+    /// callback stack. Never keep this sink in application state.
+    explicit SocketMessageSink(Connection& conn);
 
     /// See MessageSink::send. Returns false without writing if the fd
     /// has been reassigned (generation mismatch) or is no longer live.
@@ -48,7 +64,8 @@ public:
 
 private:
     ConnectionHandle  handle_;
-    ConnectionLookup  lookup_;
+    ConnectionLookup  lookup_;                 ///< set on foreign-fd ctor
+    Connection*       direct_conn_ = nullptr;  ///< set on direct ctor
 };
 
 } // namespace net
