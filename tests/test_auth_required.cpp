@@ -41,6 +41,7 @@
 #include "net/connection.h"
 #include "net/websocket.h"
 #include "storage/database.h"
+#include "storage/postgres_game_store.h"
 
 using json = nlohmann::json;
 using namespace chess;
@@ -265,6 +266,8 @@ int main() {
     matchmaker.set_match_callback([](const MatchResult&) {});
     GameHandler  handler(room_mgr, matchmaker);
     handler.set_database(&db);
+    storage::PostgresGameStore game_store(db);
+    handler.set_game_store(&game_store);
     handler.set_signer(&signer);
     handler.set_connection_lookup([](int) -> net::Connection* { return nullptr; });
 

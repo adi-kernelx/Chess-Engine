@@ -85,16 +85,16 @@ chess::Square parse_square(const std::string& sq_str) {
 
 } // namespace
 
-GameplayService::GameplayService(chess::game::RoomManager& rooms,
-                                 chess::game::Matchmaker&  matchmaker,
-                                 chess::game::AIPlayer&    ai,
-                                 ForeignSender             foreign_sender,
-                                 SpectatorBroadcaster      spectator_broadcaster,
-                                 chess::storage::Database* db)
+GameplayService::GameplayService(chess::game::RoomManager&              rooms,
+                                 chess::game::Matchmaker&               matchmaker,
+                                 chess::game::AIPlayer&                 ai,
+                                 ForeignSender                          foreign_sender,
+                                 SpectatorBroadcaster                   spectator_broadcaster,
+                                 chess::application::ports::GameStore*  game_store)
     : rooms_(rooms), matchmaker_(matchmaker), ai_(ai),
       foreign_sender_(std::move(foreign_sender)),
       spectator_broadcaster_(std::move(spectator_broadcaster)),
-      db_(db) {
+      game_store_(game_store) {
     // Both callables MUST be non-null. A default-constructed std::function
     // would let a routine silently drop a foreign notification — the exact
     // silent-failure mode LLD-1's generation guard also tries to prevent.
@@ -563,7 +563,7 @@ void GameplayService::trigger_ai_move(std::shared_ptr<chess::game::GameRoom> roo
 
 void GameplayService::persist_game(chess::game::GameRoom* room,
                                    chess::GameStatus status) {
-    if (!db_) return;                                         // No database configured
+    if (!game_store_) return;                                 // Persistence disabled
     if (room->is_ai_game()) return;                           // AI games are not persisted
 
     int64_t w_id = room->get_db_player_id(chess::Color::WHITE);
@@ -596,9 +596,9 @@ void GameplayService::persist_game(chess::game::GameRoom* room,
     }
     game.moves = std::move(moves);
 
-    auto result = chess::storage::save_completed_game(*db_, game);
+    auto result = game_store_->save_completed_game(game);
 
-    if (result.ok) {
+    if (result.ok()) {
         chess::core::Logger::info("game", "GameplayService",
             "Game " + std::to_string(room->get_id()) +
             " persisted (DB id=" + std::to_string(result.game_id) +
@@ -609,7 +609,7 @@ void GameplayService::persist_game(chess::game::GameRoom* room,
     } else {
         chess::core::Logger::error("game", "GameplayService",
             "Failed to persist game " + std::to_string(room->get_id()) +
-            ": " + result.error);
+            " (" + chess::storage::to_string(result.code) + "): " + result.error);
     }
 }
 

@@ -50,6 +50,8 @@ set(SOURCES
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/storage/postgres_game_store.cpp
+    src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
@@ -521,6 +523,8 @@ add_executable(test_auth_required
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/storage/postgres_game_store.cpp
+    src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
@@ -574,6 +578,8 @@ add_executable(test_spectator
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/storage/postgres_game_store.cpp
+    src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
@@ -626,6 +632,8 @@ add_executable(test_replay
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/storage/postgres_game_store.cpp
+    src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
@@ -679,6 +687,8 @@ add_executable(test_anti_cheat
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
+    src/storage/postgres_game_store.cpp
+    src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
     src/game/handlers/analysis_handler.cpp
@@ -769,6 +779,7 @@ add_executable(test_gameplay_service
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/application/gameplay_service.cpp
+    src/storage/storage_error.cpp
     src/storage/database.cpp
     src/storage/game_repo.cpp
     src/protocol/json_codec.cpp
@@ -823,6 +834,7 @@ add_executable(test_analysis_service
     src/chess/evaluator.cpp
     src/chess/engine.cpp
     src/application/analysis_service.cpp
+    src/storage/storage_error.cpp
     src/analysis/anti_cheat.cpp
     src/analysis/cheat_report_repo.cpp
     src/storage/database.cpp

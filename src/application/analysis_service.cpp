@@ -101,8 +101,9 @@ json report_to_json(const chess::analysis::AnalysisReport& r) {
 
 } // namespace
 
-AnalysisService::AnalysisService(chess::storage::Database* db)
-    : db_(db) {}
+AnalysisService::AnalysisService(chess::storage::Database*             db,
+                                 chess::application::ports::GameStore* game_store)
+    : db_(db), game_store_(game_store) {}
 
 // ── analyze_position ────────────────────────────────────────────────
 
@@ -253,23 +254,28 @@ void AnalysisService::analyze_game(const RequestContext& /*ctx*/,
     chess::analysis::AnalysisReport black_report =
         chess::analysis::analyze_side(black_plies);
 
-    // Persist both sides. save_cheat_report is upsert-on-conflict,
-    // so re-running analyze_game on the same game refreshes rather
-    // than duplicates.
-    auto save_w = chess::analysis::save_cheat_report(*db_, stored->game_id,
+    // Persist both sides through the GameStore port. save_cheat_report
+    // is upsert-on-conflict, so re-running analyze_game on the same
+    // game refreshes rather than duplicates. `game_store_` may be null
+    // (persistence disabled) — skip the writes in that case; the
+    // verdict is still returned to the caller.
+    if (game_store_) {
+        auto save_w = game_store_->save_cheat_report(stored->game_id,
                                                      stored->white_id, "w",
                                                      white_report);
-    auto save_b = chess::analysis::save_cheat_report(*db_, stored->game_id,
+        auto save_b = game_store_->save_cheat_report(stored->game_id,
                                                      stored->black_id, "b",
                                                      black_report);
-    if (!save_w.ok || !save_b.ok) {
-        chess::core::Logger::warn("game", "AntiCheat",
-            "Failed to persist cheat report for game "
-            + std::to_string(stored->game_id) + ": "
-            + (save_w.ok ? save_b.error : save_w.error));
-        // Fall through — return the report to the caller even if
-        // persistence failed. The verdict is already computed and
-        // useful; a DB blip should not swallow it.
+        if (!save_w.ok() || !save_b.ok()) {
+            const auto& failed = save_w.ok() ? save_b : save_w;
+            chess::core::Logger::warn("game", "AntiCheat",
+                "Failed to persist cheat report for game "
+                + std::to_string(stored->game_id) + " ("
+                + chess::storage::to_string(failed.code) + "): " + failed.error);
+            // Fall through — return the report to the caller even if
+            // persistence failed. The verdict is already computed and
+            // useful; a DB blip should not swallow it.
+        }
     }
 
     json response;

@@ -55,6 +55,7 @@
 #include <memory>
 #include <string>
 
+#include "application/ports/game_store.h"
 #include "application/ports/message_sink.h"
 #include "application/request_context.h"
 #include "application/result.h"
@@ -62,7 +63,6 @@
 #include "game/matchmaker.h"
 #include "game/room_manager.h"
 #include "protocol/request.h"
-#include "storage/database.h"
 
 namespace chess::application {
 
@@ -78,18 +78,18 @@ using SpectatorBroadcaster =
 
 class GameplayService {
 public:
-    /// All references must outlive the service. `db` may be null when
-    /// the server was launched without persistence — the service then
-    /// skips the `persist_game` step but never fails a request because
-    /// of it. `foreign_sender` and `spectator_broadcaster` MUST NOT be
-    /// null; the constructor asserts otherwise (bad state, not a
-    /// runtime condition).
-    GameplayService(chess::game::RoomManager& rooms,
-                    chess::game::Matchmaker&  matchmaker,
-                    chess::game::AIPlayer&    ai,
-                    ForeignSender             foreign_sender,
-                    SpectatorBroadcaster      spectator_broadcaster,
-                    chess::storage::Database* db);
+    /// All references must outlive the service. `game_store` may be
+    /// null when the server was launched without persistence — the
+    /// service then skips the `persist_game` step but never fails a
+    /// request because of it. `foreign_sender` and
+    /// `spectator_broadcaster` MUST NOT be null; the constructor
+    /// asserts otherwise (bad state, not a runtime condition).
+    GameplayService(chess::game::RoomManager&              rooms,
+                    chess::game::Matchmaker&               matchmaker,
+                    chess::game::AIPlayer&                 ai,
+                    ForeignSender                          foreign_sender,
+                    SpectatorBroadcaster                   spectator_broadcaster,
+                    chess::application::ports::GameStore*  game_store);
 
     // ── LLD-1-migrated routes (typed request, MessageSink caller) ──
 
@@ -163,12 +163,12 @@ private:
     void persist_game(chess::game::GameRoom* room,
                       chess::GameStatus status);
 
-    chess::game::RoomManager&  rooms_;
-    chess::game::Matchmaker&   matchmaker_;
-    chess::game::AIPlayer&     ai_;
-    ForeignSender              foreign_sender_;
-    SpectatorBroadcaster       spectator_broadcaster_;
-    chess::storage::Database*  db_ = nullptr;
+    chess::game::RoomManager&              rooms_;
+    chess::game::Matchmaker&               matchmaker_;
+    chess::game::AIPlayer&                 ai_;
+    ForeignSender                          foreign_sender_;
+    SpectatorBroadcaster                   spectator_broadcaster_;
+    chess::application::ports::GameStore*  game_store_ = nullptr;
 
     /// Local monotonically-increasing player id for in-memory bookkeeping.
     /// Distinct from `players.id` (the DB primary key), which is what

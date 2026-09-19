@@ -52,7 +52,7 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
         room_mgr_, matchmaker_, ai_player_,
         std::move(foreign_sender),
         std::move(spectator_broadcaster),
-        db_);
+        game_store_);
 
     gameplay_handler_ = std::make_unique<handlers::GameplayHandler>(
         *gameplay_service_, identity_.get(), connection_lookup_);
@@ -69,7 +69,7 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
 
     // ── LLD-2.3: build and register the analysis family. ──
 
-    analysis_service_ = std::make_unique<application::AnalysisService>(db_);
+    analysis_service_ = std::make_unique<application::AnalysisService>(db_, game_store_);
     analysis_handler_ = std::make_unique<handlers::AnalysisHandler>(
         *analysis_service_, connection_lookup_);
     analysis_handler_->register_handlers(router);

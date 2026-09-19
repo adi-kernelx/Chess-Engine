@@ -74,7 +74,7 @@ int main() {
     // ── analyze_position ──────────────────────────────────────────
 
     run_test("analyze_position empty FEN → error", [] {
-        AnalysisService svc(nullptr);
+        AnalysisService svc(nullptr, nullptr);
         FakeSink sink;
         svc.analyze_position(make_ctx(1), "", 8, sink);
         if (sink.frames.size() != 1) return false;
@@ -83,7 +83,7 @@ int main() {
     });
 
     run_test("analyze_position invalid FEN → error", [] {
-        AnalysisService svc(nullptr);
+        AnalysisService svc(nullptr, nullptr);
         FakeSink sink;
         svc.analyze_position(make_ctx(1), "this is not a fen", 8, sink);
         if (sink.frames.size() != 1) return false;
@@ -92,7 +92,7 @@ int main() {
     });
 
     run_test("analyze_position on checkmate → terminal payload", [] {
-        AnalysisService svc(nullptr);
+        AnalysisService svc(nullptr, nullptr);
         FakeSink sink;
         // Fool's mate: 1.f3 e5 2.g4 Qh4#. Black to move — wait, that's
         // already mate against White. FEN of the resulting position with
@@ -107,7 +107,7 @@ int main() {
     });
 
     run_test("analyze_position on starting pos → analysis payload", [] {
-        AnalysisService svc(nullptr);
+        AnalysisService svc(nullptr, nullptr);
         FakeSink sink;
         // Depth 3 is fast enough to finish well under ANALYZE_TIME_MS.
         svc.analyze_position(make_ctx(1),
@@ -122,7 +122,7 @@ int main() {
     });
 
     run_test("analyze_position clamps requested depth to [1, 15]", [] {
-        AnalysisService svc(nullptr);
+        AnalysisService svc(nullptr, nullptr);
         FakeSink sink;
         // Ask for depth 999 — should be clamped, and the search should
         // complete under the time budget, capped by depth 15.
@@ -140,7 +140,7 @@ int main() {
     // ── analyze_game ──────────────────────────────────────────────
 
     run_test("analyze_game with null db → no-database error", [] {
-        AnalysisService svc(nullptr);
+        AnalysisService svc(nullptr, nullptr);
         FakeSink sink;
         svc.analyze_game(make_ctx(1), 1, sink);
         if (sink.frames.size() != 1) return false;
@@ -154,7 +154,7 @@ int main() {
         // isn't reachable without a live cluster. This test exercises
         // the "no database" branch — the invariant it documents is
         // that game_id == 0 never reaches the DB.
-        AnalysisService svc(nullptr);
+        AnalysisService svc(nullptr, nullptr);
         FakeSink sink;
         svc.analyze_game(make_ctx(1), 0, sink);
         if (sink.frames.size() != 1) return false;
@@ -164,7 +164,7 @@ int main() {
     });
 
     run_test("analyze_game with negative game_id → invalid (null db path)", [] {
-        AnalysisService svc(nullptr);
+        AnalysisService svc(nullptr, nullptr);
         FakeSink sink;
         svc.analyze_game(make_ctx(1), -5, sink);
         if (sink.frames.size() != 1) return false;

@@ -30,6 +30,7 @@
 #include "game/room_manager.h"
 #include "net/tcp_server.h"
 #include "storage/database.h"
+#include "storage/postgres_game_store.h"
 
 #include <atomic>
 #include <cerrno>
@@ -166,13 +167,14 @@ int main() {
     // These are heap-allocated because their lifetime must span the run() call
     // AND they must be destroyed BEFORE the router that references them. Using
     // unique_ptrs on the stack in main() satisfies both.
-    std::unique_ptr<storage::Database>       db;
-    std::unique_ptr<auth::TokenSigner>       signer;
-    std::unique_ptr<auth::SupabaseVerifier>  google;
-    std::unique_ptr<crypto::MlDsa65KeyPair>  identity;
-    std::unique_ptr<crypto::SealedKeyStore>  seal_store;
-    std::unique_ptr<crypto::SealedRegistry>  sealed_reg;
-    std::unique_ptr<auth::AuthHandler>       auth_handler;
+    std::unique_ptr<storage::Database>          db;
+    std::unique_ptr<auth::TokenSigner>          signer;
+    std::unique_ptr<auth::SupabaseVerifier>     google;
+    std::unique_ptr<crypto::MlDsa65KeyPair>     identity;
+    std::unique_ptr<crypto::SealedKeyStore>     seal_store;
+    std::unique_ptr<crypto::SealedRegistry>     sealed_reg;
+    std::unique_ptr<auth::AuthHandler>          auth_handler;
+    std::unique_ptr<storage::PostgresGameStore> game_store;
 
     bool auth_enabled = false;
     {
@@ -250,10 +252,14 @@ int main() {
         auth_handler->register_handlers(server.get_router());
         core::Logger::info("main", "startup", "Auth handlers registered");
 
-        // Wire game persistence: GameHandler needs the DB for save_completed_game,
-        // get_profile, get_leaderboard, and the signer for auth extraction.
+        // Wire game persistence: GameHandler needs the DB for the read
+        // paths (get_profile / get_leaderboard / get_game / analyze_game
+        // reads), the GameStore port for the write paths (persist_game,
+        // save_cheat_report), and the signer for auth extraction.
         game_handler.set_database(db.get());
         game_handler.set_signer(signer.get());
+        game_store = std::make_unique<storage::PostgresGameStore>(*db);
+        game_handler.set_game_store(game_store.get());
         core::Logger::info("main", "startup", "Game persistence enabled");
     }
 

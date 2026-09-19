@@ -49,6 +49,7 @@
 #include <cstdint>
 #include <string>
 
+#include "application/ports/game_store.h"
 #include "application/ports/message_sink.h"
 #include "application/request_context.h"
 #include "application/result.h"
@@ -58,11 +59,16 @@ namespace chess::application {
 
 class AnalysisService {
 public:
-    /// `db` may be null when the server was launched without
-    /// persistence. `analyze_game` then replies with the pre-refactor
-    /// "Analysis unavailable — no database" error string;
-    /// `analyze_position` needs no DB and works unconditionally.
-    explicit AnalysisService(chess::storage::Database* db);
+    /// `db` and `game_store` both live at nullable positions that
+    /// mirror the pre-LLD-3 semantics. `analyze_game` needs both: the
+    /// read side to find the game and load move_times (still direct on
+    /// Database — LLD-3.3 introduces PlayerQueries for that), and the
+    /// write side to persist the cheat reports (via GameStore, LLD-3.2).
+    /// Null `db` short-circuits to the pre-refactor
+    /// "Analysis unavailable — no database" error;
+    /// `analyze_position` needs neither and works unconditionally.
+    AnalysisService(chess::storage::Database*             db,
+                    chess::application::ports::GameStore* game_store);
 
     void analyze_position(const RequestContext& ctx,
                           const std::string&    fen,
@@ -74,7 +80,8 @@ public:
                           MessageSink&          caller_sink);
 
 private:
-    chess::storage::Database*  db_ = nullptr;
+    chess::storage::Database*             db_         = nullptr;
+    chess::application::ports::GameStore* game_store_ = nullptr;
 };
 
 } // namespace chess::application
