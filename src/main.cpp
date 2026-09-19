@@ -29,8 +29,10 @@
 #include "game/matchmaker.h"
 #include "game/room_manager.h"
 #include "net/tcp_server.h"
+#include "application/ports/null_persistence.h"
 #include "storage/database.h"
 #include "storage/postgres_game_store.h"
+#include "storage/postgres_player_queries.h"
 
 #include <atomic>
 #include <cerrno>
@@ -167,14 +169,17 @@ int main() {
     // These are heap-allocated because their lifetime must span the run() call
     // AND they must be destroyed BEFORE the router that references them. Using
     // unique_ptrs on the stack in main() satisfies both.
-    std::unique_ptr<storage::Database>          db;
-    std::unique_ptr<auth::TokenSigner>          signer;
-    std::unique_ptr<auth::SupabaseVerifier>     google;
-    std::unique_ptr<crypto::MlDsa65KeyPair>     identity;
-    std::unique_ptr<crypto::SealedKeyStore>     seal_store;
-    std::unique_ptr<crypto::SealedRegistry>     sealed_reg;
-    std::unique_ptr<auth::AuthHandler>          auth_handler;
-    std::unique_ptr<storage::PostgresGameStore> game_store;
+    std::unique_ptr<storage::Database>                    db;
+    std::unique_ptr<auth::TokenSigner>                    signer;
+    std::unique_ptr<auth::SupabaseVerifier>               google;
+    std::unique_ptr<crypto::MlDsa65KeyPair>               identity;
+    std::unique_ptr<crypto::SealedKeyStore>               seal_store;
+    std::unique_ptr<crypto::SealedRegistry>               sealed_reg;
+    std::unique_ptr<auth::AuthHandler>                    auth_handler;
+    // LLD-3.3 — persistence ports; always non-null. Real adapter when
+    // the DB is up, Null adapter (capability-disabled) otherwise.
+    std::unique_ptr<application::ports::GameStore>        game_store;
+    std::unique_ptr<application::ports::PlayerQueries>    player_queries;
 
     bool auth_enabled = false;
     {
@@ -252,15 +257,31 @@ int main() {
         auth_handler->register_handlers(server.get_router());
         core::Logger::info("main", "startup", "Auth handlers registered");
 
-        // Wire game persistence: GameHandler needs the DB for the read
-        // paths (get_profile / get_leaderboard / get_game / analyze_game
-        // reads), the GameStore port for the write paths (persist_game,
-        // save_cheat_report), and the signer for auth extraction.
+        // Wire game persistence: signer for auth extraction, Database*
+        // for the tournament family (which still calls Database directly
+        // — its own port is a future slice), plus the LLD-3.2/3.3 ports
+        // for the game family. Both ports get their real Postgres
+        // adapters here.
         game_handler.set_database(db.get());
         game_handler.set_signer(signer.get());
-        game_store = std::make_unique<storage::PostgresGameStore>(*db);
+        game_store     = std::make_unique<storage::PostgresGameStore>(*db);
+        player_queries = std::make_unique<storage::PostgresPlayerQueries>(*db);
         game_handler.set_game_store(game_store.get());
+        game_handler.set_player_queries(player_queries.get());
         core::Logger::info("main", "startup", "Game persistence enabled");
+    }
+
+    // LLD-3.3 capability-disabled composition: if auth was NOT enabled,
+    // the DB is unavailable. Wire the Null adapters so services still
+    // receive real (non-null) references and every DB-touching route
+    // uniformly emits its pre-refactor "unavailable" wire error.
+    if (!game_store) {
+        game_store     = std::make_unique<application::ports::NullGameStore>();
+        player_queries = std::make_unique<application::ports::NullPlayerQueries>();
+        game_handler.set_game_store(game_store.get());
+        game_handler.set_player_queries(player_queries.get());
+        core::Logger::info("main", "startup",
+            "Persistence disabled (Null adapters wired)");
     }
 
     // LLD-2.1: register AFTER db/signer are wired (see note above).

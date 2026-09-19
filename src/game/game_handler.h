@@ -71,6 +71,7 @@
 #include "application/game_query_service.h"
 #include "application/gameplay_service.h"
 #include "application/ports/game_store.h"
+#include "application/ports/player_queries.h"
 #include "application/tournament_service.h"
 #include "auth/token.h"
 #include "game/ai_player.h"
@@ -112,12 +113,14 @@ public:
     }
     void set_database(storage::Database* db) { db_ = db; }
     void set_signer(auth::TokenSigner* s)    { signer_ = s; }
-    /// Set the GameStore port for persistence (LLD-3.2). May be null,
-    /// in which case GameplayService::persist_game and
-    /// AnalysisService::analyze_game's cheat-report writes are
-    /// skipped — matching the pre-LLD-3 "no database configured"
-    /// semantics.
+    /// Set the GameStore port (LLD-3.2). Must be non-null before
+    /// `register_handlers` — in capability-disabled mode pass a
+    /// `NullGameStore`; the port's `capable()` method distinguishes.
     void set_game_store(application::ports::GameStore* store) { game_store_ = store; }
+    /// Set the PlayerQueries port (LLD-3.3). Must be non-null before
+    /// `register_handlers` — same capability-disabled composition
+    /// rule as `set_game_store`.
+    void set_player_queries(application::ports::PlayerQueries* q) { player_queries_ = q; }
 
 private:
     // ── Un-migrated family handlers (LLD-2.2 / 2.3 / 2.4 targets) ──
@@ -141,9 +144,10 @@ private:
     Matchmaker&   matchmaker_;
     AIPlayer      ai_player_;
 
-    storage::Database*             db_          = nullptr;
-    auth::TokenSigner*             signer_      = nullptr;
-    application::ports::GameStore* game_store_  = nullptr;
+    storage::Database*                 db_             = nullptr;
+    auth::TokenSigner*                 signer_         = nullptr;
+    application::ports::GameStore*     game_store_     = nullptr;
+    application::ports::PlayerQueries* player_queries_ = nullptr;
 
     std::function<net::Connection*(int fd)> connection_lookup_;
 

@@ -78,10 +78,11 @@ using SpectatorBroadcaster =
 
 class GameplayService {
 public:
-    /// All references must outlive the service. `game_store` may be
-    /// null when the server was launched without persistence — the
-    /// service then skips the `persist_game` step but never fails a
-    /// request because of it. `foreign_sender` and
+    /// All references must outlive the service. `game_store` is a
+    /// non-null reference — in capability-disabled mode the composition
+    /// root injects a `NullGameStore` and `game_store.capable()`
+    /// returns false, causing `persist_game` to short-circuit silently
+    /// (see the port header). `foreign_sender` and
     /// `spectator_broadcaster` MUST NOT be null; the constructor
     /// asserts otherwise (bad state, not a runtime condition).
     GameplayService(chess::game::RoomManager&              rooms,
@@ -89,7 +90,7 @@ public:
                     chess::game::AIPlayer&                 ai,
                     ForeignSender                          foreign_sender,
                     SpectatorBroadcaster                   spectator_broadcaster,
-                    chess::application::ports::GameStore*  game_store);
+                    chess::application::ports::GameStore&  game_store);
 
     // ── LLD-1-migrated routes (typed request, MessageSink caller) ──
 
@@ -168,7 +169,7 @@ private:
     chess::game::AIPlayer&                 ai_;
     ForeignSender                          foreign_sender_;
     SpectatorBroadcaster                   spectator_broadcaster_;
-    chess::application::ports::GameStore*  game_store_ = nullptr;
+    chess::application::ports::GameStore&  game_store_;
 
     /// Local monotonically-increasing player id for in-memory bookkeeping.
     /// Distinct from `players.id` (the DB primary key), which is what

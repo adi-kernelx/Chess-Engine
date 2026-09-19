@@ -75,6 +75,16 @@ class GameStore {
 public:
     virtual ~GameStore() = default;
 
+    /// True when this store can actually persist. Used by
+    /// `GameplayService::persist_game` to short-circuit silently in
+    /// capability-disabled mode (no `DATABASE_URL` at boot): calling
+    /// through to a `NullGameStore` would work but would log a spurious
+    /// "Failed to persist … (disconnected)" line for every finished
+    /// game. The read side has no equivalent because reads translate
+    /// their `Disconnected` outcome into a client-facing error the
+    /// user sees; a silent no-op is only correct for the write side.
+    virtual bool capable() const = 0;
+
     /// Persist a completed game atomically. Returns an outcome carrying
     /// the assigned `game_id` and the calculated `EloUpdate` on success,
     /// or a typed `StorageError` on failure. Idempotency on retry is

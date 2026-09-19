@@ -90,7 +90,7 @@ GameplayService::GameplayService(chess::game::RoomManager&              rooms,
                                  chess::game::AIPlayer&                 ai,
                                  ForeignSender                          foreign_sender,
                                  SpectatorBroadcaster                   spectator_broadcaster,
-                                 chess::application::ports::GameStore*  game_store)
+                                 chess::application::ports::GameStore&  game_store)
     : rooms_(rooms), matchmaker_(matchmaker), ai_(ai),
       foreign_sender_(std::move(foreign_sender)),
       spectator_broadcaster_(std::move(spectator_broadcaster)),
@@ -563,7 +563,7 @@ void GameplayService::trigger_ai_move(std::shared_ptr<chess::game::GameRoom> roo
 
 void GameplayService::persist_game(chess::game::GameRoom* room,
                                    chess::GameStatus status) {
-    if (!game_store_) return;                                 // Persistence disabled
+    if (!game_store_.capable()) return;                       // Persistence disabled
     if (room->is_ai_game()) return;                           // AI games are not persisted
 
     int64_t w_id = room->get_db_player_id(chess::Color::WHITE);
@@ -596,7 +596,7 @@ void GameplayService::persist_game(chess::game::GameRoom* room,
     }
     game.moves = std::move(moves);
 
-    auto result = game_store_->save_completed_game(game);
+    auto result = game_store_.save_completed_game(game);
 
     if (result.ok()) {
         chess::core::Logger::info("game", "GameplayService",

@@ -46,6 +46,7 @@
 
 #include "application/game_query_service.h"
 #include "application/ports/message_sink.h"
+#include "application/ports/null_persistence.h"
 #include "application/request_context.h"
 #include "core/types.h"
 #include "game/room_manager.h"
@@ -106,7 +107,8 @@ int main() {
 
     run_test("list_live_games on empty RoomManager", [] {
         chess::game::RoomManager rooms;
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.list_live_games(make_ctx(100), sink);
         if (sink.frames.size() != 1) return false;
@@ -118,7 +120,8 @@ int main() {
     run_test("list_live_games includes an IN_PROGRESS room", [] {
         chess::game::RoomManager rooms;
         make_live_room(rooms, 1, 10, "alice", 2, 11, "bob");
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.list_live_games(make_ctx(100), sink);
         if (sink.frames.size() != 1) return false;
@@ -134,7 +137,8 @@ int main() {
 
     run_test("spectate with game_id==0 → invalid", [] {
         chess::game::RoomManager rooms;
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.spectate(make_ctx(50), "watcher", 0, sink);
         if (sink.frames.size() != 1) return false;
@@ -145,7 +149,8 @@ int main() {
 
     run_test("spectate on unknown game_id → not found", [] {
         chess::game::RoomManager rooms;
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.spectate(make_ctx(50), "watcher", 9999, sink);
         if (sink.frames.size() != 1) return false;
@@ -157,7 +162,8 @@ int main() {
     run_test("spectate on IN_PROGRESS room → spectate_start", [] {
         chess::game::RoomManager rooms;
         auto room = make_live_room(rooms, 1, 10, "alice", 2, 11, "bob");
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.spectate(make_ctx(77), "watcher", room->get_id(), sink);
         if (sink.frames.size() != 1) return false;
@@ -172,7 +178,8 @@ int main() {
     run_test("spectate rejects a seated player of same room", [] {
         chess::game::RoomManager rooms;
         auto room = make_live_room(rooms, 1, 10, "alice", 2, 11, "bob");
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         // fd 10 is white's seat in this room.
         svc.spectate(make_ctx(10), "alice", room->get_id(), sink);
@@ -187,7 +194,8 @@ int main() {
         chess::game::RoomManager rooms;
         auto r1 = make_live_room(rooms, 1, 10, "alice", 2, 11, "bob");
         auto r2 = make_live_room(rooms, 3, 20, "carol", 4, 21, "dave");
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         // fd 10 is seated in r1 and wants to spectate r2.
         svc.spectate(make_ctx(10), "alice", r2->get_id(), sink);
@@ -202,7 +210,8 @@ int main() {
 
     run_test("stop_spectating with unknown game_id → still ack", [] {
         chess::game::RoomManager rooms;
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.stop_spectating(make_ctx(50), 7777, sink);
         if (sink.frames.size() != 1) return false;
@@ -214,7 +223,8 @@ int main() {
         chess::game::RoomManager rooms;
         auto room = make_live_room(rooms, 1, 10, "alice", 2, 11, "bob");
         room->add_spectator(77);
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.stop_spectating(make_ctx(77), room->get_id(), sink);
         if (sink.frames.size() != 1) return false;
@@ -228,7 +238,8 @@ int main() {
 
     run_test("get_profile with null db → no-database error", [] {
         chess::game::RoomManager rooms;
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.get_profile(make_ctx(1), "alice", 0, sink);
         if (sink.frames.size() != 1) return false;
@@ -239,7 +250,8 @@ int main() {
 
     run_test("get_leaderboard with null db → no-database error", [] {
         chess::game::RoomManager rooms;
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.get_leaderboard(make_ctx(1), 20, 0, sink);
         if (sink.frames.size() != 1) return false;
@@ -250,7 +262,8 @@ int main() {
 
     run_test("get_history with null db → no-database error", [] {
         chess::game::RoomManager rooms;
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.get_history(make_ctx(1), "alice", 20, sink);
         if (sink.frames.size() != 1) return false;
@@ -261,7 +274,8 @@ int main() {
 
     run_test("get_game with null db → no-database error", [] {
         chess::game::RoomManager rooms;
-        GameQueryService svc(rooms, nullptr);
+        ports::NullPlayerQueries null_queries;
+        GameQueryService svc(rooms, null_queries);
         FakeSink sink;
         svc.get_game(make_ctx(1), 1, sink);
         if (sink.frames.size() != 1) return false;

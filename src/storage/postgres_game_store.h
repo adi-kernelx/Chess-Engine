@@ -38,6 +38,8 @@ public:
     /// pointer to the services.
     explicit PostgresGameStore(Database& db);
 
+    bool capable() const override { return true; }
+
     chess::application::ports::SaveGameOutcome save_completed_game(
         const CompletedGame& game) override;
 

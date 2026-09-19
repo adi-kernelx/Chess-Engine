@@ -51,24 +51,22 @@
 
 #include "application/ports/game_store.h"
 #include "application/ports/message_sink.h"
+#include "application/ports/player_queries.h"
 #include "application/request_context.h"
 #include "application/result.h"
-#include "storage/database.h"
 
 namespace chess::application {
 
 class AnalysisService {
 public:
-    /// `db` and `game_store` both live at nullable positions that
-    /// mirror the pre-LLD-3 semantics. `analyze_game` needs both: the
-    /// read side to find the game and load move_times (still direct on
-    /// Database — LLD-3.3 introduces PlayerQueries for that), and the
-    /// write side to persist the cheat reports (via GameStore, LLD-3.2).
-    /// Null `db` short-circuits to the pre-refactor
-    /// "Analysis unavailable — no database" error;
-    /// `analyze_position` needs neither and works unconditionally.
-    AnalysisService(chess::storage::Database*             db,
-                    chess::application::ports::GameStore* game_store);
+    /// Both port references must outlive the service. In capability-
+    /// disabled mode the composition root injects `NullPlayerQueries`
+    /// + `NullGameStore`; `analyze_game` then hits the port, gets a
+    /// `Disconnected` outcome from the read side, and emits the
+    /// pre-refactor "Analysis unavailable — no database" wire error.
+    /// `analyze_position` uses neither port and works unconditionally.
+    AnalysisService(chess::application::ports::PlayerQueries& queries,
+                    chess::application::ports::GameStore&     game_store);
 
     void analyze_position(const RequestContext& ctx,
                           const std::string&    fen,
@@ -80,8 +78,8 @@ public:
                           MessageSink&          caller_sink);
 
 private:
-    chess::storage::Database*             db_         = nullptr;
-    chess::application::ports::GameStore* game_store_ = nullptr;
+    chess::application::ports::PlayerQueries& queries_;
+    chess::application::ports::GameStore&     game_store_;
 };
 
 } // namespace chess::application

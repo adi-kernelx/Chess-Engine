@@ -85,9 +85,9 @@ std::vector<std::string> split_uci_moves(const std::string& s) {
 
 } // namespace
 
-GameQueryService::GameQueryService(chess::game::RoomManager& rooms,
-                                   chess::storage::Database* db)
-    : rooms_(rooms), db_(db) {}
+GameQueryService::GameQueryService(chess::game::RoomManager&                 rooms,
+                                   chess::application::ports::PlayerQueries& queries)
+    : rooms_(rooms), queries_(queries) {}
 
 // ── get_profile ─────────────────────────────────────────────────────
 
@@ -95,22 +95,26 @@ void GameQueryService::get_profile(const RequestContext& /*ctx*/,
                                    const std::string&    username,
                                    int                   offset,
                                    MessageSink&          caller_sink) {
-    if (!db_) {
-        caller_sink.send(make_error_frame("Profiles are not available (no database)"));
-        return;
-    }
     if (username.empty()) {
         caller_sink.send(make_error_frame("Missing 'username' field"));
         return;
     }
 
-    auto profile = chess::storage::find_player_by_username(*db_, username);
+    auto profile_res = queries_.find_player_by_username(username);
+    if (!profile_res.ok) {
+        caller_sink.send(make_error_frame("Profiles are not available (no database)"));
+        return;
+    }
+    const auto& profile = profile_res.value;
     if (!profile) {
         caller_sink.send(make_error_frame("Player '" + username + "' not found"));
         return;
     }
 
-    auto recent = chess::storage::get_player_games(*db_, profile->player_id, 20, offset);
+    auto recent_res = queries_.get_player_games(profile->player_id, 20, offset);
+    // Read failure here is soft — same behaviour as the pre-refactor
+    // free function which logs internally and returns empty on error.
+    const auto& recent = recent_res.value;
 
     json response;
     response["type"]         = "profile";
@@ -145,16 +149,16 @@ void GameQueryService::get_leaderboard(const RequestContext& /*ctx*/,
                                        int                   limit,
                                        int                   offset,
                                        MessageSink&          caller_sink) {
-    if (!db_) {
-        caller_sink.send(make_error_frame("Leaderboard is not available (no database)"));
-        return;
-    }
-
     // Clamp limit to a reasonable maximum — same policy as pre-refactor.
     if (limit > 100) limit = 100;
     if (limit < 1)   limit = 1;
 
-    auto entries = chess::storage::get_leaderboard(*db_, limit, offset);
+    auto entries_res = queries_.get_leaderboard(limit, offset);
+    if (!entries_res.ok) {
+        caller_sink.send(make_error_frame("Leaderboard is not available (no database)"));
+        return;
+    }
+    const auto& entries = entries_res.value;
 
     json response;
     response["type"]    = "leaderboard";
@@ -181,23 +185,25 @@ void GameQueryService::get_history(const RequestContext& /*ctx*/,
                                    const std::string&    username,
                                    int                   limit,
                                    MessageSink&          caller_sink) {
-    if (!db_) {
-        caller_sink.send(make_error_frame("History unavailable — no database"));
-        return;
-    }
     if (username.empty()) {
         caller_sink.send(make_error_frame("Missing 'username' field"));
         return;
     }
     limit = std::clamp(limit, 1, 100);
 
-    auto profile = chess::storage::find_player_by_username(*db_, username);
+    auto profile_res = queries_.find_player_by_username(username);
+    if (!profile_res.ok) {
+        caller_sink.send(make_error_frame("History unavailable \xE2\x80\x94 no database"));
+        return;
+    }
+    const auto& profile = profile_res.value;
     if (!profile) {
         caller_sink.send(make_error_frame("Player not found: " + username));
         return;
     }
 
-    auto games = chess::storage::get_player_games(*db_, profile->player_id, limit, 0);
+    auto games_res = queries_.get_player_games(profile->player_id, limit, 0);
+    const auto& games = games_res.value;
 
     json response;
     response["type"]     = "history";
@@ -225,39 +231,28 @@ void GameQueryService::get_history(const RequestContext& /*ctx*/,
 void GameQueryService::get_game(const RequestContext& /*ctx*/,
                                 int64_t               game_id,
                                 MessageSink&          caller_sink) {
-    if (!db_) {
-        caller_sink.send(make_error_frame("Replay unavailable — server has no database"));
-        return;
-    }
     if (game_id <= 0) {
         caller_sink.send(make_error_frame("Missing or invalid game_id"));
         return;
     }
 
-    auto stored = chess::storage::find_game_by_id(*db_, game_id);
-    if (!stored) {
+    auto stored_res = queries_.find_game_by_id(game_id);
+    if (!stored_res.ok) {
+        caller_sink.send(make_error_frame("Replay unavailable \xE2\x80\x94 server has no database"));
+        return;
+    }
+    if (!stored_res.value.has_value()) {
         caller_sink.send(make_error_frame("Game " + std::to_string(game_id) + " not found"));
         return;
     }
+    const auto& stored = stored_res.value;
 
     // Load per-ply think times as {ply → ms}. Missing rows → 0 ms.
-    std::vector<int> think_by_ply;
-    {
-        auto r = db_->exec(
-            "SELECT ply_number, think_time_ms FROM move_times"
-            " WHERE game_id = $1 ORDER BY ply_number",
-            {chess::storage::Param::int64(game_id)});
-        if (r.ok) {
-            think_by_ply.resize(r.rows.size() + 1, 0);
-            for (const auto& row : r.rows) {
-                int p = std::stoi(row.at(0));
-                int t = std::stoi(row.at(1));
-                if (p >= 0 && static_cast<size_t>(p) < think_by_ply.size()) {
-                    think_by_ply[p] = t;
-                }
-            }
-        }
-    }
+    // Read failure here is soft — falls back to an empty timeline,
+    // matching the pre-refactor inline QueryResult behaviour.
+    auto times_res = queries_.get_move_times_by_ply(game_id);
+    std::vector<int> think_by_ply = times_res.ok ? std::move(times_res.value)
+                                                 : std::vector<int>{};
 
     // Reconstruct every board position by replaying the persisted UCI
     // string. Bail out on malformed data with a partial payload rather

@@ -101,9 +101,9 @@ json report_to_json(const chess::analysis::AnalysisReport& r) {
 
 } // namespace
 
-AnalysisService::AnalysisService(chess::storage::Database*             db,
-                                 chess::application::ports::GameStore* game_store)
-    : db_(db), game_store_(game_store) {}
+AnalysisService::AnalysisService(chess::application::ports::PlayerQueries& queries,
+                                 chess::application::ports::GameStore&     game_store)
+    : queries_(queries), game_store_(game_store) {}
 
 // ── analyze_position ────────────────────────────────────────────────
 
@@ -162,39 +162,32 @@ void AnalysisService::analyze_position(const RequestContext& /*ctx*/,
 void AnalysisService::analyze_game(const RequestContext& /*ctx*/,
                                    int64_t               game_id,
                                    MessageSink&          caller_sink) {
-    if (!db_) {
-        caller_sink.send(make_error_frame("Analysis unavailable \xE2\x80\x94 no database"));
-        return;
-    }
     if (game_id <= 0) {
         caller_sink.send(make_error_frame("Missing or invalid game_id"));
         return;
     }
 
-    auto stored = chess::storage::find_game_by_id(*db_, game_id);
-    if (!stored) {
+    auto stored_res = queries_.find_game_by_id(game_id);
+    if (!stored_res.ok) {
+        // Storage-level failure (typically Disconnected — the
+        // capability-disabled case surfaces exactly here). Same wire
+        // string the pre-LLD-3 null-db check used to emit.
+        caller_sink.send(make_error_frame("Analysis unavailable \xE2\x80\x94 no database"));
+        return;
+    }
+    if (!stored_res.value.has_value()) {
         caller_sink.send(make_error_frame("Game " + std::to_string(game_id) + " not found"));
         return;
     }
+    const auto& stored = stored_res.value;
 
-    // Load per-ply think times keyed by ply_number.
-    std::vector<int> think_by_ply;
-    {
-        auto r = db_->exec(
-            "SELECT ply_number, think_time_ms FROM move_times"
-            " WHERE game_id = $1 ORDER BY ply_number",
-            {chess::storage::Param::int64(game_id)});
-        if (r.ok) {
-            think_by_ply.resize(r.rows.size() + 1, 0);
-            for (const auto& row : r.rows) {
-                int p = std::stoi(row.at(0));
-                int t = std::stoi(row.at(1));
-                if (p >= 0 && static_cast<size_t>(p) < think_by_ply.size()) {
-                    think_by_ply[p] = t;
-                }
-            }
-        }
-    }
+    // Load per-ply think times keyed by ply_number. Read failure here
+    // is soft — we log implicitly by falling back to an empty timeline
+    // (same behaviour the pre-refactor inline query had when its
+    // QueryResult failed).
+    auto times_res = queries_.get_move_times_by_ply(game_id);
+    std::vector<int> think_by_ply = times_res.ok ? std::move(times_res.value)
+                                                 : std::vector<int>{};
 
     // Reconstruct positions; for each ply, capture the pre-move
     // complexity, engine's best move, and whether the actual move
@@ -256,16 +249,15 @@ void AnalysisService::analyze_game(const RequestContext& /*ctx*/,
 
     // Persist both sides through the GameStore port. save_cheat_report
     // is upsert-on-conflict, so re-running analyze_game on the same
-    // game refreshes rather than duplicates. `game_store_` may be null
-    // (persistence disabled) — skip the writes in that case; the
-    // verdict is still returned to the caller.
-    if (game_store_) {
-        auto save_w = game_store_->save_cheat_report(stored->game_id,
-                                                     stored->white_id, "w",
-                                                     white_report);
-        auto save_b = game_store_->save_cheat_report(stored->game_id,
-                                                     stored->black_id, "b",
-                                                     black_report);
+    // game refreshes rather than duplicates. Skip when the store is
+    // capability-disabled; the verdict is still returned to the caller.
+    if (game_store_.capable()) {
+        auto save_w = game_store_.save_cheat_report(stored->game_id,
+                                                    stored->white_id, "w",
+                                                    white_report);
+        auto save_b = game_store_.save_cheat_report(stored->game_id,
+                                                    stored->black_id, "b",
+                                                    black_report);
         if (!save_w.ok() || !save_b.ok()) {
             const auto& failed = save_w.ok() ? save_b : save_w;
             chess::core::Logger::warn("game", "AntiCheat",

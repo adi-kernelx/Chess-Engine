@@ -47,6 +47,7 @@
 #include "net/websocket.h"
 #include "storage/database.h"
 #include "storage/postgres_game_store.h"
+#include "storage/postgres_player_queries.h"
 #include "storage/game_repo.h"
 
 using json = nlohmann::json;
@@ -527,7 +528,9 @@ int main() {
     GameHandler  handler(room_mgr, matchmaker);
     handler.set_database(&db);
     storage::PostgresGameStore game_store(db);
+    storage::PostgresPlayerQueries player_queries(db);
     handler.set_game_store(&game_store);
+    handler.set_player_queries(&player_queries);
     handler.set_signer(&signer);
     handler.set_connection_lookup([](int) -> net::Connection* { return nullptr; });
     net::MessageRouter router;

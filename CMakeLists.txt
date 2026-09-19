@@ -51,6 +51,7 @@ set(SOURCES
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
     src/storage/postgres_game_store.cpp
+    src/storage/postgres_player_queries.cpp
     src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
@@ -524,6 +525,7 @@ add_executable(test_auth_required
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
     src/storage/postgres_game_store.cpp
+    src/storage/postgres_player_queries.cpp
     src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
@@ -579,6 +581,7 @@ add_executable(test_spectator
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
     src/storage/postgres_game_store.cpp
+    src/storage/postgres_player_queries.cpp
     src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
@@ -633,6 +636,7 @@ add_executable(test_replay
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
     src/storage/postgres_game_store.cpp
+    src/storage/postgres_player_queries.cpp
     src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
@@ -688,6 +692,7 @@ add_executable(test_anti_cheat
     src/application/gameplay_service.cpp
     src/application/auth/identity_extractor.cpp
     src/storage/postgres_game_store.cpp
+    src/storage/postgres_player_queries.cpp
     src/storage/storage_error.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp

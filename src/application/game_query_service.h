@@ -47,21 +47,21 @@
 #include <string>
 
 #include "application/ports/message_sink.h"
+#include "application/ports/player_queries.h"
 #include "application/request_context.h"
 #include "application/result.h"
 #include "game/room_manager.h"
-#include "storage/database.h"
 
 namespace chess::application {
 
 class GameQueryService {
 public:
-    /// `rooms` must outlive the service. `db` may be null when the server
-    /// was launched without persistence — DB-backed routes then reply
-    /// with the pre-refactor "unavailable" error string rather than
-    /// pretending to serve empty results.
-    GameQueryService(chess::game::RoomManager& rooms,
-                     chess::storage::Database* db);
+    /// Both references must outlive the service. In capability-disabled
+    /// mode the composition root injects `NullPlayerQueries`; DB-backed
+    /// routes then hit the port, get a `Disconnected` outcome, and
+    /// emit the pre-refactor "unavailable" wire error string.
+    GameQueryService(chess::game::RoomManager&                 rooms,
+                     chess::application::ports::PlayerQueries& queries);
 
     // ── DB browse (no auth) ────────────────────────────────────────
 
@@ -105,8 +105,8 @@ public:
                          MessageSink&          caller_sink);
 
 private:
-    chess::game::RoomManager&  rooms_;
-    chess::storage::Database*  db_ = nullptr;
+    chess::game::RoomManager&                 rooms_;
+    chess::application::ports::PlayerQueries& queries_;
 };
 
 } // namespace chess::application

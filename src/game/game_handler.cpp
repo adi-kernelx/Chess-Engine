@@ -21,6 +21,7 @@
 
 #include "game/game_handler.h"
 
+#include <cassert>
 #include <memory>
 
 namespace chess {
@@ -48,11 +49,18 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
         this->broadcast_to_spectators(room, frame);
     };
 
+    // LLD-3.3 invariant: `game_store_` and `player_queries_` are non-null
+    // by the time we get here. `main.cpp` wires PostgresGameStore /
+    // PostgresPlayerQueries when the DB is available, or NullGameStore /
+    // NullPlayerQueries when it is not (capability-disabled mode).
+    assert(game_store_     != nullptr);
+    assert(player_queries_ != nullptr);
+
     gameplay_service_ = std::make_unique<application::GameplayService>(
         room_mgr_, matchmaker_, ai_player_,
         std::move(foreign_sender),
         std::move(spectator_broadcaster),
-        game_store_);
+        *game_store_);
 
     gameplay_handler_ = std::make_unique<handlers::GameplayHandler>(
         *gameplay_service_, identity_.get(), connection_lookup_);
@@ -62,14 +70,15 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
     // ── LLD-2.2: build and register the query / spectator / replay family. ──
 
     query_service_ = std::make_unique<application::GameQueryService>(
-        room_mgr_, db_);
+        room_mgr_, *player_queries_);
     query_handler_ = std::make_unique<handlers::QueryHandler>(
         *query_service_, identity_.get(), connection_lookup_);
     query_handler_->register_handlers(router);
 
     // ── LLD-2.3: build and register the analysis family. ──
 
-    analysis_service_ = std::make_unique<application::AnalysisService>(db_, game_store_);
+    analysis_service_ = std::make_unique<application::AnalysisService>(
+        *player_queries_, *game_store_);
     analysis_handler_ = std::make_unique<handlers::AnalysisHandler>(
         *analysis_service_, connection_lookup_);
     analysis_handler_->register_handlers(router);
