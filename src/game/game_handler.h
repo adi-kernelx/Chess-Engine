@@ -59,11 +59,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include "application/analysis_service.h"
 #include "application/auth/identity_extractor.h"
 #include "application/game_query_service.h"
 #include "application/gameplay_service.h"
 #include "auth/token.h"
 #include "game/ai_player.h"
+#include "game/handlers/analysis_handler.h"
 #include "game/handlers/gameplay_handler.h"
 #include "game/handlers/query_handler.h"
 #include "game/matchmaker.h"
@@ -103,10 +105,6 @@ public:
 
 private:
     // ── Un-migrated family handlers (LLD-2.2 / 2.3 / 2.4 targets) ──
-
-    // Analysis family (LLD-2.3 target)
-    void handle_analyze_position(net::Connection& conn, const std::string& message);
-    void handle_analyze_game(net::Connection& conn, const std::string& message);
 
     // Tournament family (LLD-2.4 target)
     void handle_create_tournament(net::Connection& conn, const std::string& message);
@@ -159,6 +157,11 @@ private:
 
     std::unique_ptr<application::GameQueryService>        query_service_;
     std::unique_ptr<handlers::QueryHandler>               query_handler_;
+
+    // ── LLD-2.3 objects, constructed on register_handlers ──
+
+    std::unique_ptr<application::AnalysisService>         analysis_service_;
+    std::unique_ptr<handlers::AnalysisHandler>            analysis_handler_;
 };
 
 } // namespace game

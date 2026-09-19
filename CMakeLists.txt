@@ -52,6 +52,8 @@ set(SOURCES
     src/application/auth/identity_extractor.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
+    src/game/handlers/analysis_handler.cpp
+    src/application/analysis_service.cpp
     src/game/matchmaker.cpp
     src/game/ai_player.cpp
     # Phase 7 — hand-written cryptographic primitives
@@ -504,6 +506,8 @@ add_executable(test_auth_required
     src/application/auth/identity_extractor.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
+    src/game/handlers/analysis_handler.cpp
+    src/application/analysis_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -553,6 +557,8 @@ add_executable(test_spectator
     src/application/auth/identity_extractor.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
+    src/game/handlers/analysis_handler.cpp
+    src/application/analysis_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -601,6 +607,8 @@ add_executable(test_replay
     src/application/auth/identity_extractor.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
+    src/game/handlers/analysis_handler.cpp
+    src/application/analysis_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -650,6 +658,8 @@ add_executable(test_anti_cheat
     src/application/auth/identity_extractor.cpp
     src/game/handlers/query_handler.cpp
     src/application/game_query_service.cpp
+    src/game/handlers/analysis_handler.cpp
+    src/application/analysis_service.cpp
     src/protocol/json_codec.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
@@ -769,3 +779,29 @@ add_executable(test_game_query_service
 )
 target_include_directories(test_game_query_service PRIVATE src third_party)
 target_link_libraries(test_game_query_service PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
+
+# Test: LLD-2.3 AnalysisService.
+# Seam-level tests: a fake MessageSink captures caller-side frames.
+# analyze_position runs the real engine against a FEN (no DB); the
+# DB-backed analyze_game happy path is covered end-to-end by
+# test_anti_cheat, so here we exercise every error branch that the
+# seam guarantees (empty FEN, invalid FEN, null-db analyze_game,
+# invalid game_id, terminal position) without a live cluster.
+add_executable(test_analysis_service
+    tests/test_analysis_service.cpp
+    src/core/logger.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/application/analysis_service.cpp
+    src/analysis/anti_cheat.cpp
+    src/analysis/cheat_report_repo.cpp
+    src/storage/database.cpp
+    src/storage/game_repo.cpp
+)
+target_include_directories(test_analysis_service PRIVATE src third_party)
+target_link_libraries(test_analysis_service PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
