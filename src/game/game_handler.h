@@ -99,10 +99,13 @@
 
 #pragma once
 
+#include "application/ports/message_sink.h"
+#include "application/request_context.h"
 #include "game/room_manager.h"
 #include "game/matchmaker.h"
 #include "net/websocket.h"
 #include "net/connection.h"
+#include "protocol/request.h"
 #include "storage/database.h"
 #include "auth/token.h"
 #include <nlohmann/json.hpp>
@@ -150,6 +153,25 @@ private:
     void handle_tournament_state(net::Connection& conn, const std::string& message);
     void handle_list_tournaments(net::Connection& conn, const std::string& message);
     void handle_report_tournament_result(net::Connection& conn, const std::string& message);
+
+    // ── LLD-1 typed impls ──
+    //
+    // The entry points above still bind to the router with the raw
+    // (Connection&, std::string) signature. Inside, they parse the JSON,
+    // decode into a typed request via `protocol::codec`, build a
+    // RequestContext + a caller-side MessageSink for the mover, and
+    // delegate to the impl below. Broadcast fan-out (opponent + spectators)
+    // still uses the pre-existing inline flush pattern in LLD-1 — the plan
+    // schedules a full-sink broadcast for LLD-4.
+    void handle_make_move_impl(const application::RequestContext& ctx,
+                               const protocol::MakeMoveRequest&   req,
+                               application::MessageSink&          caller_sink);
+    void handle_resign_impl(const application::RequestContext& ctx,
+                            const protocol::ResignRequest&     req,
+                            application::MessageSink&          caller_sink);
+    void handle_game_state_impl(const application::RequestContext& ctx,
+                                const protocol::GameStateRequest&  req,
+                                application::MessageSink&          caller_sink);
 
     /// After a human makes a move in an AI game, compute and submit the AI's response.
     void trigger_ai_move(std::shared_ptr<GameRoom> room, int human_fd);

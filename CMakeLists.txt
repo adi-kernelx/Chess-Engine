@@ -89,6 +89,9 @@ set(SOURCES
     src/tournament/swiss.cpp
     src/tournament/tournament_repo.cpp
     src/tournament/tournament_manager.cpp
+    # LLD-1 — typed protocol boundary
+    src/protocol/json_codec.cpp
+    src/net/socket_message_sink.cpp
 )
 
 # Executable
@@ -491,6 +494,8 @@ add_executable(test_auth_required
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
+    src/protocol/json_codec.cpp
+    src/net/socket_message_sink.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
     src/storage/game_repo.cpp
@@ -533,6 +538,8 @@ add_executable(test_spectator
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
+    src/protocol/json_codec.cpp
+    src/net/socket_message_sink.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
     src/storage/game_repo.cpp
@@ -574,6 +581,8 @@ add_executable(test_replay
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
+    src/protocol/json_codec.cpp
+    src/net/socket_message_sink.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
     src/storage/game_repo.cpp
@@ -616,6 +625,8 @@ add_executable(test_anti_cheat
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
+    src/protocol/json_codec.cpp
+    src/net/socket_message_sink.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
     src/storage/game_repo.cpp
@@ -635,6 +646,31 @@ target_include_directories(test_anti_cheat PRIVATE src third_party)
 target_compile_definitions(test_anti_cheat PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_anti_cheat PRIVATE
     Threads::Threads OpenSSL::Crypto PostgreSQL::PostgreSQL)
+
+# Test: LLD-1 SocketMessageSink adapter.
+# Exercises the delivery boundary: fake sink capture behavior, real
+# socket sink over a socketpair, and the generation guard against fd
+# reuse.
+add_executable(test_message_sink
+    tests/test_message_sink.cpp
+    src/net/socket_message_sink.cpp
+    src/net/connection.cpp
+    src/net/websocket.cpp
+    src/core/logger.cpp
+)
+target_include_directories(test_message_sink PRIVATE src third_party)
+target_link_libraries(test_message_sink PRIVATE Threads::Threads OpenSSL::Crypto)
+
+# Test: LLD-1 protocol JSON codec.
+# Boundary between raw wire JSON and the typed request/response values a
+# migrated handler consumes. Pure — no DB, no sockets, no threads — so it
+# runs everywhere.
+add_executable(test_protocol_codec
+    tests/test_protocol_codec.cpp
+    src/protocol/json_codec.cpp
+)
+target_include_directories(test_protocol_codec PRIVATE src third_party)
+target_link_libraries(test_protocol_codec PRIVATE Threads::Threads)
 
 # Test: Swiss tournament system (Phase 9.4).
 # Three layers: pure Swiss pairing (no DB, always runs), tournament_repo

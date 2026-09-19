@@ -56,6 +56,11 @@ private:
     MessageRouter router_;
     std::recursive_mutex connections_mutex_;
     std::unordered_map<int, std::unique_ptr<Connection>> connections_;
+    /// LLD-1: monotonic counter incremented every time we accept() and
+    /// stamped onto the new Connection's generation. Combined with fd,
+    /// this gives ConnectionHandle a value stable across the whole
+    /// process lifetime that fd reuse cannot forge.
+    uint64_t next_generation_ = 1;
     DisconnectCallback disconnect_cb_;
     static const int MAX_EVENTS = 64;
 };

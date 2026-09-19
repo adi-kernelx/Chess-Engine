@@ -127,7 +127,14 @@ void TcpServer::handle_new_connection() {
 
         {
             std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
-            connections_[client_fd] = std::make_unique<Connection>(client_fd, std::string(ip_str));
+            auto conn = std::make_unique<Connection>(client_fd, std::string(ip_str));
+            // LLD-1: stamp a fresh, never-reused generation on this
+            // connection. A stale ConnectionHandle for the same fd but
+            // an earlier generation now compares unequal to the current
+            // one, so a foreign send scheduled before the previous
+            // socket closed cannot land on this new client.
+            conn->set_generation(next_generation_++);
+            connections_[client_fd] = std::move(conn);
         }
 
         struct epoll_event event;

@@ -5,6 +5,8 @@
 #include <string>
 #include <unistd.h>
 
+#include "net/connection_handle.h"
+
 namespace chess {
 namespace net {
 
@@ -19,6 +21,17 @@ public:
 
     int get_fd() const { return fd_; }
     const std::string& get_ip() const { return ip_; }
+
+    /// LLD-1: monotonically increasing generation set by TcpServer at accept
+    /// time. Paired with `fd` in a `ConnectionHandle`, this lets a foreign
+    /// sender detect that the fd it queued for has since closed and been
+    /// reassigned to a different client. Default 0 for tests that construct
+    /// a Connection directly.
+    uint64_t generation() const { return generation_; }
+    void set_generation(uint64_t g) { generation_ = g; }
+
+    /// Stable identifier: fd + generation.
+    ConnectionHandle handle() const { return {fd_, generation_}; }
 
     // Reads data from socket into read_buffer_. Returns bytes read, or 0 on disconnect, -1 on error (EAGAIN handled)
     int read_from_socket();
@@ -45,8 +58,9 @@ public:
 private:
     int fd_;
     std::string ip_;
+    uint64_t generation_ = 0;  // LLD-1: bumped by TcpServer on accept()
     bool upgraded_ = false;  // false = raw HTTP, true = WebSocket framing
-    
+
     std::vector<uint8_t> read_buffer_;
     std::vector<uint8_t> write_buffer_;
 };

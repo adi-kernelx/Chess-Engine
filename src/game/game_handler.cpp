@@ -18,6 +18,10 @@
 #include "tournament/tournament_repo.h"
 #include "auth/session.h"
 #include "chess/board.h"
+#include "net/socket_message_sink.h"
+#include "protocol/json_codec.h"
+#include "protocol/request.h"
+#include "protocol/response.h"
 #include "chess/engine.h"
 #include "chess/move.h"
 #include "chess/move_gen.h"
@@ -234,135 +238,135 @@ void GameHandler::handle_join_game(net::Connection& conn, const std::string& mes
 //      or:  { "type": "move_rejected", "error": "Illegal move" }
 
 void GameHandler::handle_make_move(net::Connection& conn, const std::string& message) {
-    try {
-        auto msg = json::parse(message);
-
-        std::string from_str = msg.value("from", "");
-        std::string to_str   = msg.value("to", "");
-
-        if (from_str.empty() || to_str.empty()) {
-            send_json(conn, make_error("Missing 'from' or 'to' fields"));
-            return;
-        }
-
-        Square from_sq = parse_square(from_str);
-        Square to_sq   = parse_square(to_str);
-
-        if (from_sq == NO_SQUARE || to_sq == NO_SQUARE) {
-            send_json(conn, make_error("Invalid square: '" + from_str + "' or '" + to_str + "'"));
-            return;
-        }
-
-        // Parse optional promotion piece
-        PieceType promo = PieceType::NONE;
-        std::string promo_str = msg.value("promotion", "");
-        if (!promo_str.empty()) {
-            char pc = promo_str[0];
-            switch (pc) {
-                case 'q': case 'Q': promo = PieceType::QUEEN;  break;
-                case 'r': case 'R': promo = PieceType::ROOK;   break;
-                case 'b': case 'B': promo = PieceType::BISHOP;  break;
-                case 'n': case 'N': promo = PieceType::KNIGHT;  break;
-                default: break;
-            }
-        }
-
-        // Find the player's room
-        auto room = room_mgr_.find_room_by_fd(conn.get_fd());
-        if (!room) {
-            send_json(conn, make_error("You are not in a game"));
-            return;
-        }
-
-        // Submit the move to the authoritative game room
-        auto result = room->submit_move(conn.get_fd(), from_sq, to_sq, promo);
-
-        if (!result.success) {
-            json reject;
-            reject["type"]  = "move_rejected";
-            reject["error"] = result.error;
-
-            // If the error was a timeout, also send game_over
-            if (result.game_status == GameStatus::TIMEOUT) {
-                json game_over;
-                game_over["type"]   = "game_over";
-                game_over["result"] = room->get_result_string();
-                game_over["reason"] = "timeout";
-
-                // Send to both players
-                send_json(conn, reject.dump());
-                send_json(conn, game_over.dump());
-
-                int opp_fd = room->get_opponent_fd(conn.get_fd());
-                if (opp_fd >= 0 && connection_lookup_) {
-                    send_json_to_fd(opp_fd, game_over.dump());
-                }
-                // Phase 9.1 — every watcher sees the timeout too
-                broadcast_to_spectators(*room, game_over.dump());
-
-                persist_game(room.get(), GameStatus::TIMEOUT);
-            } else {
-                send_json(conn, reject.dump());
-            }
-            return;
-        }
-
-        // Move accepted — build the broadcast message. Phase 9.1 includes
-        // the FEN in every move_made so spectators (and seat players) can
-        // update their board without a follow-up game_state request.
-        json move_msg;
-        move_msg["type"]       = "move_made";
-        move_msg["from"]       = from_str;
-        move_msg["to"]         = to_str;
-        move_msg["san"]        = result.san;
-        move_msg["white_time"] = result.white_time_ms;
-        move_msg["black_time"] = result.black_time_ms;
-        move_msg["fen"]        = room->get_board().to_fen();
-
-        if (promo != PieceType::NONE) {
-            move_msg["promotion"] = promo_str;
-        }
-
-        // Send to the mover
-        send_json(conn, move_msg.dump());
-
-        // Send to the opponent
-        int opp_fd = room->get_opponent_fd(conn.get_fd());
-        if (opp_fd >= 0 && connection_lookup_) {
-            send_json_to_fd(opp_fd, move_msg.dump());
-        }
-        // Phase 9.1 — fan out to every watcher of this room. Players first,
-        // spectators second, so a slow watcher can never delay the seat that
-        // owes the opponent an authoritative clock/board update.
-        broadcast_to_spectators(*room, move_msg.dump());
-
-        // If the game ended (checkmate, stalemate, draw), send game_over
-        if (result.game_status != GameStatus::ONGOING) {
-            json game_over;
-            game_over["type"]   = "game_over";
-            game_over["result"] = room->get_result_string();
-            game_over["reason"] = status_to_reason(result.game_status);
-
-            send_json(conn, game_over.dump());
-            if (opp_fd >= 0 && connection_lookup_) {
-                send_json_to_fd(opp_fd, game_over.dump());
-            }
-            broadcast_to_spectators(*room, game_over.dump());
-
-            core::Logger::info("game", "GameHandler",
-                "Game " + std::to_string(room->get_id()) + " ended: " +
-                room->get_result_string() + " (" + status_to_reason(result.game_status) + ")");
-
-            persist_game(room.get(), result.game_status);
-        }
-
-        // If this is an AI game and the game is still going, trigger AI's response
-        if (result.success && result.game_status == GameStatus::ONGOING && room->is_ai_game()) {
-            trigger_ai_move(room, conn.get_fd());
-        }
-
-    } catch (const json::exception& e) {
+    // Thin protocol adapter (LLD-1). Parses the frame, decodes into a
+    // typed request via the shared codec, wraps the caller's connection
+    // as a MessageSink, and delegates. Wire behaviour on the caller path
+    // is preserved bit-for-bit by encode_* in protocol/json_codec.cpp.
+    nlohmann::json msg;
+    try { msg = nlohmann::json::parse(message); }
+    catch (const nlohmann::json::exception& e) {
         send_json(conn, make_error("Invalid JSON: " + std::string(e.what())));
+        return;
+    }
+
+    auto req = protocol::codec::decode_make_move(msg);
+    if (!req.has_value()) {
+        // Same error phrasing the old inline decode used, so tests that
+        // matched substrings on the error message keep matching.
+        send_json(conn, make_error(
+            "Missing 'from'/'to' or invalid square / promotion"));
+        return;
+    }
+
+    application::RequestContext ctx;
+    ctx.caller = conn.handle();
+    net::SocketMessageSink caller_sink(ctx.caller, connection_lookup_);
+    handle_make_move_impl(ctx, *req, caller_sink);
+}
+
+void GameHandler::handle_make_move_impl(const application::RequestContext& ctx,
+                                        const protocol::MakeMoveRequest&   req,
+                                        application::MessageSink&          caller_sink) {
+    // Turn the trusted UCI square strings into Square indices. The codec
+    // already validated shape and range, so parse_square cannot fail on
+    // us — but we still check as a belt-and-braces guard against future
+    // codec regressions.
+    Square from_sq = parse_square(req.from);
+    Square to_sq   = parse_square(req.to);
+    if (from_sq == NO_SQUARE || to_sq == NO_SQUARE) {
+        caller_sink.send(protocol::codec::encode_error(
+            {"", "Invalid square: '" + req.from + "' or '" + req.to + "'"}));
+        return;
+    }
+
+    // Rebuild the original promotion string the client sent (lowercased),
+    // preserving the wire shape of `move_made.promotion`.
+    PieceType promo = PieceType::NONE;
+    std::string promo_wire;
+    if (req.promotion.has_value()) {
+        promo_wire = std::string(1, *req.promotion);
+        switch (*req.promotion) {
+            case 'q': promo = PieceType::QUEEN;  break;
+            case 'r': promo = PieceType::ROOK;   break;
+            case 'b': promo = PieceType::BISHOP; break;
+            case 'n': promo = PieceType::KNIGHT; break;
+            default: break;   // codec guarantees this can't happen
+        }
+    }
+
+    auto room = room_mgr_.find_room_by_fd(ctx.caller.fd);
+    if (!room) {
+        caller_sink.send(protocol::codec::encode_error(
+            {"", "You are not in a game"}));
+        return;
+    }
+
+    auto result = room->submit_move(ctx.caller.fd, from_sq, to_sq, promo);
+
+    if (!result.success) {
+        const std::string reject = protocol::codec::encode_move_rejected(
+            {result.error});
+
+        if (result.game_status == GameStatus::TIMEOUT) {
+            const std::string game_over = protocol::codec::encode_game_over(
+                {room->get_result_string(), "timeout"});
+
+            caller_sink.send(reject);
+            caller_sink.send(game_over);
+
+            int opp_fd = room->get_opponent_fd(ctx.caller.fd);
+            if (opp_fd >= 0 && connection_lookup_) {
+                send_json_to_fd(opp_fd, game_over);
+            }
+            broadcast_to_spectators(*room, game_over);
+            persist_game(room.get(), GameStatus::TIMEOUT);
+        } else {
+            caller_sink.send(reject);
+        }
+        return;
+    }
+
+    // Move accepted — build the broadcast frame once and share the bytes.
+    protocol::MoveMadeResponse mm;
+    mm.from          = req.from;
+    mm.to            = req.to;
+    mm.san           = result.san;
+    mm.fen           = room->get_board().to_fen();
+    mm.white_time_ms = result.white_time_ms;
+    mm.black_time_ms = result.black_time_ms;
+    if (promo != PieceType::NONE) mm.promotion = promo_wire;
+    const std::string move_msg = protocol::codec::encode_move_made(mm);
+
+    caller_sink.send(move_msg);
+
+    int opp_fd = room->get_opponent_fd(ctx.caller.fd);
+    if (opp_fd >= 0 && connection_lookup_) {
+        send_json_to_fd(opp_fd, move_msg);
+    }
+    // Phase 9.1 — fan out to every watcher of this room. Players first,
+    // spectators second, so a slow watcher can never delay the seat that
+    // owes the opponent an authoritative clock/board update.
+    broadcast_to_spectators(*room, move_msg);
+
+    if (result.game_status != GameStatus::ONGOING) {
+        const std::string game_over = protocol::codec::encode_game_over(
+            {room->get_result_string(),
+             status_to_reason(result.game_status)});
+        caller_sink.send(game_over);
+        if (opp_fd >= 0 && connection_lookup_) {
+            send_json_to_fd(opp_fd, game_over);
+        }
+        broadcast_to_spectators(*room, game_over);
+
+        core::Logger::info("game", "GameHandler",
+            "Game " + std::to_string(room->get_id()) + " ended: " +
+            room->get_result_string() + " (" +
+            status_to_reason(result.game_status) + ")");
+        persist_game(room.get(), result.game_status);
+    }
+
+    if (result.game_status == GameStatus::ONGOING && room->is_ai_game()) {
+        trigger_ai_move(room, ctx.caller.fd);
     }
 }
 
@@ -371,30 +375,41 @@ void GameHandler::handle_make_move(net::Connection& conn, const std::string& mes
 // ============================================================
 
 void GameHandler::handle_resign(net::Connection& conn, const std::string& /*message*/) {
-    auto room = room_mgr_.find_room_by_fd(conn.get_fd());
+    // LLD-1: resign carries no payload, so the decode is trivial. Wrapping
+    // it in the same pattern as make_move keeps every migrated route
+    // consistent — decode, wrap sink, delegate — even when the decode
+    // is a no-op.
+    application::RequestContext ctx;
+    ctx.caller = conn.handle();
+    net::SocketMessageSink caller_sink(ctx.caller, connection_lookup_);
+    handle_resign_impl(ctx, protocol::ResignRequest{}, caller_sink);
+}
+
+void GameHandler::handle_resign_impl(const application::RequestContext& ctx,
+                                     const protocol::ResignRequest&,
+                                     application::MessageSink&          caller_sink) {
+    auto room = room_mgr_.find_room_by_fd(ctx.caller.fd);
     if (!room) {
-        send_json(conn, make_error("You are not in a game"));
+        caller_sink.send(protocol::codec::encode_error(
+            {"", "You are not in a game"}));
         return;
     }
 
-    if (!room->resign(conn.get_fd())) {
-        send_json(conn, make_error("Cannot resign — game is not in progress"));
+    if (!room->resign(ctx.caller.fd)) {
+        caller_sink.send(protocol::codec::encode_error(
+            {"", "Cannot resign — game is not in progress"}));
         return;
     }
 
-    json game_over;
-    game_over["type"]   = "game_over";
-    game_over["result"] = room->get_result_string();
-    game_over["reason"] = "resignation";
+    const std::string game_over = protocol::codec::encode_game_over(
+        {room->get_result_string(), "resignation"});
 
-    // Notify both players
-    send_json(conn, game_over.dump());
-    int opp_fd = room->get_opponent_fd(conn.get_fd());
+    caller_sink.send(game_over);
+    int opp_fd = room->get_opponent_fd(ctx.caller.fd);
     if (opp_fd >= 0 && connection_lookup_) {
-        send_json_to_fd(opp_fd, game_over.dump());
+        send_json_to_fd(opp_fd, game_over);
     }
-    // Phase 9.1 — spectators see the resignation too
-    broadcast_to_spectators(*room, game_over.dump());
+    broadcast_to_spectators(*room, game_over);
 
     core::Logger::info("game", "GameHandler",
         "Game " + std::to_string(room->get_id()) + ": player resigned → " +
@@ -596,45 +611,55 @@ void GameHandler::handle_stop_spectating(net::Connection& conn,
 // ============================================================
 
 void GameHandler::handle_game_state(net::Connection& conn, const std::string& /*message*/) {
-    auto room = room_mgr_.find_room_by_fd(conn.get_fd());
+    // LLD-1: game_state, like resign, has no payload. The adapter is
+    // trivial; the impl composes the response through the shared codec
+    // so the wire fields (game_id, fen, white_time, black_time, state,
+    // moves[{san, think_ms}], optional result/reason) match the old
+    // inline emitter exactly.
+    application::RequestContext ctx;
+    ctx.caller = conn.handle();
+    net::SocketMessageSink caller_sink(ctx.caller, connection_lookup_);
+    handle_game_state_impl(ctx, protocol::GameStateRequest{}, caller_sink);
+}
+
+void GameHandler::handle_game_state_impl(const application::RequestContext& ctx,
+                                         const protocol::GameStateRequest&,
+                                         application::MessageSink&          caller_sink) {
+    auto room = room_mgr_.find_room_by_fd(ctx.caller.fd);
     if (!room) {
-        send_json(conn, make_error("You are not in a game"));
+        caller_sink.send(protocol::codec::encode_error(
+            {"", "You are not in a game"}));
         return;
     }
 
-    int white_ms, black_ms;
+    int white_ms = 0, black_ms = 0;
     room->get_remaining_times(white_ms, black_ms);
-
     auto history = room->get_move_history();
 
-    json response;
-    response["type"]       = "game_state";
-    response["game_id"]    = room->get_id();
-    response["fen"]        = room->get_board().to_fen();
-    response["white_time"] = white_ms;
-    response["black_time"] = black_ms;
+    protocol::GameStateResponse resp;
+    resp.game_id       = room->get_id();
+    resp.fen           = room->get_board().to_fen();
+    resp.white_time_ms = white_ms;
+    resp.black_time_ms = black_ms;
 
-    // State string
-    auto state = room->get_state();
-    if (state == RoomState::WAITING)     response["state"] = "waiting";
-    else if (state == RoomState::IN_PROGRESS) response["state"] = "in_progress";
-    else response["state"] = "finished";
+    const auto state = room->get_state();
+    switch (state) {
+        case RoomState::WAITING:     resp.state = "waiting";     break;
+        case RoomState::IN_PROGRESS: resp.state = "in_progress"; break;
+        case RoomState::FINISHED:    resp.state = "finished";    break;
+    }
 
-    // Move list
-    response["moves"] = json::array();
+    resp.moves.reserve(history.size());
     for (const auto& record : history) {
-        json move_entry;
-        move_entry["san"]       = record.san;
-        move_entry["think_ms"]  = record.think_time_ms;
-        response["moves"].push_back(move_entry);
+        resp.moves.push_back({record.san, record.think_time_ms});
     }
 
     if (state == RoomState::FINISHED) {
-        response["result"] = room->get_result_string();
-        response["reason"] = status_to_reason(room->get_game_status());
+        resp.result = room->get_result_string();
+        resp.reason = status_to_reason(room->get_game_status());
     }
 
-    send_json(conn, response.dump());
+    caller_sink.send(protocol::codec::encode_game_state(resp));
 }
 
 // ============================================================
