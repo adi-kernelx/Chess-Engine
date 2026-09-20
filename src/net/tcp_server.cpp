@@ -248,6 +248,17 @@ void TcpServer::handle_client_data(int client_fd) {
             }
         }
     }
+
+    // LLD-6.4: cap enforcement. If any of the writes above pushed the
+    // buffer past `Connection::MAX_WRITE_BUFFER_BYTES`, the append was
+    // dropped and the sticky overflow flag is set. Close now — a slow
+    // client that lets its socket back-pressure this hard is either
+    // dead or malicious, and continuing to serve it wastes RAM.
+    if (conn->write_buffer_overflowed()) {
+        core::Logger::warn("net", "TcpServer",
+            "Closing " + conn->get_ip() + " — write buffer overflow");
+        close_connection(client_fd);
+    }
 }
 
 void TcpServer::close_connection(int client_fd) {

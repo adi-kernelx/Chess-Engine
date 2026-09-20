@@ -167,6 +167,29 @@ add_executable(test_game_room
 target_include_directories(test_game_room PRIVATE src)
 target_link_libraries(test_game_room PRIVATE Threads::Threads)
 
+# Test: LLD-6.4 concurrency invariants — Connection write-buffer cap
+# and GameRoom revision counter. Pins the two additive invariants a
+# future async slice will need in place before touching the current
+# serialized event loop.
+add_executable(test_concurrency_invariants
+    tests/test_concurrency_invariants.cpp
+    src/core/logger.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/ai_player.cpp
+    src/game/game_room.cpp
+    src/core/uuid.cpp
+    src/game/room_manager.cpp
+    src/net/connection.cpp
+)
+target_include_directories(test_concurrency_invariants PRIVATE src third_party)
+target_link_libraries(test_concurrency_invariants PRIVATE Threads::Threads)
+
 # Test: LLD-6.3 deterministic-time consumers (GameRoom Fischer +
 # Matchmaker ELO fence). Uses the FakeClock from LLD-6.1 to drive
 # both consumers instantly; proves the injected-clock seams work.

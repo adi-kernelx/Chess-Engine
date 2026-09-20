@@ -74,6 +74,18 @@ struct GameSnapshot {
     std::string  completion_uuid;
     bool         is_ai_game  = false;
 
+    /// LLD-6.4: monotonically-increasing revision of the source room
+    /// at the moment this snapshot was taken. Every mutating GameRoom
+    /// operation bumps the room's revision; a consumer that queues a
+    /// long-running job with a snapshot in hand can re-read the room's
+    /// current revision before applying the result and discard if it
+    /// has advanced. No consumer uses it today — the current
+    /// serialized path never produces a stale snapshot — but async
+    /// move-selection landing in a later slice needs this field to
+    /// implement "late results after resign/disconnect/state change
+    /// must be discarded" (plan §6.4).
+    uint64_t     revision    = 0;
+
     // ── Outcome ───────────────────────────────────────────────
     GameStatus   status      = GameStatus::ONGOING;  ///< the terminal status
     std::string  result;                              ///< "1-0" / "0-1" / "1/2-1/2"

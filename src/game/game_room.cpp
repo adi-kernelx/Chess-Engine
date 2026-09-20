@@ -209,6 +209,10 @@ void GameRoom::build_snapshot_locked(GameSnapshot& out) const {
     // travels with the snapshot through the completion listener into
     // `save_completed_game`, which uses it to short-circuit retries.
     out.completion_uuid    = chess::core::generate_uuid_v4();
+    // LLD-6.4: pin the room's current revision. A future async consumer
+    // holding this snapshot can compare it against `room->revision()`
+    // before applying a queued result and discard on mismatch.
+    out.revision           = revision_.load(std::memory_order_relaxed);
 }
 
 void GameRoom::emit_started(const GameStarted& ev) {
@@ -265,6 +269,7 @@ bool GameRoom::join(PlayerId player_id, const std::string& player_name, int conn
 
         if (state_ != RoomState::WAITING) return false;
         if (!black_.is_empty()) return false;
+        revision_.fetch_add(1, std::memory_order_release);
 
         // Seat the joiner as Black
         black_.connection_fd  = connection_fd;
@@ -299,6 +304,7 @@ bool GameRoom::join(PlayerId player_id, const std::string& player_name, int conn
 GameRoom::MoveResult GameRoom::submit_move(int connection_fd, Square from, Square to,
                                            PieceType promo_type) {
     LockAndDrain lock(*this);
+    revision_.fetch_add(1, std::memory_order_release);
 
     MoveResult result;
     result.success = false;
@@ -414,6 +420,7 @@ GameRoom::MoveResult GameRoom::submit_move(int connection_fd, Square from, Squar
 GameRoom::MoveResult GameRoom::submit_move_ai(Square from, Square to,
                                                PieceType promo_type) {
     LockAndDrain lock(*this);
+    revision_.fetch_add(1, std::memory_order_release);
 
     MoveResult result;
     result.success = false;
@@ -507,6 +514,7 @@ GameRoom::MoveResult GameRoom::submit_move_ai(Square from, Square to,
 
 bool GameRoom::resign(int connection_fd) {
     LockAndDrain lock(*this);
+    revision_.fetch_add(1, std::memory_order_release);
 
     if (state_ != RoomState::IN_PROGRESS) return false;
 
@@ -524,6 +532,7 @@ bool GameRoom::resign(int connection_fd) {
 
 void GameRoom::on_disconnect(int connection_fd) {
     LockAndDrain lock(*this);
+    revision_.fetch_add(1, std::memory_order_release);
 
     if (white_.connection_fd == connection_fd) {
         white_.connected = false;
@@ -541,6 +550,7 @@ void GameRoom::on_disconnect(int connection_fd) {
 
 bool GameRoom::on_reconnect(PlayerId player_id, int new_fd) {
     LockAndDrain lock(*this);
+    revision_.fetch_add(1, std::memory_order_release);
 
     if (state_ == RoomState::FINISHED) return false;
 
@@ -739,6 +749,7 @@ std::string GameRoom::to_pgn() const {
 
 bool GameRoom::add_spectator(int connection_fd) {
     LockAndDrain lock(*this);
+    revision_.fetch_add(1, std::memory_order_release);
 
     // Spectating is only meaningful once the game is live. A WAITING room
     // has no board activity to broadcast; a FINISHED room has nothing more
@@ -765,6 +776,7 @@ bool GameRoom::add_spectator(int connection_fd) {
 
 bool GameRoom::remove_spectator(int connection_fd) {
     LockAndDrain lock(*this);
+    revision_.fetch_add(1, std::memory_order_release);
     for (auto it = spectator_fds_.begin(); it != spectator_fds_.end(); ++it) {
         if (*it == connection_fd) {
             spectator_fds_.erase(it);

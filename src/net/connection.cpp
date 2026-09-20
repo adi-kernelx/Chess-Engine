@@ -46,6 +46,19 @@ int Connection::write_to_socket() {
 }
 
 void Connection::append_to_write_buffer(const uint8_t* data, size_t length) {
+    // LLD-6.4: drop-on-overflow. Once we've overflowed we drop every
+    // subsequent write — the transport is expected to close the
+    // connection soon after checking the flag, and continuing to
+    // buffer would let a slow client eat unbounded RAM.
+    if (write_buffer_overflowed_) return;
+    if (write_buffer_.size() + length > MAX_WRITE_BUFFER_BYTES) {
+        write_buffer_overflowed_ = true;
+        core::Logger::warn("net", "Connection",
+            "Write buffer overflow (>" +
+            std::to_string(MAX_WRITE_BUFFER_BYTES) + " bytes) for " +
+            ip_ + " (fd " + std::to_string(fd_) + ") — dropping writes");
+        return;
+    }
     write_buffer_.insert(write_buffer_.end(), data, data + length);
 }
 

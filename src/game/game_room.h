@@ -24,6 +24,7 @@
 #include "chess/move_gen.h"
 #include "chess/notation.h"
 #include "game/ai_player.h"
+#include <atomic>
 #include <string>
 #include <vector>
 #include <memory>
@@ -330,10 +331,26 @@ private:
     /// timeout detection deterministically.
     application::ports::Clock* clock_ = &application::ports::default_clock();
 
+    /// LLD-6.4: monotonically-increasing revision. Bumped inside the
+    /// room mutex by every mutating public method. Read via
+    /// `revision()` (atomic acquire; no mutex required).
+    std::atomic<uint64_t> revision_{0};
+
 public:
     /// Inject a Clock (test seam). Must be called before any move
     /// timing runs. The pointer must outlive the room.
     void set_clock(application::ports::Clock* c) { clock_ = c; }
+
+    /// LLD-6.4: monotonically-increasing revision. Bumped by every
+    /// mutating public method (join, submit_move, submit_move_ai,
+    /// resign, on_disconnect, on_reconnect, add_spectator,
+    /// remove_spectator, finish_game). A caller that queues a job
+    /// with a snapshot in hand can re-read this before applying the
+    /// result and discard on mismatch. Public because a follow-up
+    /// slice that introduces async move selection reads it from
+    /// outside the room; the field itself is atomic so the read
+    /// need not take the room mutex.
+    uint64_t revision() const { return revision_.load(std::memory_order_acquire); }
 
 private:
 
