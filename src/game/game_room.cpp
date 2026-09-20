@@ -115,8 +115,8 @@ GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_na
     black_.connected     = true;
 
     // Start White's clock
-    game_start_time_ = std::chrono::steady_clock::now();
-    wall_start_ = std::chrono::system_clock::now();
+    game_start_time_ = clock_->steady_now();
+    wall_start_ = clock_->system_now();
     white_.clock_start = game_start_time_;
 }
 
@@ -277,8 +277,8 @@ bool GameRoom::join(PlayerId player_id, const std::string& player_name, int conn
 
         // Start the game — White's clock begins ticking
         state_ = RoomState::IN_PROGRESS;
-        game_start_time_ = std::chrono::steady_clock::now();
-        wall_start_ = std::chrono::system_clock::now();
+        game_start_time_ = clock_->steady_now();
+        wall_start_ = clock_->system_now();
         white_.clock_start = game_start_time_;
 
         // LLD-4.1 — assemble the event under the lock; fire callbacks
@@ -358,7 +358,7 @@ GameRoom::MoveResult GameRoom::submit_move(int connection_fd, Square from, Squar
     std::string san = notation::move_to_san(board_, matched_move);
 
     // --- Calculate think time ---
-    auto now = std::chrono::steady_clock::now();
+    auto now = clock_->steady_now();
     PlayerSlot& current_player = (player_color == Color::WHITE) ? white_ : black_;
     int think_time_ms = static_cast<int>(
         std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -459,7 +459,7 @@ GameRoom::MoveResult GameRoom::submit_move_ai(Square from, Square to,
     std::string san = notation::move_to_san(board_, matched_move);
 
     // Calculate think time for the AI
-    auto now = std::chrono::steady_clock::now();
+    auto now = clock_->steady_now();
     PlayerSlot& ai_slot = (ai_color_ == Color::WHITE) ? white_ : black_;
     int think_time_ms = static_cast<int>(
         std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -649,7 +649,7 @@ void GameRoom::get_remaining_times(int& white_ms, int& black_ms) const {
 
     // If the game is in progress, deduct elapsed time from the active player
     if (state_ == RoomState::IN_PROGRESS) {
-        auto now = std::chrono::steady_clock::now();
+        auto now = clock_->steady_now();
         const PlayerSlot& active = (board_.side_to_move() == Color::WHITE) ? white_ : black_;
         int elapsed = static_cast<int>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -808,7 +808,7 @@ void GameRoom::finish_game(GameStatus status, const std::string& result) {
     state_       = RoomState::FINISHED;
     game_status_ = status;
     result_      = result;
-    wall_end_    = std::chrono::system_clock::now();
+    wall_end_    = clock_->system_now();
 
     auto ev = std::make_unique<GameCompleted>();
     build_snapshot_locked(ev->snapshot);
@@ -818,7 +818,7 @@ void GameRoom::finish_game(GameStatus status, const std::string& result) {
 
 void GameRoom::switch_clock() {
     // Note: caller must hold mutex_
-    auto now = std::chrono::steady_clock::now();
+    auto now = clock_->steady_now();
 
     // The side that JUST moved (before board_.make_move toggled the turn)
     // is now board_.side_to_move()'s OPPONENT, because make_move already
@@ -850,7 +850,7 @@ bool GameRoom::check_flag() const {
     // Note: caller must hold mutex_
     if (state_ != RoomState::IN_PROGRESS) return false;
 
-    auto now = std::chrono::steady_clock::now();
+    auto now = clock_->steady_now();
     const PlayerSlot& active = (board_.side_to_move() == Color::WHITE) ? white_ : black_;
 
     int elapsed = static_cast<int>(

@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "application/ports/clock.h"
 #include "core/types.h"
 #include "chess/board.h"
 #include "chess/move.h"
@@ -318,10 +319,23 @@ private:
 
     /// Timestamp when the game started (first move)
     std::chrono::steady_clock::time_point game_start_time_;
-    
+
     /// Wall-clock timestamps for ISO 8601 persistence.
     std::chrono::system_clock::time_point wall_start_;
     std::chrono::system_clock::time_point wall_end_;
+
+    /// LLD-6.3: injectable time source. Defaults to the process-wide
+    /// SystemClock — production behaviour is byte-identical. Tests
+    /// call `set_clock(&fake)` to drive Fischer decrement and
+    /// timeout detection deterministically.
+    application::ports::Clock* clock_ = &application::ports::default_clock();
+
+public:
+    /// Inject a Clock (test seam). Must be called before any move
+    /// timing runs. The pointer must outlive the room.
+    void set_clock(application::ports::Clock* c) { clock_ = c; }
+
+private:
 
     /// LLD-4.1 — event listeners. Snapshot-copied before invoke so a
     /// listener callback can safely mutate this vector without racing

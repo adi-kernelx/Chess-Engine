@@ -85,6 +85,16 @@ public:
     }
 };
 
+/// Process-wide default `SystemClock`. Long-lived consumers (GameRoom,
+/// Matchmaker, RateLimiter) fall back to this when no explicit clock
+/// is injected — production behaviour is identical to reading
+/// `std::chrono::*::now()` inline. Tests override by calling the
+/// consumer's `set_clock(&fake)` setter before touching time.
+inline Clock& default_clock() {
+    static SystemClock instance;
+    return instance;
+}
+
 /// Test clock. Starts at a specified `(steady, system)` pair — both
 /// axes advance in lock-step when the test calls `advance(delta)`.
 /// Not thread-safe; tests that share a FakeClock across threads

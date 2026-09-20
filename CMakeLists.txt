@@ -167,6 +167,28 @@ add_executable(test_game_room
 target_include_directories(test_game_room PRIVATE src)
 target_link_libraries(test_game_room PRIVATE Threads::Threads)
 
+# Test: LLD-6.3 deterministic-time consumers (GameRoom Fischer +
+# Matchmaker ELO fence). Uses the FakeClock from LLD-6.1 to drive
+# both consumers instantly; proves the injected-clock seams work.
+add_executable(test_deterministic_time
+    tests/test_deterministic_time.cpp
+    src/core/logger.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/ai_player.cpp
+    src/game/game_room.cpp
+    src/core/uuid.cpp
+    src/game/room_manager.cpp
+    src/game/matchmaker.cpp
+)
+target_include_directories(test_deterministic_time PRIVATE src third_party)
+target_link_libraries(test_deterministic_time PRIVATE Threads::Threads)
+
 # Test: Matchmaker (Phase 4.3)
 add_executable(test_matchmaker
     tests/test_matchmaker.cpp

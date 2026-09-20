@@ -49,6 +49,8 @@
 #include <chrono>
 #include <functional>
 
+#include "application/ports/clock.h"
+
 namespace chess {
 namespace game {
 
@@ -67,8 +69,10 @@ struct QueueEntry {
 
     /// Calculate the acceptable ELO range based on wait time.
     /// Starts at ±base_range, widens by +50 every 10 seconds.
-    int acceptable_range(int base_range = 200) const {
-        auto now = std::chrono::steady_clock::now();
+    /// LLD-6.3: the caller passes the current `steady_now()` so the
+    /// Matchmaker's injected Clock drives the widening.
+    int acceptable_range(std::chrono::steady_clock::time_point now,
+                         int base_range = 200) const {
         int seconds_waiting = static_cast<int>(
             std::chrono::duration_cast<std::chrono::seconds>(now - enqueue_time).count()
         );
@@ -144,10 +148,15 @@ public:
     /// Get the total queue size across all buckets — O(1).
     size_t queue_size() const;
 
+    /// LLD-6.3: inject a Clock (test seam). Defaults to the process-
+    /// wide SystemClock. The pointer must outlive the matchmaker.
+    void set_clock(application::ports::Clock* c) { clock_ = c; }
+
 private:
     mutable std::mutex mutex_;
     RoomManager& room_mgr_;
     MatchCallback match_cb_;
+    application::ports::Clock* clock_ = &application::ports::default_clock();
 
     // ── Primary Index ──
     // TimeControl → Red-Black Tree of players sorted by ELO.

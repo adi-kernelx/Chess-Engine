@@ -245,19 +245,21 @@ void test_elo_range_widening() {
         QueueEntry entry;
         entry.elo = 1200;
         // Simulate enqueuing 20 seconds ago
-        entry.enqueue_time = std::chrono::steady_clock::now() - std::chrono::seconds(20);
+        auto now = std::chrono::steady_clock::now();
+        entry.enqueue_time = now - std::chrono::seconds(20);
 
         // After 20 seconds: base 200 + (20/10)*50 = 200 + 100 = 300
-        int range = entry.acceptable_range();
+        int range = entry.acceptable_range(now);
         return range == 300;
     });
 
     run_test("Fresh entry has base range", []() {
         QueueEntry entry;
         entry.elo = 1200;
-        entry.enqueue_time = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        entry.enqueue_time = now;
 
-        return entry.acceptable_range() == 200;
+        return entry.acceptable_range(now) == 200;
     });
 }
 

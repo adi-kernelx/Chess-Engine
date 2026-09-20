@@ -54,7 +54,7 @@ bool Matchmaker::enqueue(int connection_fd, PlayerId player_id,
     entry.username       = username;
     entry.elo            = elo;
     entry.time_control   = tc;
-    entry.enqueue_time   = std::chrono::steady_clock::now();
+    entry.enqueue_time   = clock_->steady_now();
 
     // Insert into the ELO tree for this time control bucket — O(log N)
     // multimap::insert returns an iterator to the inserted element
@@ -131,9 +131,12 @@ std::vector<MatchResult> Matchmaker::try_match() {
 
             int elo_diff = std::abs(a.elo - b.elo);
 
-            // Both players must accept the ELO difference (fence check)
-            if (elo_diff <= a.acceptable_range() &&
-                elo_diff <= b.acceptable_range()) {
+            // Both players must accept the ELO difference (fence check).
+            // Single `now` for the whole sweep — otherwise adjacent
+            // acceptable_range calls could see different clock reads.
+            const auto now = clock_->steady_now();
+            if (elo_diff <= a.acceptable_range(now) &&
+                elo_diff <= b.acceptable_range(now)) {
 
                 // ── Match found! Create a game room. ──
                 auto room = room_mgr_.create_room(
