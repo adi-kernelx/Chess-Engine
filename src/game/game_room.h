@@ -25,6 +25,7 @@
 #include "game/ai_player.h"
 #include <string>
 #include <vector>
+#include <memory>
 #include <mutex>
 #include <chrono>
 #include <cstdint>
@@ -32,6 +33,16 @@
 
 namespace chess {
 namespace game {
+
+// Forward declarations for LLD-4.1 listener plumbing. Full definitions
+// live in `game/game_events.h`, which itself includes `game_snapshot.h`
+// which needs `MoveRecord` + `TimeControl` from THIS header — so we
+// break the cycle here.
+class GameEventListener;
+using GameEventListenerPtr = std::shared_ptr<GameEventListener>;
+struct GameStarted;
+struct GameCompleted;
+struct GameSnapshot;
 
 // ============================================================
 // Game Room State Machine
@@ -107,6 +118,11 @@ public:
     /// The game starts immediately (no WAITING state).
     GameRoom(GameId id, PlayerId creator_id, const std::string& creator_name,
              int creator_fd, const TimeControl& tc, AIDifficulty difficulty);
+
+    /// Out-of-line so `unique_ptr<GameCompleted>` (forward-declared in
+    /// this header) sees the full type at destruction, which is defined
+    /// in `game_events.h` included by game_room.cpp.
+    ~GameRoom();
 
     // --------------------------------------------------------
     // Room lifecycle
@@ -218,6 +234,22 @@ public:
     /// Cheap accessor for the lobby's `spectator_count` field.
     size_t spectator_count() const;
 
+    // --------------------------------------------------------
+    // LLD-4.1 — typed event listeners
+    // --------------------------------------------------------
+
+    /// Register a listener. The room holds a `shared_ptr`; caller keeps
+    /// a copy to control lifetime. Adding the same pointer twice is
+    /// legal — it results in two callbacks per event. Idempotency
+    /// (if wanted) is the caller's responsibility.
+    void add_listener(GameEventListenerPtr listener);
+
+    /// Remove by `shared_ptr` identity (owner_before equality). Returns
+    /// true if a matching listener was found and removed, false
+    /// otherwise. Safe to call from a listener callback — the room
+    /// snapshots the listener list before invoking.
+    bool remove_listener(const GameEventListenerPtr& listener);
+
 private:
     // --------------------------------------------------------
     // Internal helpers
@@ -227,8 +259,27 @@ private:
     /// Returns Color::NONE if the fd isn't in this room.
     Color color_of(int connection_fd) const;
 
-    /// End the game with a result.
+    /// End the game with a result. Builds the terminal `GameSnapshot`
+    /// under `mutex_`, snapshots the listener list, releases the lock,
+    /// then invokes each listener's `on_game_completed` outside the
+    /// lock. Listener callbacks that throw are caught + logged; other
+    /// listeners still fire.
     void finish_game(GameStatus status, const std::string& result);
+
+    /// Fire `on_game_started` on every listener. Called from `join()`
+    /// (and from the AI-game constructor path via a direct emit).
+    /// Same mutex discipline as `emit_completed` below.
+    void emit_started(const GameStarted& ev);
+
+    /// Fire `on_game_completed` on every listener. See `finish_game`.
+    void emit_completed(const GameCompleted& ev);
+
+    /// Build the immutable snapshot of this room's terminal state
+    /// into `out`. Out-param (rather than return-by-value) so this
+    /// header can keep `GameSnapshot` forward-declared and avoid a
+    /// game_room.h ⇄ game_snapshot.h include cycle. MUST be called
+    /// with `mutex_` held.
+    void build_snapshot_locked(GameSnapshot& out) const;
 
     /// Update the clock: stop the current player's clock, deduct elapsed time,
     /// add increment, and start the opponent's clock.
@@ -271,6 +322,40 @@ private:
     /// Wall-clock timestamps for ISO 8601 persistence.
     std::chrono::system_clock::time_point wall_start_;
     std::chrono::system_clock::time_point wall_end_;
+
+    /// LLD-4.1 — event listeners. Snapshot-copied before invoke so a
+    /// listener callback can safely mutate this vector without racing
+    /// the iteration loop.
+    std::vector<GameEventListenerPtr> listeners_;
+
+    /// LLD-4.1 — a terminal-transition event queued by `finish_game`
+    /// under the lock, drained by `LockAndDrain::~LockAndDrain` after
+    /// the lock releases. `mutable` so const accessors (which cannot
+    /// call `finish_game` but still use `LockAndDrain`) can pass a
+    /// `const GameRoom&` to the guard; drain will find these fields
+    /// empty in that case and do nothing.
+    mutable std::unique_ptr<GameCompleted>    pending_completed_;
+    mutable std::vector<GameEventListenerPtr> pending_listeners_snapshot_;
+
+    /// RAII helper: every public GameRoom method uses this instead of a
+    /// plain `std::lock_guard`. On destruction it (1) captures any
+    /// pending completion event into locals, (2) releases the mutex,
+    /// (3) invokes each listener's `on_game_completed`. This guarantees
+    /// listener callbacks run OUTSIDE the room lock without every
+    /// caller having to remember an "unlock-then-emit" dance. A
+    /// listener that throws is caught + logged; other listeners still
+    /// fire (plan-doc "listener failure isolation" requirement).
+    class LockAndDrain {
+    public:
+        explicit LockAndDrain(const GameRoom& room);
+        ~LockAndDrain();
+        LockAndDrain(const LockAndDrain&) = delete;
+        LockAndDrain& operator=(const LockAndDrain&) = delete;
+    private:
+        const GameRoom&              room_;
+        std::unique_lock<std::mutex> lock_;
+    };
+    friend class LockAndDrain;
 };
 
 } // namespace game

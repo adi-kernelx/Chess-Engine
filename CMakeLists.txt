@@ -146,6 +146,7 @@ target_link_libraries(test_notation PRIVATE Threads::Threads)
 # Test: Game Room Manager (Phase 4.1)
 add_executable(test_game_room
     tests/test_game_room.cpp
+    src/core/logger.cpp
     src/chess/zobrist.cpp
     src/chess/transposition_table.cpp
     src/chess/board.cpp
@@ -443,6 +444,7 @@ target_link_libraries(test_json_escaping PRIVATE Threads::Threads)
 # Test: AI Player Integration (Phase 6.4)
 add_executable(test_ai_integration
     tests/test_ai_integration.cpp
+    src/core/logger.cpp
     src/chess/zobrist.cpp
     src/chess/transposition_table.cpp
     src/chess/board.cpp
@@ -481,6 +483,7 @@ target_link_libraries(test_repositories PRIVATE Threads::Threads PostgreSQL::Pos
 # Database-backed tests skip cleanly without DATABASE_URL.
 add_executable(test_game_persistence
     tests/test_game_persistence.cpp
+    src/core/logger.cpp
     src/chess/zobrist.cpp
     src/chess/transposition_table.cpp
     src/chess/board.cpp
@@ -868,3 +871,24 @@ add_executable(test_tournament_service
 )
 target_include_directories(test_tournament_service PRIVATE src third_party)
 target_link_libraries(test_tournament_service PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
+
+# Test: LLD-4.1 GameEvents / GameSnapshot / listener plumbing.
+# Pure logic — no DB, no sockets. Verifies add/remove_listener,
+# GameStarted/GameCompleted emission, snapshot correctness, listener
+# failure isolation, and the callbacks-outside-lock invariant via a
+# re-entering listener.
+add_executable(test_game_events
+    tests/test_game_events.cpp
+    src/core/logger.cpp
+    src/chess/zobrist.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/game/game_room.cpp
+    src/game/ai_player.cpp
+    src/chess/transposition_table.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+)
+target_include_directories(test_game_events PRIVATE src)
+target_link_libraries(test_game_events PRIVATE Threads::Threads)

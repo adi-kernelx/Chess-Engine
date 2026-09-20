@@ -10,9 +10,15 @@
  */
 
 #include "game/game_room.h"
+
+#include <exception>
 #include <sstream>
 #include <iomanip>
 #include <ctime>
+
+#include "core/logger.h"
+#include "game/game_events.h"
+#include "game/game_snapshot.h"
 
 namespace chess {
 namespace game {
@@ -92,32 +98,172 @@ GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_na
     white_.clock_start = game_start_time_;
 }
 
+GameRoom::~GameRoom() = default;
+
+// ============================================================
+// LLD-4.1 — LockAndDrain: per-method critical section + post-unlock
+// listener emission for terminal-transition events.
+// ============================================================
+
+GameRoom::LockAndDrain::LockAndDrain(const GameRoom& room)
+    : room_(room), lock_(room.mutex_) {}
+
+GameRoom::LockAndDrain::~LockAndDrain() {
+    // Snapshot any pending completion under the lock, then release.
+    std::unique_ptr<GameCompleted>    ev;
+    std::vector<GameEventListenerPtr> to_fire;
+    if (room_.pending_completed_) {
+        ev = std::move(room_.pending_completed_);
+        to_fire = std::move(room_.pending_listeners_snapshot_);
+    }
+    lock_.unlock();
+
+    if (!ev) return;
+    for (const auto& listener : to_fire) {
+        if (!listener) continue;
+        try {
+            listener->on_game_completed(*ev);
+        } catch (const std::exception& e) {
+            core::Logger::warn("game", "GameRoom",
+                "Listener threw on on_game_completed for game "
+                + std::to_string(ev->snapshot.room_id) + ": " + e.what());
+        } catch (...) {
+            core::Logger::warn("game", "GameRoom",
+                "Listener threw non-standard exception on on_game_completed for game "
+                + std::to_string(ev->snapshot.room_id));
+        }
+    }
+}
+
+// ============================================================
+// LLD-4.1 — listener registration + snapshot + emit helpers
+// ============================================================
+
+void GameRoom::add_listener(GameEventListenerPtr listener) {
+    if (!listener) return;
+    LockAndDrain lock(*this);
+    listeners_.push_back(std::move(listener));
+}
+
+bool GameRoom::remove_listener(const GameEventListenerPtr& listener) {
+    LockAndDrain lock(*this);
+    for (auto it = listeners_.begin(); it != listeners_.end(); ++it) {
+        if (it->get() == listener.get()) {
+            listeners_.erase(it);
+            return true;
+        }
+    }
+    return false;
+}
+
+void GameRoom::build_snapshot_locked(GameSnapshot& out) const {
+    // Caller holds mutex_.
+    out.room_id            = id_;
+    out.is_ai_game         = is_ai_;
+    out.status             = game_status_;
+    out.result             = result_;
+    out.termination_reason.clear();  // populated by the caller/service layer
+                                     // via status_to_reason (LLD-4.2 puts the
+                                     // string on the snapshot too).
+    out.time_control       = time_control_;
+    out.started_at_iso     = format_iso8601(wall_start_);
+    out.ended_at_iso       = format_iso8601(wall_end_);
+
+    out.white.db_player_id = white_.db_player_id;
+    out.white.player_id    = white_.player_id;
+    out.white.username     = white_.username;
+    out.white.elo          = white_.elo;
+    out.white.remaining_ms = white_.remaining_ms;
+
+    out.black.db_player_id = black_.db_player_id;
+    out.black.player_id    = black_.player_id;
+    out.black.username     = black_.username;
+    out.black.elo          = black_.elo;
+    out.black.remaining_ms = black_.remaining_ms;
+
+    out.history            = move_history_;
+    out.move_count         = static_cast<int>(move_history_.size());
+    out.completion_uuid.clear();  // populated by LLD-4.2 completion service.
+}
+
+void GameRoom::emit_started(const GameStarted& ev) {
+    // Snapshot listeners under the lock, invoke outside.
+    std::vector<GameEventListenerPtr> to_fire;
+    {
+        LockAndDrain lock(*this);
+        to_fire = listeners_;
+    }
+    for (const auto& listener : to_fire) {
+        if (!listener) continue;
+        try {
+            listener->on_game_started(ev);
+        } catch (const std::exception& e) {
+            core::Logger::warn("game", "GameRoom",
+                "Listener threw on on_game_started for game "
+                + std::to_string(ev.room_id) + ": " + e.what());
+        } catch (...) {
+            core::Logger::warn("game", "GameRoom",
+                "Listener threw non-standard exception on on_game_started for game "
+                + std::to_string(ev.room_id));
+        }
+    }
+}
+
+void GameRoom::emit_completed(const GameCompleted& ev) {
+    // Kept for symmetry / test use. In production the terminal event
+    // flows through LockAndDrain instead — see finish_game.
+    std::vector<GameEventListenerPtr> to_fire;
+    {
+        LockAndDrain lock(*this);
+        to_fire = listeners_;
+    }
+    for (const auto& listener : to_fire) {
+        if (!listener) continue;
+        try { listener->on_game_completed(ev); }
+        catch (const std::exception& e) {
+            core::Logger::warn("game", "GameRoom",
+                "Listener threw on on_game_completed for game "
+                + std::to_string(ev.snapshot.room_id) + ": " + e.what());
+        } catch (...) {}
+    }
+}
+
 // ============================================================
 // Join — Second player enters the room
 // ============================================================
 
 bool GameRoom::join(PlayerId player_id, const std::string& player_name, int connection_fd,
                     int64_t db_player_id, int elo) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    GameStarted ev;
+    {
+        LockAndDrain lock(*this);
 
-    if (state_ != RoomState::WAITING) return false;
-    if (!black_.is_empty()) return false;
+        if (state_ != RoomState::WAITING) return false;
+        if (!black_.is_empty()) return false;
 
-    // Seat the joiner as Black
-    black_.connection_fd  = connection_fd;
-    black_.player_id      = player_id;
-    black_.db_player_id   = db_player_id;
-    black_.username       = player_name;
-    black_.elo            = elo;
-    black_.remaining_ms   = time_control_.base_time_ms;
-    black_.connected      = true;
+        // Seat the joiner as Black
+        black_.connection_fd  = connection_fd;
+        black_.player_id      = player_id;
+        black_.db_player_id   = db_player_id;
+        black_.username       = player_name;
+        black_.elo            = elo;
+        black_.remaining_ms   = time_control_.base_time_ms;
+        black_.connected      = true;
 
-    // Start the game — White's clock begins ticking
-    state_ = RoomState::IN_PROGRESS;
-    game_start_time_ = std::chrono::steady_clock::now();
-    wall_start_ = std::chrono::system_clock::now();
-    white_.clock_start = game_start_time_;
+        // Start the game — White's clock begins ticking
+        state_ = RoomState::IN_PROGRESS;
+        game_start_time_ = std::chrono::steady_clock::now();
+        wall_start_ = std::chrono::system_clock::now();
+        white_.clock_start = game_start_time_;
 
+        // LLD-4.1 — assemble the event under the lock; fire callbacks
+        // outside the lock a few lines below.
+        ev.room_id     = id_;
+        ev.white_db_id = white_.db_player_id;
+        ev.black_db_id = black_.db_player_id;
+        ev.is_ai_game  = false;
+    }
+    emit_started(ev);
     return true;
 }
 
@@ -127,7 +273,7 @@ bool GameRoom::join(PlayerId player_id, const std::string& player_name, int conn
 
 GameRoom::MoveResult GameRoom::submit_move(int connection_fd, Square from, Square to,
                                            PieceType promo_type) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
 
     MoveResult result;
     result.success = false;
@@ -242,7 +388,7 @@ GameRoom::MoveResult GameRoom::submit_move(int connection_fd, Square from, Squar
 
 GameRoom::MoveResult GameRoom::submit_move_ai(Square from, Square to,
                                                PieceType promo_type) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
 
     MoveResult result;
     result.success = false;
@@ -335,7 +481,7 @@ GameRoom::MoveResult GameRoom::submit_move_ai(Square from, Square to,
 // ============================================================
 
 bool GameRoom::resign(int connection_fd) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
 
     if (state_ != RoomState::IN_PROGRESS) return false;
 
@@ -352,7 +498,7 @@ bool GameRoom::resign(int connection_fd) {
 // ============================================================
 
 void GameRoom::on_disconnect(int connection_fd) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
 
     if (white_.connection_fd == connection_fd) {
         white_.connected = false;
@@ -369,7 +515,7 @@ void GameRoom::on_disconnect(int connection_fd) {
 }
 
 bool GameRoom::on_reconnect(PlayerId player_id, int new_fd) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
 
     if (state_ == RoomState::FINISHED) return false;
 
@@ -391,12 +537,12 @@ bool GameRoom::on_reconnect(PlayerId player_id, int new_fd) {
 // ============================================================
 
 GameId GameRoom::get_id() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return id_;
 }
 
 RoomState GameRoom::get_state() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return state_;
 }
 
@@ -407,7 +553,7 @@ const Board& GameRoom::get_board() const {
 }
 
 Color GameRoom::side_to_move() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return board_.side_to_move();
 }
 
@@ -416,62 +562,62 @@ const TimeControl& GameRoom::get_time_control() const {
 }
 
 std::string GameRoom::get_result_string() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return result_;
 }
 
 GameStatus GameRoom::get_game_status() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return game_status_;
 }
 
 bool GameRoom::is_ai_game() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return is_ai_;
 }
 
 AIDifficulty GameRoom::ai_difficulty() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return ai_difficulty_;
 }
 
 Color GameRoom::ai_color() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return ai_color_;
 }
 
 int GameRoom::get_player_fd(Color color) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     if (color == Color::WHITE) return white_.connection_fd;
     if (color == Color::BLACK) return black_.connection_fd;
     return -1;
 }
 
 int GameRoom::get_opponent_fd(int my_fd) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     if (white_.connection_fd == my_fd) return black_.connection_fd;
     if (black_.connection_fd == my_fd) return white_.connection_fd;
     return -1;
 }
 
 bool GameRoom::has_player(int connection_fd) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return white_.connection_fd == connection_fd || black_.connection_fd == connection_fd;
 }
 
 bool GameRoom::has_player_id(PlayerId pid) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return white_.player_id == pid || black_.player_id == pid;
 }
 
 int GameRoom::current_turn_fd() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     if (state_ != RoomState::IN_PROGRESS) return -1;
     return (board_.side_to_move() == Color::WHITE) ? white_.connection_fd : black_.connection_fd;
 }
 
 void GameRoom::get_remaining_times(int& white_ms, int& black_ms) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
 
     white_ms = white_.remaining_ms;
     black_ms = black_.remaining_ms;
@@ -496,45 +642,45 @@ void GameRoom::get_remaining_times(int& white_ms, int& black_ms) const {
 }
 
 std::vector<MoveRecord> GameRoom::get_move_history() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return move_history_;
 }
 
 PlayerId GameRoom::get_player_id(Color color) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     if (color == Color::WHITE) return white_.player_id;
     if (color == Color::BLACK) return black_.player_id;
     return 0;
 }
 
 int64_t GameRoom::get_db_player_id(Color color) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     if (color == Color::WHITE) return white_.db_player_id;
     if (color == Color::BLACK) return black_.db_player_id;
     return 0;
 }
 
 std::string GameRoom::get_username(Color color) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     if (color == Color::WHITE) return white_.username;
     if (color == Color::BLACK) return black_.username;
     return "";
 }
 
 int GameRoom::get_elo(Color color) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     if (color == Color::WHITE) return white_.elo;
     if (color == Color::BLACK) return black_.elo;
     return 0;
 }
 
 std::string GameRoom::get_started_at_iso() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return format_iso8601(wall_start_);
 }
 
 std::string GameRoom::get_ended_at_iso() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return format_iso8601(wall_end_);
 }
 
@@ -543,7 +689,7 @@ std::string GameRoom::get_ended_at_iso() const {
 // ============================================================
 
 std::string GameRoom::to_pgn() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
 
     std::vector<notation::PgnTag> tags;
     tags.push_back({"Event", "Online Game"});
@@ -567,7 +713,7 @@ std::string GameRoom::to_pgn() const {
 // ============================================================
 
 bool GameRoom::add_spectator(int connection_fd) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
 
     // Spectating is only meaningful once the game is live. A WAITING room
     // has no board activity to broadcast; a FINISHED room has nothing more
@@ -593,7 +739,7 @@ bool GameRoom::add_spectator(int connection_fd) {
 }
 
 bool GameRoom::remove_spectator(int connection_fd) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     for (auto it = spectator_fds_.begin(); it != spectator_fds_.end(); ++it) {
         if (*it == connection_fd) {
             spectator_fds_.erase(it);
@@ -609,12 +755,12 @@ std::vector<int> GameRoom::spectator_fds() const {
     // send_json_to_fd() while still holding the room mutex, which would
     // block every other move on this room for the duration of the flush
     // (each flush is a syscall per spectator).
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return spectator_fds_;
 }
 
 size_t GameRoom::spectator_count() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    LockAndDrain lock(*this);
     return spectator_fds_.size();
 }
 
@@ -630,11 +776,19 @@ Color GameRoom::color_of(int connection_fd) const {
 }
 
 void GameRoom::finish_game(GameStatus status, const std::string& result) {
-    // Note: caller must hold mutex_
+    // Note: caller must hold mutex_ (via LockAndDrain in every public
+    // caller). Queues a GameCompleted event; LockAndDrain's dtor fires
+    // it AFTER the lock is released — see the class body in game_room.h
+    // and its dtor above.
     state_       = RoomState::FINISHED;
     game_status_ = status;
     result_      = result;
     wall_end_    = std::chrono::system_clock::now();
+
+    auto ev = std::make_unique<GameCompleted>();
+    build_snapshot_locked(ev->snapshot);
+    pending_completed_          = std::move(ev);
+    pending_listeners_snapshot_ = listeners_;
 }
 
 void GameRoom::switch_clock() {
