@@ -770,6 +770,15 @@ add_executable(test_protocol_codec
 target_include_directories(test_protocol_codec PRIVATE src third_party)
 target_link_libraries(test_protocol_codec PRIVATE Threads::Threads)
 
+# Test: LLD-6.1 Clock port.
+# Pure header-only implementations; no DB, no sockets, no threads.
+# Contract tests for SystemClock (production) and FakeClock (test).
+add_executable(test_clock
+    tests/test_clock.cpp
+)
+target_include_directories(test_clock PRIVATE src third_party)
+target_link_libraries(test_clock PRIVATE Threads::Threads)
+
 # Test: LLD-5.1 RequestPipeline stages.
 # Exercises the ordered parse-json + auth stages of the pipeline via
 # `dispatch_for_test`. A socketpair receives the wire frames. Depends
