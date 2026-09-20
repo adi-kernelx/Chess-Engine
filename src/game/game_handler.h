@@ -84,6 +84,7 @@
 #include "game/room_manager.h"
 #include "net/connection.h"
 #include "net/websocket.h"
+#include "protocol/request_pipeline.h"
 #include "storage/database.h"
 
 namespace chess {
@@ -152,9 +153,10 @@ private:
 
     std::function<net::Connection*(int fd)> connection_lookup_;
 
-    // ── LLD-2.1 objects, constructed on register_handlers ──
+    // ── LLD-2.1 / LLD-5.1 objects, constructed on register_handlers ──
 
     std::unique_ptr<application::auth::IdentityExtractor> identity_;
+    std::unique_ptr<protocol::RequestPipeline>            pipeline_;
     std::unique_ptr<application::GameplayService>         gameplay_service_;
     std::unique_ptr<handlers::GameplayHandler>            gameplay_handler_;
 

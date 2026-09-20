@@ -109,6 +109,7 @@ set(SOURCES
     src/tournament/tournament_manager.cpp
     # LLD-1 — typed protocol boundary
     src/protocol/json_codec.cpp
+    src/protocol/request_pipeline.cpp
     src/net/socket_message_sink.cpp
 )
 
@@ -546,6 +547,7 @@ add_executable(test_auth_required
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
     src/protocol/json_codec.cpp
+    src/protocol/request_pipeline.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
@@ -604,6 +606,7 @@ add_executable(test_spectator
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
     src/protocol/json_codec.cpp
+    src/protocol/request_pipeline.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
@@ -661,6 +664,7 @@ add_executable(test_replay
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
     src/protocol/json_codec.cpp
+    src/protocol/request_pipeline.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
@@ -719,6 +723,7 @@ add_executable(test_anti_cheat
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
     src/protocol/json_codec.cpp
+    src/protocol/request_pipeline.cpp
     src/net/socket_message_sink.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
@@ -764,6 +769,33 @@ add_executable(test_protocol_codec
 )
 target_include_directories(test_protocol_codec PRIVATE src third_party)
 target_link_libraries(test_protocol_codec PRIVATE Threads::Threads)
+
+# Test: LLD-5.1 RequestPipeline stages.
+# Exercises the ordered parse-json + auth stages of the pipeline via
+# `dispatch_for_test`. A socketpair receives the wire frames. Depends
+# on connection.cpp + websocket.cpp (for the SocketMessageSink caller
+# sink), identity_extractor.cpp (auth stage), and their transitive
+# storage/auth deps. Runs without DB.
+add_executable(test_request_pipeline
+    tests/test_request_pipeline.cpp
+    src/protocol/request_pipeline.cpp
+    src/net/socket_message_sink.cpp
+    src/net/connection.cpp
+    src/net/websocket.cpp
+    src/core/logger.cpp
+    src/application/auth/identity_extractor.cpp
+    src/auth/token.cpp
+    src/auth/session.cpp
+    src/auth/username.cpp
+    src/storage/database.cpp
+    src/storage/player_repo.cpp
+    src/storage/storage_error.cpp
+    src/crypto/base64.cpp
+    src/crypto/random.cpp
+    src/crypto/sha512.cpp
+)
+target_include_directories(test_request_pipeline PRIVATE src third_party)
+target_link_libraries(test_request_pipeline PRIVATE Threads::Threads OpenSSL::Crypto PostgreSQL::PostgreSQL)
 
 # Test: Swiss tournament system (Phase 9.4).
 # Three layers: pure Swiss pairing (no DB, always runs), tournament_repo

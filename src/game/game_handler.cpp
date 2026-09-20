@@ -61,10 +61,23 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
         std::move(foreign_sender),
         std::move(spectator_broadcaster));
 
-    gameplay_handler_ = std::make_unique<handlers::GameplayHandler>(
-        *gameplay_service_, identity_.get(), connection_lookup_);
+    // LLD-5.1: pipeline owns parse-json + auth stages for every route
+    // it manages. Constructed once here, shared across every family
+    // handler that migrates to it (5.1 = gameplay; 5.2+ adds the rest).
+    pipeline_ = std::make_unique<protocol::RequestPipeline>(
+        identity_.get(), connection_lookup_);
 
-    gameplay_handler_->register_handlers(router);
+    gameplay_handler_ = std::make_unique<handlers::GameplayHandler>(
+        *gameplay_service_, connection_lookup_);
+
+    gameplay_handler_->register_handlers(*pipeline_);
+
+    // LLD-5.1: bind every pipeline-registered route on the router. The
+    // three un-migrated families (query/analysis/tournament) still
+    // call `router.register_handler` directly below; each writes its
+    // own key into the router's map, so the two paths coexist without
+    // colliding.
+    pipeline_->install_on_router(router);
 
     // ── LLD-4.2: register the completion service as RoomManager's ──
     //   default listener. Every room `create_room` / `create_ai_room`
