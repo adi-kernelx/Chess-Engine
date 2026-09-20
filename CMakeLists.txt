@@ -45,6 +45,7 @@ set(SOURCES
     src/chess/notation.cpp
     src/chess/evaluator.cpp
     src/chess/engine.cpp
+    src/chess/engine_move_selector.cpp
     src/game/game_room.cpp
     src/game/room_manager.cpp
     src/game/game_handler.cpp
@@ -778,6 +779,24 @@ add_executable(test_clock
 )
 target_include_directories(test_clock PRIVATE src third_party)
 target_link_libraries(test_clock PRIVATE Threads::Threads)
+
+# Test: LLD-6.2 MoveSelector port + EngineMoveSelector adapter.
+# Contract tests including one real (small-depth) engine search.
+add_executable(test_move_selector
+    tests/test_move_selector.cpp
+    src/chess/engine_move_selector.cpp
+    src/chess/engine.cpp
+    src/chess/evaluator.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/transposition_table.cpp
+    src/chess/zobrist.cpp
+    src/game/ai_player.cpp
+    src/core/logger.cpp
+)
+target_include_directories(test_move_selector PRIVATE src third_party)
+target_link_libraries(test_move_selector PRIVATE Threads::Threads)
 
 # Test: LLD-5.1 RequestPipeline stages.
 # Exercises the ordered parse-json + auth stages of the pipeline via

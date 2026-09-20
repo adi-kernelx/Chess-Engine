@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "application/ports/move_selector.h"
 #include "chess/board.h"
 #include "chess/engine.h"
 #include "core/types.h"
@@ -29,6 +30,12 @@ AIDifficulty parse_difficulty(const std::string& str);
 
 /// Human-readable name for a difficulty level (e.g. "Medium").
 std::string difficulty_name(AIDifficulty diff);
+
+/// LLD-6.2: difficulty as configuration. Returns the (max_depth,
+/// time_ms) pair the MoveSelector port speaks. Public so any caller
+/// that wants to talk to a `MoveSelector` directly can convert
+/// difficulty without owning an `AIPlayer`.
+application::ports::SearchLimits limits_for(AIDifficulty diff);
 
 /// Result of an AI move computation
 struct AIMove {

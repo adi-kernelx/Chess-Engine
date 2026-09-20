@@ -30,8 +30,7 @@ std::string difficulty_name(AIDifficulty diff) {
     }
 }
 
-// Difficulty → (max_depth, time_limit_ms)
-static std::pair<int, int> difficulty_params(AIDifficulty diff) {
+application::ports::SearchLimits limits_for(AIDifficulty diff) {
     switch (diff) {
         case AIDifficulty::EASY:   return {2,   200};
         case AIDifficulty::MEDIUM: return {4,  1000};
@@ -48,10 +47,10 @@ static std::pair<int, int> difficulty_params(AIDifficulty diff) {
 AIPlayer::AIPlayer() : engine_(16) {}  // 16 MB TT for AI
 
 AIMove AIPlayer::compute_move(const Board& board, AIDifficulty difficulty) {
-    auto [max_depth, time_ms] = difficulty_params(difficulty);
+    auto lim = limits_for(difficulty);
 
     engine_.set_position(board);
-    auto result = engine_.search(time_ms, max_depth);
+    auto result = engine_.search(lim.time_ms, lim.max_depth);
 
     AIMove ai_move;
     ai_move.from       = result.best_move.from;
