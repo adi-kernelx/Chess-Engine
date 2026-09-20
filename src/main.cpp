@@ -1,19 +1,24 @@
 /**
- * main.cpp — server entry point.
+ * main.cpp — server entry point / composition root.
  *
- * Boot order (§7.10):
+ * Boot order (post LLD-5):
  *   1. Read $PORT from the environment (Cloud Run passes the port to bind on
  *      via this variable; local dev falls back to 9000).
  *   2. Build the network layer (thread pool → TcpServer → router).
  *   3. Build the game layer (RoomManager → Matchmaker → GameHandler).
- *   4. If $DATABASE_URL and $JWT_SIGNING_KEY are both present, build the auth
- *      layer (Database → TokenSigner → SupabaseVerifier if configured →
- *      SealedRegistry if the ML-DSA identity key is on disk → AuthHandler).
- *      If either core auth env is missing, the auth surface is simply not
- *      registered and the frontend falls back to capability-preview mode.
- *   5. Wire the sealed-envelope pre-dispatch hook so seal-required messages
- *      are opened (or refused if the type is registered but arrived
- *      unsealed) BEFORE the handler is reached.
+ *   4. Optional auth stack: if $DATABASE_URL and $JWT_SIGNING_KEY are both
+ *      present, wire Database → TokenSigner → SupabaseVerifier (Google, if
+ *      configured) → SealedRegistry (if the ML-DSA identity key is on disk)
+ *      → AuthHandler. Any missing piece degrades gracefully — password
+ *      auth without Google, or capability-preview mode without a DB at all.
+ *   5. Persistence ports: real PostgresGameStore + PostgresPlayerQueries
+ *      when auth is enabled, Null adapters (LLD-3.3) otherwise. Services
+ *      always see non-null references.
+ *   6. Build the shared RequestPipeline (LLD-5) with the IdentityExtractor,
+ *      a SealOpenFn wrapping SealedRegistry::inspect (or empty when seals
+ *      are disabled), and the fd → Connection lookup. Both AuthHandler and
+ *      GameHandler register their routes on it, then `install_on_router`
+ *      binds every route on the router in one call.
  */
 
 #include "application/auth/identity_extractor.h"
@@ -160,12 +165,6 @@ int main() {
         game_handler.on_player_disconnect(fd);
     });
 
-    // LLD-2.1 note: `game_handler.register_handlers` is called AFTER the
-    // auth block below so that `set_database` / `set_signer` are settled
-    // by the time GameHandler builds its internal IdentityExtractor +
-    // GameplayService. Registering earlier would produce a service that
-    // sees a null DB even when auth ends up enabled.
-
     // ── Auth layer (optional; graceful skip if not configured) ──
     //
     // These are heap-allocated because their lifetime must span the run() call
@@ -264,11 +263,12 @@ int main() {
             "Persistence disabled (Null adapters wired)");
     }
 
-    // LLD-5.3: build the shared request pipeline. It owns the
-    // SealOpen + ParseJson + Auth stages that used to be scattered
-    // between `set_pre_dispatch` (seal) and inline handler prologues
-    // (parse + auth). The pipeline lives at composition-root scope so
-    // AuthHandler and GameHandler can share one instance.
+    // ── Request pipeline (LLD-5) ──
+    //
+    // One auditable path per request. Stages: SealOpen (via the
+    // callback below) → ParseJson → Auth → Dispatch. AuthHandler
+    // registers as raw routes (SealOpen only); every other family
+    // uses the typed path.
     application::auth::IdentityExtractor identity_extractor(
         db.get(), signer.get());
     auto lookup = [&server](int fd) -> net::Connection* {
