@@ -124,29 +124,50 @@ AuthHandler::AuthHandler(storage::Database& db,
       rl_seal_ip_      (rate_presets::seal_request_per_ip())
 {}
 
-void AuthHandler::register_handlers(net::MessageRouter& router) {
+void AuthHandler::register_handlers(protocol::RequestPipeline& pipeline) {
+    using protocol::RoutePolicy;
+    // Every auth route registers as a "raw" route on the pipeline —
+    // SealOpen still runs, but the handler owns its own JSON parse,
+    // rate limits, and `auth_error{code:...}` frames.
+    auto raw = [](auto method) {
+        return [method](net::Connection& c,
+                        const std::string& m,
+                        chess::application::MessageSink&) {
+            method(c, m);
+        };
+    };
     if (sealed_reg_) {
-        router.register_handler("seal_request",
-            [this](net::Connection& c, const std::string& m) { handle_seal_request(c, m); });
+        pipeline.register_raw_route(RoutePolicy{"seal_request"},
+            [this](net::Connection& c, const std::string& m,
+                   chess::application::MessageSink&) { handle_seal_request(c, m); });
     }
-    router.register_handler("register",
-        [this](net::Connection& c, const std::string& m) { handle_register(c, m); });
-    router.register_handler("login",
-        [this](net::Connection& c, const std::string& m) { handle_login(c, m); });
-    router.register_handler("refresh",
-        [this](net::Connection& c, const std::string& m) { handle_refresh(c, m); });
-    router.register_handler("logout",
-        [this](net::Connection& c, const std::string& m) { handle_logout(c, m); });
-    router.register_handler("logout_all",
-        [this](net::Connection& c, const std::string& m) { handle_logout_all(c, m); });
+    pipeline.register_raw_route(RoutePolicy{"register"},
+        [this](net::Connection& c, const std::string& m,
+               chess::application::MessageSink&) { handle_register(c, m); });
+    pipeline.register_raw_route(RoutePolicy{"login"},
+        [this](net::Connection& c, const std::string& m,
+               chess::application::MessageSink&) { handle_login(c, m); });
+    pipeline.register_raw_route(RoutePolicy{"refresh"},
+        [this](net::Connection& c, const std::string& m,
+               chess::application::MessageSink&) { handle_refresh(c, m); });
+    pipeline.register_raw_route(RoutePolicy{"logout"},
+        [this](net::Connection& c, const std::string& m,
+               chess::application::MessageSink&) { handle_logout(c, m); });
+    pipeline.register_raw_route(RoutePolicy{"logout_all"},
+        [this](net::Connection& c, const std::string& m,
+               chess::application::MessageSink&) { handle_logout_all(c, m); });
     if (google_) {
-        router.register_handler("google_auth",
-            [this](net::Connection& c, const std::string& m) { handle_google_auth(c, m); });
-        router.register_handler("link_google",
-            [this](net::Connection& c, const std::string& m) { handle_link_google(c, m); });
-        router.register_handler("unlink_google",
-            [this](net::Connection& c, const std::string& m) { handle_unlink_google(c, m); });
+        pipeline.register_raw_route(RoutePolicy{"google_auth"},
+            [this](net::Connection& c, const std::string& m,
+                   chess::application::MessageSink&) { handle_google_auth(c, m); });
+        pipeline.register_raw_route(RoutePolicy{"link_google"},
+            [this](net::Connection& c, const std::string& m,
+                   chess::application::MessageSink&) { handle_link_google(c, m); });
+        pipeline.register_raw_route(RoutePolicy{"unlink_google"},
+            [this](net::Connection& c, const std::string& m,
+                   chess::application::MessageSink&) { handle_unlink_google(c, m); });
     }
+    (void)raw;  // helper kept for future use if migration wants it
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────

@@ -33,6 +33,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "application/auth/identity_extractor.h"
 #include "auth/session.h"
 #include "auth/token.h"
 #include "game/game_handler.h"
@@ -40,6 +41,7 @@
 #include "game/room_manager.h"
 #include "net/connection.h"
 #include "net/websocket.h"
+#include "protocol/request_pipeline.h"
 #include "storage/database.h"
 #include "storage/postgres_game_store.h"
 #include "storage/postgres_player_queries.h"
@@ -277,11 +279,15 @@ int main() {
     storage::PostgresPlayerQueries player_queries(db);
     handler.set_game_store(&game_store);
     handler.set_player_queries(&player_queries);
-    handler.set_signer(&signer);
     handler.set_connection_lookup([](int) -> net::Connection* { return nullptr; });
 
     net::MessageRouter router;
-    handler.register_handlers(router);
+    application::auth::IdentityExtractor extractor(&db, &signer);
+    protocol::RequestPipeline pipeline(
+        &extractor, /*sealed_reg=*/nullptr,
+        [](int) -> net::Connection* { return nullptr; });
+    handler.register_handlers(pipeline);
+    pipeline.install_on_router(router);
 
     // ── create_game ──────────────────────────────────────────
     std::cout << "\n=== create_game ===\n";

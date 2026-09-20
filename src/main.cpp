@@ -16,6 +16,8 @@
  *      unsealed) BEFORE the handler is reached.
  */
 
+#include "application/auth/identity_extractor.h"
+#include "application/ports/null_persistence.h"
 #include "auth/auth_handler.h"
 #include "auth/oauth_verify.h"
 #include "auth/token.h"
@@ -29,7 +31,7 @@
 #include "game/matchmaker.h"
 #include "game/room_manager.h"
 #include "net/tcp_server.h"
-#include "application/ports/null_persistence.h"
+#include "protocol/request_pipeline.h"
 #include "storage/database.h"
 #include "storage/postgres_game_store.h"
 #include "storage/postgres_player_queries.h"
@@ -228,42 +230,20 @@ int main() {
             sealed_reg->require_sealed("login");
             sealed_reg->require_sealed("register");
             sealed_reg->require_sealed("google_auth");
-
-            // Pre-dispatch hook: opens or rejects seal-required messages
-            // before any handler is reached. See sealed_registry.h.
-            server.get_router().set_pre_dispatch(
-                [reg = sealed_reg.get()](net::Connection&, const std::string& type,
-                                         const std::string& message,
-                                         std::string& rewritten) {
-                    std::string opened;
-                    auto out = reg->inspect(type, message, opened);
-                    if (out == crypto::SealedRegistry::Outcome::NotSealed) {
-                        return net::MessageRouter::PreDispatch::Continue;
-                    }
-                    if (out == crypto::SealedRegistry::Outcome::Opened) {
-                        rewritten = std::move(opened);
-                        return net::MessageRouter::PreDispatch::Replace;
-                    }
-                    return net::MessageRouter::PreDispatch::Reject;
-                });
+            // LLD-5.3: seal opening now lives inside the request
+            // pipeline (see below). The old `set_pre_dispatch` hook
+            // is gone.
             core::Logger::info("main", "startup", "Sealed envelopes enabled");
         } else {
             core::Logger::info("main", "startup",
                 "Sealed envelopes disabled (no SERVER_IDENTITY_KEY_PATH)");
         }
 
-        auth_handler = std::make_unique<auth::AuthHandler>(
-            *db, *signer, google.get(), sealed_reg.get());
-        auth_handler->register_handlers(server.get_router());
-        core::Logger::info("main", "startup", "Auth handlers registered");
-
-        // Wire game persistence: signer for auth extraction, Database*
-        // for the tournament family (which still calls Database directly
-        // — its own port is a future slice), plus the LLD-3.2/3.3 ports
-        // for the game family. Both ports get their real Postgres
-        // adapters here.
+        // Wire game persistence: Database* for the tournament family
+        // (which still calls Database directly — its own port is a
+        // future slice), plus the LLD-3.2/3.3 ports for the game
+        // family. Both ports get their real Postgres adapters here.
         game_handler.set_database(db.get());
-        game_handler.set_signer(signer.get());
         game_store     = std::make_unique<storage::PostgresGameStore>(*db);
         player_queries = std::make_unique<storage::PostgresPlayerQueries>(*db);
         game_handler.set_game_store(game_store.get());
@@ -284,8 +264,49 @@ int main() {
             "Persistence disabled (Null adapters wired)");
     }
 
-    // LLD-2.1: register AFTER db/signer are wired (see note above).
-    game_handler.register_handlers(server.get_router());
+    // LLD-5.3: build the shared request pipeline. It owns the
+    // SealOpen + ParseJson + Auth stages that used to be scattered
+    // between `set_pre_dispatch` (seal) and inline handler prologues
+    // (parse + auth). The pipeline lives at composition-root scope so
+    // AuthHandler and GameHandler can share one instance.
+    application::auth::IdentityExtractor identity_extractor(
+        db.get(), signer.get());
+    auto lookup = [&server](int fd) -> net::Connection* {
+        return server.get_connection(fd);
+    };
+    protocol::SealOpenFn seal_open;
+    if (sealed_reg) {
+        seal_open = [reg = sealed_reg.get()](const std::string& type,
+                                             const std::string& message,
+                                             std::string&       out) {
+            std::string opened;
+            switch (reg->inspect(type, message, opened)) {
+                case crypto::SealedRegistry::Outcome::NotSealed:
+                    return protocol::SealOutcome::Continue;
+                case crypto::SealedRegistry::Outcome::Opened:
+                    out = std::move(opened);
+                    return protocol::SealOutcome::Rewritten;
+                case crypto::SealedRegistry::Outcome::Rejected:
+                    return protocol::SealOutcome::Rejected;
+            }
+            return protocol::SealOutcome::Rejected;
+        };
+    }
+    protocol::RequestPipeline pipeline(&identity_extractor,
+                                       std::move(seal_open),
+                                       lookup);
+
+    if (auth_enabled) {
+        auth_handler = std::make_unique<auth::AuthHandler>(
+            *db, *signer, google.get(), sealed_reg.get());
+        auth_handler->register_handlers(pipeline);
+        core::Logger::info("main", "startup", "Auth handlers registered");
+    }
+
+    game_handler.register_handlers(pipeline);
+
+    // Bind every pipeline-registered route on the router in one call.
+    pipeline.install_on_router(server.get_router());
 
     server.get_router().set_default_handler(
         [](net::Connection& conn, const std::string& message) {

@@ -34,14 +34,7 @@ namespace game {
 GameHandler::GameHandler(RoomManager& room_mgr, Matchmaker& matchmaker)
     : room_mgr_(room_mgr), matchmaker_(matchmaker) {}
 
-void GameHandler::register_handlers(net::MessageRouter& router) {
-    // ── LLD-2.1: build and register the gameplay family. ──
-    //
-    // Both db_ and signer_ MUST already have been set (or explicitly
-    // left null when auth is not configured). See main.cpp for ordering.
-    identity_ = std::make_unique<application::auth::IdentityExtractor>(
-        db_, signer_);
-
+void GameHandler::register_handlers(protocol::RequestPipeline& pipeline) {
     auto foreign_sender = [this](int fd, const std::string& frame) {
         this->send_json_to_fd(fd, frame);
     };
@@ -61,16 +54,10 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
         std::move(foreign_sender),
         std::move(spectator_broadcaster));
 
-    // LLD-5.1: pipeline owns parse-json + auth stages for every route
-    // it manages. Constructed once here, shared across every family
-    // handler that migrates to it (5.1 = gameplay; 5.2+ adds the rest).
-    pipeline_ = std::make_unique<protocol::RequestPipeline>(
-        identity_.get(), connection_lookup_);
-
     gameplay_handler_ = std::make_unique<handlers::GameplayHandler>(
         *gameplay_service_, connection_lookup_);
 
-    gameplay_handler_->register_handlers(*pipeline_);
+    gameplay_handler_->register_handlers(pipeline);
 
     // ── LLD-4.2: register the completion service as RoomManager's ──
     //   default listener. Every room `create_room` / `create_ai_room`
@@ -89,30 +76,26 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
         room_mgr_, *player_queries_);
     query_handler_ = std::make_unique<handlers::QueryHandler>(
         *query_service_, connection_lookup_);
-    query_handler_->register_handlers(*pipeline_);
+    query_handler_->register_handlers(pipeline);
 
-    // ── LLD-2.3 · 5.2: analysis family on pipeline ──
+    // ── LLD-2.3: analysis family on pipeline ──
 
     analysis_service_ = std::make_unique<application::AnalysisService>(
         *player_queries_, *game_store_);
     analysis_handler_ = std::make_unique<handlers::AnalysisHandler>(
         *analysis_service_, connection_lookup_);
-    analysis_handler_->register_handlers(*pipeline_);
+    analysis_handler_->register_handlers(pipeline);
 
-    // ── LLD-2.4 · 5.2: tournaments family on pipeline ──
+    // ── LLD-2.4: tournaments family on pipeline ──
 
     tournament_service_ = std::make_unique<application::TournamentService>(db_);
     tournament_handler_ = std::make_unique<handlers::TournamentHandler>(
         *tournament_service_, connection_lookup_);
-    tournament_handler_->register_handlers(*pipeline_);
+    tournament_handler_->register_handlers(pipeline);
 
-    // LLD-5.2: bind every pipeline-registered route on the router in
-    // one call at the end. Every family this class owns now flows
-    // through the same parse-json + auth stages; AuthHandler still
-    // registers its auth-family routes on the router directly, and
-    // the seal pre-dispatch closure on the router still handles those
-    // — both migrate in LLD-5.3.
-    pipeline_->install_on_router(router);
+    // LLD-5.3: the composition root owns `pipeline` and calls
+    // `install_on_router` after every registrant has registered.
+    // GameHandler no longer touches the router.
 }
 
 void GameHandler::on_player_disconnect(int connection_fd) {

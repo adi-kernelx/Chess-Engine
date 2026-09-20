@@ -34,9 +34,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include "application/auth/identity_extractor.h"
 #include "auth/session.h"
 #include "auth/token.h"
 #include "game/game_handler.h"
+#include "protocol/request_pipeline.h"
 #include "game/matchmaker.h"
 #include "game/room_manager.h"
 #include "net/connection.h"
@@ -256,20 +258,22 @@ int main() {
     storage::PostgresPlayerQueries player_queries(db);
     handler.set_game_store(&game_store);
     handler.set_player_queries(&player_queries);
-    handler.set_signer(&signer);
 
     // fd → Connection* map for send_json_to_fd fan-out. The test owns every
     // FakeConn; the lookup returns the raw Connection* when the handler
     // wants to write to a foreign fd (opponent or spectator).
     std::unordered_map<int, net::Connection*> conn_by_fd;
-    handler.set_connection_lookup(
-        [&conn_by_fd](int fd) -> net::Connection* {
-            auto it = conn_by_fd.find(fd);
-            return it == conn_by_fd.end() ? nullptr : it->second;
-        });
+    auto lookup = [&conn_by_fd](int fd) -> net::Connection* {
+        auto it = conn_by_fd.find(fd);
+        return it == conn_by_fd.end() ? nullptr : it->second;
+    };
+    handler.set_connection_lookup(lookup);
 
     net::MessageRouter router;
-    handler.register_handlers(router);
+    application::auth::IdentityExtractor extractor(&db, &signer);
+    protocol::RequestPipeline pipeline(&extractor, nullptr, lookup);
+    handler.register_handlers(pipeline);
+    pipeline.install_on_router(router);
 
     // Bring up a live game: Alice creates, Bob joins.
     auto alice = make_conn();

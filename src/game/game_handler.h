@@ -67,14 +67,12 @@
 #include <nlohmann/json.hpp>
 
 #include "application/analysis_service.h"
-#include "application/auth/identity_extractor.h"
 #include "application/game_completion_service.h"
 #include "application/game_query_service.h"
 #include "application/gameplay_service.h"
 #include "application/ports/game_store.h"
 #include "application/ports/player_queries.h"
 #include "application/tournament_service.h"
-#include "auth/token.h"
 #include "game/ai_player.h"
 #include "game/handlers/analysis_handler.h"
 #include "game/handlers/gameplay_handler.h"
@@ -94,27 +92,23 @@ class GameHandler {
 public:
     GameHandler(RoomManager& room_mgr, Matchmaker& matchmaker);
 
-    /// Register every message handler on the router. Must be called
-    /// AFTER `set_connection_lookup`, `set_database`, and `set_signer`
-    /// — see main.cpp for the required ordering. The gameplay family is
-    /// delegated to an internally-owned `GameplayHandler`; other
-    /// families are still handled by methods on this class pending
-    /// LLD-2.2 / 2.3 / 2.4 migrations.
-    void register_handlers(net::MessageRouter& router);
+    /// Register every game-family message handler on the shared
+    /// pipeline. Must be called AFTER `set_connection_lookup`,
+    /// `set_game_store`, and `set_player_queries`. The pipeline is
+    /// owned by the composition root (main.cpp / tests) — LLD-5.3
+    /// hoisted it there so AuthHandler and GameHandler can share.
+    void register_handlers(protocol::RequestPipeline& pipeline);
 
     /// Called by the transport when a socket closes. Forwards to the
     /// gameplay service (room+queue cleanup); the unmigrated families
     /// currently have no disconnect hook.
     void on_player_disconnect(int connection_fd);
 
-    /// Setters used by main during composition. All optional — a null
-    /// database or signer produces `auth_required` on auth-required
-    /// routes rather than silently downgrading. See IdentityExtractor.
+    /// Setters used by main during composition.
     void set_connection_lookup(std::function<net::Connection*(int fd)> lookup) {
         connection_lookup_ = std::move(lookup);
     }
     void set_database(storage::Database* db) { db_ = db; }
-    void set_signer(auth::TokenSigner* s)    { signer_ = s; }
     /// Set the GameStore port (LLD-3.2). Must be non-null before
     /// `register_handlers` — in capability-disabled mode pass a
     /// `NullGameStore`; the port's `capable()` method distinguishes.
@@ -147,16 +141,13 @@ private:
     AIPlayer      ai_player_;
 
     storage::Database*                 db_             = nullptr;
-    auth::TokenSigner*                 signer_         = nullptr;
     application::ports::GameStore*     game_store_     = nullptr;
     application::ports::PlayerQueries* player_queries_ = nullptr;
 
     std::function<net::Connection*(int fd)> connection_lookup_;
 
-    // ── LLD-2.1 / LLD-5.1 objects, constructed on register_handlers ──
+    // ── LLD-2.1 objects, constructed on register_handlers ──
 
-    std::unique_ptr<application::auth::IdentityExtractor> identity_;
-    std::unique_ptr<protocol::RequestPipeline>            pipeline_;
     std::unique_ptr<application::GameplayService>         gameplay_service_;
     std::unique_ptr<handlers::GameplayHandler>            gameplay_handler_;
 

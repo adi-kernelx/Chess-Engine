@@ -147,40 +147,22 @@ using WsMessageHandler = std::function<void(Connection& conn, const std::string&
 class MessageRouter {
 public:
     /**
-     * What a pre-dispatch hook decided about a message (Phase 7.4).
-     * The hook runs after `type` has been extracted but before any handler is
-     * reached, which is the only place a whole class of message can be
-     * transformed or refused without every handler knowing about it.
+     * LLD-5.3: the pre-dispatch hook is gone. Its only consumer was
+     * the sealed-envelope gate, which now lives as the SealOpen stage
+     * of `protocol::RequestPipeline`. Cross-cutting filters that used
+     * to install here should register on the pipeline instead.
      */
-    enum class PreDispatch {
-        Continue,   ///< dispatch the original message unchanged
-        Replace,    ///< dispatch `rewritten` instead
-        Reject      ///< drop it; do not dispatch at all
-    };
-
-    /**
-     * @param rewritten  written only when the hook returns Replace, so the
-     *                   common path copies nothing.
-     */
-    using PreDispatchHook = std::function<PreDispatch(Connection& conn,
-                                                      const std::string& type,
-                                                      const std::string& message,
-                                                      std::string& rewritten)>;
 
     void register_handler(const std::string& type, WsMessageHandler handler);
     void route(Connection& conn, const std::string& message);
-    
-    void set_default_handler(WsMessageHandler handler) { default_handler_ = std::move(handler); }
 
-    /// Install the sealed-envelope gate (or any other cross-cutting filter).
-    void set_pre_dispatch(PreDispatchHook hook) { pre_dispatch_ = std::move(hook); }
+    void set_default_handler(WsMessageHandler handler) { default_handler_ = std::move(handler); }
 
 private:
     void dispatch(Connection& conn, const std::string& type, const std::string& message);
 
     std::unordered_map<std::string, WsMessageHandler> handlers_;
     WsMessageHandler default_handler_;
-    PreDispatchHook  pre_dispatch_;
 };
 
 } // namespace net

@@ -56,6 +56,8 @@ using chess::net::Connection;
 using chess::protocol::AuthRequirement;
 using chess::protocol::RequestPipeline;
 using chess::protocol::RoutePolicy;
+using chess::protocol::SealOpenFn;
+using chess::protocol::SealOutcome;
 using nlohmann::json;
 
 namespace {
@@ -144,7 +146,7 @@ int main() {
 
     run_test("Malformed JSON → wire error, typed route never runs", []() {
         Fixture fx;
-        RequestPipeline pipeline(nullptr, fx.lookup());
+        RequestPipeline pipeline(nullptr, SealOpenFn{}, fx.lookup());
         int invocations = 0;
         RoutePolicy pol{"ping"};
         auto fn = [&](RequestContext&, const json&, MessageSink&) { ++invocations; };
@@ -161,7 +163,7 @@ int main() {
 
     run_test("Well-formed JSON passes through to typed route", []() {
         Fixture fx;
-        RequestPipeline pipeline(nullptr, fx.lookup());
+        RequestPipeline pipeline(nullptr, SealOpenFn{}, fx.lookup());
         std::string seen_type;
         auto fn = [&](RequestContext&, const json& m, MessageSink&) {
             seen_type = m.value("type", "");
@@ -178,7 +180,7 @@ int main() {
         Fixture fx;
         // Deliberately construct pipeline with a null extractor to
         // prove the None path never dereferences it.
-        RequestPipeline pipeline(nullptr, fx.lookup());
+        RequestPipeline pipeline(nullptr, SealOpenFn{}, fx.lookup());
         bool ran = false;
         bool identity_set = true;
         auto fn = [&](RequestContext& ctx, const json&, MessageSink&) {
@@ -195,7 +197,7 @@ int main() {
 
     run_test("AuthRequirement::Required + null extractor → auth_required", []() {
         Fixture fx;
-        RequestPipeline pipeline(nullptr, fx.lookup());
+        RequestPipeline pipeline(nullptr, SealOpenFn{}, fx.lookup());
         int invocations = 0;
         auto fn = [&](RequestContext&, const json&, MessageSink&) { ++invocations; };
         pipeline.dispatch_for_test(
@@ -220,7 +222,7 @@ int main() {
         // An IdentityExtractor built with both dependencies null fails
         // every extract with reason "Authentication is not available".
         IdentityExtractor extractor(nullptr, nullptr);
-        RequestPipeline pipeline(&extractor, fx.lookup());
+        RequestPipeline pipeline(&extractor, SealOpenFn{}, fx.lookup());
         int invocations = 0;
         auto fn = [&](RequestContext&, const json&, MessageSink&) { ++invocations; };
         pipeline.dispatch_for_test(
@@ -241,7 +243,7 @@ int main() {
 
     run_test("Success path invokes typed route exactly once", []() {
         Fixture fx;
-        RequestPipeline pipeline(nullptr, fx.lookup());
+        RequestPipeline pipeline(nullptr, SealOpenFn{}, fx.lookup());
         int invocations = 0;
         auto fn = [&](RequestContext&, const json&, MessageSink& sink) {
             ++invocations;
@@ -252,6 +254,99 @@ int main() {
         fx.drain();
         std::string frame = read_frame_payload(fx.pair.peer_fd);
         return invocations == 1 && frame == R"({"type":"pong"})";
+    });
+
+    // ── Raw route (LLD-5.3) ─────────────────────────────────────────────
+    //
+    // Raw routes bypass ParseJson/Auth and receive the raw message
+    // string. AuthHandler uses this because the auth family has its
+    // own error frame shape and per-surface rate limits that don't fit
+    // the generic ParseJson + Auth stages.
+
+    run_test("Raw route receives the raw string, no parse, no auth", []() {
+        Fixture fx;
+        RequestPipeline pipeline(nullptr, SealOpenFn{}, fx.lookup());
+        std::string seen;
+        int invocations = 0;
+        auto fn = [&](chess::net::Connection&, const std::string& m,
+                      MessageSink& sink) {
+            ++invocations;
+            seen = m;
+            sink.send(R"({"type":"raw_ok"})");
+        };
+        // Deliberately malformed JSON — the raw path never parses it,
+        // so no error frame is emitted by the pipeline and the fn sees
+        // the string verbatim.
+        pipeline.dispatch_raw_for_test(RoutePolicy{"weird"}, fn, *fx.conn,
+                                       "not-json-at-all");
+        fx.drain();
+        std::string frame = read_frame_payload(fx.pair.peer_fd);
+        return invocations == 1
+            && seen == "not-json-at-all"
+            && frame == R"({"type":"raw_ok"})";
+    });
+
+    run_test("Raw route + null registry = no SealOpen effect", []() {
+        Fixture fx;
+        RequestPipeline pipeline(nullptr, SealOpenFn{}, fx.lookup());
+        std::string seen;
+        auto fn = [&](chess::net::Connection&, const std::string& m,
+                      MessageSink&) { seen = m; };
+        const std::string payload = R"({"type":"login","username":"x"})";
+        pipeline.dispatch_raw_for_test(RoutePolicy{"login"}, fn, *fx.conn,
+                                       payload);
+        return seen == payload;
+    });
+
+    // ── SealOpen stage (LLD-5.3) ────────────────────────────────────────
+
+    run_test("SealOpen Rewritten replaces raw message on typed routes", []() {
+        Fixture fx;
+        SealOpenFn open = [](const std::string&, const std::string&,
+                             std::string& out) {
+            out = R"({"type":"unsealed","secret":"42"})";
+            return SealOutcome::Rewritten;
+        };
+        RequestPipeline pipeline(nullptr, std::move(open), fx.lookup());
+        std::string seen;
+        auto fn = [&](RequestContext&, const json& m, MessageSink&) {
+            seen = m.dump();
+        };
+        pipeline.dispatch_for_test(RoutePolicy{"sealed_route"}, fn, *fx.conn,
+                                   R"({"type":"sealed_route","envelope":"..."})");
+        auto j = json::parse(seen, nullptr, false);
+        return !j.is_discarded()
+            && j.value("secret", "") == "42"
+            && j.value("type", "") == "unsealed";
+    });
+
+    run_test("SealOpen Rejected drops the message silently", []() {
+        Fixture fx;
+        SealOpenFn open = [](const std::string&, const std::string&,
+                             std::string&) { return SealOutcome::Rejected; };
+        RequestPipeline pipeline(nullptr, std::move(open), fx.lookup());
+        int invocations = 0;
+        auto fn = [&](RequestContext&, const json&, MessageSink&) { ++invocations; };
+        pipeline.dispatch_for_test(RoutePolicy{"sealed_route"}, fn, *fx.conn,
+                                   R"({"type":"sealed_route"})");
+        fx.drain();
+        // No frame on the wire, no invocations.
+        std::string frame = read_frame_payload(fx.pair.peer_fd);
+        return invocations == 0 && frame.empty();
+    });
+
+    run_test("SealOpen Continue passes original message through", []() {
+        Fixture fx;
+        SealOpenFn open = [](const std::string&, const std::string&,
+                             std::string&) { return SealOutcome::Continue; };
+        RequestPipeline pipeline(nullptr, std::move(open), fx.lookup());
+        std::string seen;
+        auto fn = [&](RequestContext&, const json& m, MessageSink&) {
+            seen = m.value("type", "");
+        };
+        pipeline.dispatch_for_test(RoutePolicy{"public_route"}, fn, *fx.conn,
+                                   R"({"type":"public_route"})");
+        return seen == "public_route";
     });
 
     // ── summary ─────────────────────────────────────────────────────────

@@ -35,7 +35,9 @@
 
 #include "analysis/anti_cheat.h"
 #include "analysis/cheat_report_repo.h"
+#include "application/auth/identity_extractor.h"
 #include "auth/token.h"
+#include "protocol/request_pipeline.h"
 #include "chess/board.h"
 #include "chess/move.h"
 #include "chess/move_gen.h"
@@ -534,10 +536,14 @@ int main() {
     storage::PostgresPlayerQueries player_queries(db);
     handler.set_game_store(&game_store);
     handler.set_player_queries(&player_queries);
-    handler.set_signer(&signer);
     handler.set_connection_lookup([](int) -> net::Connection* { return nullptr; });
     net::MessageRouter router;
-    handler.register_handlers(router);
+    application::auth::IdentityExtractor extractor(&db, &signer);
+    protocol::RequestPipeline pipeline(
+        &extractor, nullptr,
+        [](int) -> net::Connection* { return nullptr; });
+    handler.register_handlers(pipeline);
+    pipeline.install_on_router(router);
 
     run_test("analyze_game returns cheat_report frame with white+black blocks", [&] {
         auto c = make_conn();

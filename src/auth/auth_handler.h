@@ -66,7 +66,9 @@
 #include "auth/oauth_verify.h"
 #include "auth/token.h"
 #include "crypto/sealed_registry.h"
+#include "net/connection.h"
 #include "net/websocket.h"
+#include "protocol/request_pipeline.h"
 #include "storage/database.h"
 
 #include <memory>
@@ -90,8 +92,13 @@ public:
                 SupabaseVerifier* google,
                 crypto::SealedRegistry* sealed_reg);
 
-    /// Install every auth handler this instance provides.
-    void register_handlers(net::MessageRouter& router);
+    /// LLD-5.3: register every auth route on the shared pipeline via
+    /// `register_raw_route`. The pipeline handles the SealOpen stage
+    /// (`login` / `register` / `google_auth` are seal-required and
+    /// arrive already opened); parsing, rate limits, and error frames
+    /// remain per-handler because the auth family has unique wire
+    /// shape (`auth_error{code:...}`) and per-surface rate limits.
+    void register_handlers(protocol::RequestPipeline& pipeline);
 
 private:
     void handle_seal_request(net::Connection& conn, const std::string& message);
