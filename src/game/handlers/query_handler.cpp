@@ -1,218 +1,117 @@
 /**
- * game/handlers/query_handler.cpp — see header for role.
+ * game/handlers/query_handler.cpp — see header.
  *
- * Every handler follows the same three-line pattern established by
- * GameplayHandler:
- *
- *     parse JSON  → auth?  → build ctx + sink  → delegate to service
- *
- * The service does the business work and every send. This file has no
- * knowledge of RoomManager or Database — it only glues the transport
- * surface to the application boundary.
- *
- * WIRE PARITY
- *   Error phrasings and JSON shapes are preserved bit-for-bit from the
- *   pre-refactor `GameHandler`. Only `spectate` is auth-required in
- *   this family; the other six routes are public reads.
+ * Every route is a two-liner after LLD-5.2: pull whatever primitives
+ * the service needs out of the pre-parsed `msg`, then delegate.
  */
 
 #include "game/handlers/query_handler.h"
 
-#include <ctime>
-#include <memory>
 #include <nlohmann/json.hpp>
 #include <utility>
 
-#include "core/logger.h"
+#include "protocol/route_policy.h"
 
 using nlohmann::json;
 
 namespace chess::game::handlers {
 
-QueryHandler::QueryHandler(chess::application::GameQueryService&              service,
-                           const chess::application::auth::IdentityExtractor* identity,
-                           chess::net::ConnectionLookup                       lookup)
-    : service_(service), identity_(identity), lookup_(std::move(lookup)) {}
+using chess::application::RequestContext;
+using chess::application::MessageSink;
+using chess::protocol::AuthRequirement;
+using chess::protocol::RoutePolicy;
 
-void QueryHandler::register_handlers(chess::net::MessageRouter& router) {
-    router.register_handler("get_profile",
-        [this](chess::net::Connection& c, const std::string& m) { handle_get_profile(c, m); });
-    router.register_handler("get_leaderboard",
-        [this](chess::net::Connection& c, const std::string& m) { handle_get_leaderboard(c, m); });
-    router.register_handler("get_history",
-        [this](chess::net::Connection& c, const std::string& m) { handle_get_history(c, m); });
-    router.register_handler("get_game",
-        [this](chess::net::Connection& c, const std::string& m) { handle_get_game(c, m); });
-    router.register_handler("list_live_games",
-        [this](chess::net::Connection& c, const std::string& m) { handle_list_live_games(c, m); });
-    router.register_handler("spectate",
-        [this](chess::net::Connection& c, const std::string& m) { handle_spectate(c, m); });
-    router.register_handler("stop_spectating",
-        [this](chess::net::Connection& c, const std::string& m) { handle_stop_spectating(c, m); });
-}
+QueryHandler::QueryHandler(chess::application::GameQueryService& service,
+                           chess::net::ConnectionLookup          lookup)
+    : service_(service), lookup_(std::move(lookup)) {}
 
-// ── Adapter helpers ─────────────────────────────────────────────────
-
-chess::application::RequestContext
-QueryHandler::make_ctx(chess::net::Connection& conn) const {
-    chess::application::RequestContext ctx;
-    ctx.caller           = conn.handle();
-    ctx.received_at_unix = static_cast<int64_t>(std::time(nullptr));
-    return ctx;
-}
-
-std::unique_ptr<chess::net::SocketMessageSink>
-QueryHandler::make_caller_sink(chess::net::Connection& conn) const {
-    // Direct-ctor sink — see socket_message_sink.h and
-    // gameplay_handler.cpp for the contract.
-    return std::make_unique<chess::net::SocketMessageSink>(conn);
-}
-
-void QueryHandler::send_error(chess::net::Connection& conn,
-                              const std::string& message) {
-    json err;
-    err["type"]    = "error";
-    err["message"] = message;
-    chess::net::WebSocket::write_frame(conn, chess::net::WsOpcode::TEXT, err.dump());
-}
-
-void QueryHandler::send_auth_error(chess::net::Connection& conn,
-                                   const std::string& message) {
-    json err;
-    err["type"]    = "error";
-    err["code"]    = chess::application::auth::kAuthRequiredCode;
-    err["message"] = message;
-    chess::net::WebSocket::write_frame(conn, chess::net::WsOpcode::TEXT, err.dump());
+void QueryHandler::register_handlers(chess::protocol::RequestPipeline& pipeline) {
+    pipeline.register_route(
+        RoutePolicy{"get_profile"},
+        [this](RequestContext& c, const json& m, MessageSink& s) { handle_get_profile(c, m, s); });
+    pipeline.register_route(
+        RoutePolicy{"get_leaderboard"},
+        [this](RequestContext& c, const json& m, MessageSink& s) { handle_get_leaderboard(c, m, s); });
+    pipeline.register_route(
+        RoutePolicy{"get_history"},
+        [this](RequestContext& c, const json& m, MessageSink& s) { handle_get_history(c, m, s); });
+    pipeline.register_route(
+        RoutePolicy{"get_game"},
+        [this](RequestContext& c, const json& m, MessageSink& s) { handle_get_game(c, m, s); });
+    pipeline.register_route(
+        RoutePolicy{"list_live_games"},
+        [this](RequestContext& c, const json& m, MessageSink& s) { handle_list_live_games(c, m, s); });
+    pipeline.register_route(
+        RoutePolicy{"spectate", AuthRequirement::Required},
+        [this](RequestContext& c, const json& m, MessageSink& s) { handle_spectate(c, m, s); });
+    pipeline.register_route(
+        RoutePolicy{"stop_spectating"},
+        [this](RequestContext& c, const json& m, MessageSink& s) { handle_stop_spectating(c, m, s); });
 }
 
 // ── get_profile ─────────────────────────────────────────────────────
 
-void QueryHandler::handle_get_profile(chess::net::Connection& conn,
-                                      const std::string& message) {
-    json msg;
-    try { msg = json::parse(message); }
-    catch (const json::exception& e) {
-        send_error(conn, "Invalid JSON: " + std::string(e.what()));
-        return;
-    }
-
+void QueryHandler::handle_get_profile(RequestContext& ctx,
+                                      const json& msg,
+                                      MessageSink& sink) {
     std::string username = msg.value("username", std::string{});
     int offset           = msg.value("offset", 0);
-
-    auto ctx  = make_ctx(conn);
-    auto sink = make_caller_sink(conn);
-    service_.get_profile(ctx, username, offset, *sink);
+    service_.get_profile(ctx, username, offset, sink);
 }
 
 // ── get_leaderboard ─────────────────────────────────────────────────
 
-void QueryHandler::handle_get_leaderboard(chess::net::Connection& conn,
-                                          const std::string& message) {
-    json msg;
-    try { msg = json::parse(message); }
-    catch (const json::exception& e) {
-        send_error(conn, "Invalid JSON: " + std::string(e.what()));
-        return;
-    }
-
+void QueryHandler::handle_get_leaderboard(RequestContext& ctx,
+                                          const json& msg,
+                                          MessageSink& sink) {
     int limit  = msg.value("limit", 50);
     int offset = msg.value("offset", 0);
-
-    auto ctx  = make_ctx(conn);
-    auto sink = make_caller_sink(conn);
-    service_.get_leaderboard(ctx, limit, offset, *sink);
+    service_.get_leaderboard(ctx, limit, offset, sink);
 }
 
 // ── get_history ─────────────────────────────────────────────────────
 
-void QueryHandler::handle_get_history(chess::net::Connection& conn,
-                                      const std::string& message) {
-    json msg;
-    try { msg = json::parse(message); }
-    catch (const json::exception& e) {
-        send_error(conn, "Invalid JSON: " + std::string(e.what()));
-        return;
-    }
-
+void QueryHandler::handle_get_history(RequestContext& ctx,
+                                      const json& msg,
+                                      MessageSink& sink) {
     std::string username = msg.value("username", std::string{});
     int limit            = msg.value("limit", 20);
-
-    auto ctx  = make_ctx(conn);
-    auto sink = make_caller_sink(conn);
-    service_.get_history(ctx, username, limit, *sink);
+    service_.get_history(ctx, username, limit, sink);
 }
 
 // ── get_game ────────────────────────────────────────────────────────
 
-void QueryHandler::handle_get_game(chess::net::Connection& conn,
-                                   const std::string& message) {
-    json msg;
-    try { msg = json::parse(message); }
-    catch (const json::exception& e) {
-        send_error(conn, "Invalid JSON: " + std::string(e.what()));
-        return;
-    }
-
+void QueryHandler::handle_get_game(RequestContext& ctx,
+                                   const json& msg,
+                                   MessageSink& sink) {
     int64_t game_id = msg.value("game_id", static_cast<int64_t>(0));
-
-    auto ctx  = make_ctx(conn);
-    auto sink = make_caller_sink(conn);
-    service_.get_game(ctx, game_id, *sink);
+    service_.get_game(ctx, game_id, sink);
 }
 
 // ── list_live_games ─────────────────────────────────────────────────
 
-void QueryHandler::handle_list_live_games(chess::net::Connection& conn,
-                                          const std::string& /*message*/) {
-    auto ctx  = make_ctx(conn);
-    auto sink = make_caller_sink(conn);
-    service_.list_live_games(ctx, *sink);
+void QueryHandler::handle_list_live_games(RequestContext& ctx,
+                                          const json& /*msg*/,
+                                          MessageSink& sink) {
+    service_.list_live_games(ctx, sink);
 }
 
-// ── spectate (auth required) ────────────────────────────────────────
+// ── spectate (auth required — identity in ctx) ──────────────────────
 
-void QueryHandler::handle_spectate(chess::net::Connection& conn,
-                                   const std::string& message) {
-    json msg;
-    try { msg = json::parse(message); }
-    catch (const json::exception& e) {
-        send_error(conn, "Invalid JSON: " + std::string(e.what()));
-        return;
-    }
-
-    if (!identity_) {
-        send_auth_error(conn, "Authentication is not configured on this server");
-        return;
-    }
-    auto id_res = identity_->extract(msg);
-    if (!id_res.is_ok()) {
-        send_auth_error(conn, id_res.reason);
-        return;
-    }
-
+void QueryHandler::handle_spectate(RequestContext& ctx,
+                                   const json& msg,
+                                   MessageSink& sink) {
     int64_t game_id = msg.value("game_id", static_cast<int64_t>(0));
-
-    auto ctx  = make_ctx(conn);
-    auto sink = make_caller_sink(conn);
-    service_.spectate(ctx, id_res.value.username, game_id, *sink);
+    service_.spectate(ctx, ctx.identity->username, game_id, sink);
 }
 
 // ── stop_spectating ─────────────────────────────────────────────────
 
-void QueryHandler::handle_stop_spectating(chess::net::Connection& conn,
-                                          const std::string& message) {
-    json msg;
-    try { msg = json::parse(message); }
-    catch (const json::exception& e) {
-        send_error(conn, "Invalid JSON: " + std::string(e.what()));
-        return;
-    }
-
+void QueryHandler::handle_stop_spectating(RequestContext& ctx,
+                                          const json& msg,
+                                          MessageSink& sink) {
     int64_t game_id = msg.value("game_id", static_cast<int64_t>(0));
-
-    auto ctx  = make_ctx(conn);
-    auto sink = make_caller_sink(conn);
-    service_.stop_spectating(ctx, game_id, *sink);
+    service_.stop_spectating(ctx, game_id, sink);
 }
 
 } // namespace chess::game::handlers
