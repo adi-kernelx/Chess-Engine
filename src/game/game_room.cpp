@@ -17,6 +17,7 @@
 #include <ctime>
 
 #include "core/logger.h"
+#include "core/uuid.h"
 #include "game/game_events.h"
 #include "game/game_snapshot.h"
 
@@ -32,6 +33,27 @@ std::string format_iso8601(const std::chrono::system_clock::time_point& tp) {
     char buf[32];
     std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_val);
     return std::string(buf);
+}
+
+/// Snapshot-side mirror of GameplayService::status_to_reason. Duplicated
+/// intentionally: this file cannot include the service header (that
+/// would flip the layering), and dragging the mapping into `core/types`
+/// would leak the wire-facing termination strings out of the transport-
+/// adjacent layer they belong to. Both copies map every GameStatus the
+/// domain exposes; a mismatch would be caught by test_game_completion.
+std::string snapshot_termination_reason(chess::GameStatus status) {
+    using chess::GameStatus;
+    switch (status) {
+        case GameStatus::CHECKMATE:                  return "checkmate";
+        case GameStatus::STALEMATE:                  return "stalemate";
+        case GameStatus::DRAW_FIFTY_MOVE:            return "fifty_move_rule";
+        case GameStatus::DRAW_INSUFFICIENT_MATERIAL: return "insufficient_material";
+        case GameStatus::DRAW_THREEFOLD_REPETITION:  return "threefold_repetition";
+        case GameStatus::DRAW_AGREEMENT:             return "draw_agreement";
+        case GameStatus::RESIGNATION:                return "resignation";
+        case GameStatus::TIMEOUT:                    return "timeout";
+        default:                                     return "unknown";
+    }
 }
 } // namespace
 
@@ -162,9 +184,7 @@ void GameRoom::build_snapshot_locked(GameSnapshot& out) const {
     out.is_ai_game         = is_ai_;
     out.status             = game_status_;
     out.result             = result_;
-    out.termination_reason.clear();  // populated by the caller/service layer
-                                     // via status_to_reason (LLD-4.2 puts the
-                                     // string on the snapshot too).
+    out.termination_reason = snapshot_termination_reason(game_status_);
     out.time_control       = time_control_;
     out.started_at_iso     = format_iso8601(wall_start_);
     out.ended_at_iso       = format_iso8601(wall_end_);
@@ -183,7 +203,12 @@ void GameRoom::build_snapshot_locked(GameSnapshot& out) const {
 
     out.history            = move_history_;
     out.move_count         = static_cast<int>(move_history_.size());
-    out.completion_uuid.clear();  // populated by LLD-4.2 completion service.
+    // LLD-4.2: stamp the terminal snapshot with a stable idempotency
+    // key. Generated exactly once per terminal transition (finish_game
+    // is the only path here that ever reaches a listener); the key
+    // travels with the snapshot through the completion listener into
+    // `save_completed_game`, which uses it to short-circuit retries.
+    out.completion_uuid    = chess::core::generate_uuid_v4();
 }
 
 void GameRoom::emit_started(const GameStarted& ev) {

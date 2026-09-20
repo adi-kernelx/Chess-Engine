@@ -59,13 +59,23 @@ void GameHandler::register_handlers(net::MessageRouter& router) {
     gameplay_service_ = std::make_unique<application::GameplayService>(
         room_mgr_, matchmaker_, ai_player_,
         std::move(foreign_sender),
-        std::move(spectator_broadcaster),
-        *game_store_);
+        std::move(spectator_broadcaster));
 
     gameplay_handler_ = std::make_unique<handlers::GameplayHandler>(
         *gameplay_service_, identity_.get(), connection_lookup_);
 
     gameplay_handler_->register_handlers(router);
+
+    // ── LLD-4.2: register the completion service as RoomManager's ──
+    //   default listener. Every room `create_room` / `create_ai_room`
+    //   builds from this point on will automatically fire its
+    //   `GameCompleted` event into `GameCompletionService`, which owns
+    //   the (idempotent) persist path. AI games and unauthenticated
+    //   seats short-circuit inside the service — attaching to every
+    //   room is a no-op for those cases.
+    completion_service_ = std::make_shared<application::GameCompletionService>(
+        *game_store_);
+    room_mgr_.set_default_listener(completion_service_);
 
     // ── LLD-2.2: build and register the query / spectator / replay family. ──
 

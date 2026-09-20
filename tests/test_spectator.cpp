@@ -98,6 +98,10 @@ bool prepare_schema(Database& db) {
     bool applied = false;
     if (mig.empty() || !db.apply_migration("0001_phase8_game_persistence",
                                            mig, applied, err)) return false;
+    const auto mig4 = read_file(source_path(
+        "src/storage/migrations/0004_lld4_completion_uuid.sql"));
+    if (mig4.empty() || !db.apply_migration("0004_lld4_completion_uuid",
+                                            mig4, applied, err)) return false;
     return true;
 }
 

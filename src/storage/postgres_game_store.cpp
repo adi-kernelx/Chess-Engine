@@ -34,12 +34,30 @@ PostgresGameStore::save_completed_game(const CompletedGame& game) {
 
     app_ports::SaveGameOutcome out;
     if (res.ok) {
-        out.code    = StorageError::Ok;
-        out.game_id = res.game_id;
-        out.elo     = res.elo;
+        out.code              = StorageError::Ok;
+        out.game_id           = res.game_id;
+        out.elo               = res.elo;
+        out.already_persisted = res.already_persisted;
     } else {
-        out.code    = classify_after(db_, res.error);
-        out.error   = res.error;
+        // A concurrent duplicate that lost the partial-unique-index
+        // race arrives here as a UniqueViolation. Reclassify it as
+        // "already persisted": the caller's retry policy is satisfied
+        // because the row now exists (the winning writer inserted it),
+        // and the caller only needs the game_id — fetch it explicitly.
+        auto code = classify_after(db_, res.error);
+        if (code == StorageError::UniqueViolation && !game.completion_uuid.empty()) {
+            auto probe = db_.exec(
+                "SELECT id FROM games WHERE completion_uuid = $1",
+                {Param::text(game.completion_uuid)});
+            if (probe.ok && !probe.empty()) {
+                out.code              = StorageError::Ok;
+                out.already_persisted = true;
+                out.game_id           = std::stoll(probe.first().at(0));
+                return out;
+            }
+        }
+        out.code  = code;
+        out.error = res.error;
     }
     return out;
 }

@@ -110,8 +110,12 @@ bool prepare_schema(Database& db) {
     const auto mig = read_file(source_path(
         "src/storage/migrations/0001_phase8_game_persistence.sql"));
     bool applied = false;
-    return !mig.empty() && db.apply_migration(
-        "0001_phase8_game_persistence", mig, applied, err);
+    if (mig.empty() || !db.apply_migration(
+        "0001_phase8_game_persistence", mig, applied, err)) return false;
+    const auto mig4 = read_file(source_path(
+        "src/storage/migrations/0004_lld4_completion_uuid.sql"));
+    return !mig4.empty() && db.apply_migration(
+        "0004_lld4_completion_uuid", mig4, applied, err);
 }
 
 int64_t insert_player(Database& db, const std::string& name, int elo = 1200) {

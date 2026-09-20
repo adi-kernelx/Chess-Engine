@@ -277,6 +277,9 @@ bool prepare_schema(Database& db) {
     if (!db.apply_migration("0002_phase9_3_cheat_reports",
             read_file(source_path("src/storage/migrations/0002_phase9_3_cheat_reports.sql")),
             applied, err)) return false;
+    if (!db.apply_migration("0004_lld4_completion_uuid",
+            read_file(source_path("src/storage/migrations/0004_lld4_completion_uuid.sql")),
+            applied, err)) return false;
     return true;
 }
 

@@ -55,7 +55,6 @@
 #include <memory>
 #include <string>
 
-#include "application/ports/game_store.h"
 #include "application/ports/message_sink.h"
 #include "application/request_context.h"
 #include "application/result.h"
@@ -78,19 +77,21 @@ using SpectatorBroadcaster =
 
 class GameplayService {
 public:
-    /// All references must outlive the service. `game_store` is a
-    /// non-null reference — in capability-disabled mode the composition
-    /// root injects a `NullGameStore` and `game_store.capable()`
-    /// returns false, causing `persist_game` to short-circuit silently
-    /// (see the port header). `foreign_sender` and
+    /// All references must outlive the service. `foreign_sender` and
     /// `spectator_broadcaster` MUST NOT be null; the constructor
     /// asserts otherwise (bad state, not a runtime condition).
+    ///
+    /// LLD-4.2 changed the ownership shape here: persistence used to
+    /// live inline on this service via a `GameStore&` and a private
+    /// `persist_game` helper. That was moved to
+    /// `GameCompletionService`, which listens on every room via
+    /// `RoomManager::set_default_listener`. This service no longer
+    /// touches the store.
     GameplayService(chess::game::RoomManager&              rooms,
                     chess::game::Matchmaker&               matchmaker,
                     chess::game::AIPlayer&                 ai,
                     ForeignSender                          foreign_sender,
-                    SpectatorBroadcaster                   spectator_broadcaster,
-                    chess::application::ports::GameStore&  game_store);
+                    SpectatorBroadcaster                   spectator_broadcaster);
 
     // ── LLD-1-migrated routes (typed request, MessageSink caller) ──
 
@@ -159,17 +160,11 @@ private:
     void trigger_ai_move(std::shared_ptr<chess::game::GameRoom> room,
                          int human_fd);
 
-    /// Persist a finished game to Postgres. No-op if `db_` is null,
-    /// the game is against AI, or either player is unauthenticated.
-    void persist_game(chess::game::GameRoom* room,
-                      chess::GameStatus status);
-
     chess::game::RoomManager&              rooms_;
     chess::game::Matchmaker&               matchmaker_;
     chess::game::AIPlayer&                 ai_;
     ForeignSender                          foreign_sender_;
     SpectatorBroadcaster                   spectator_broadcaster_;
-    chess::application::ports::GameStore&  game_store_;
 
     /// Local monotonically-increasing player id for in-memory bookkeeping.
     /// Distinct from `players.id` (the DB primary key), which is what

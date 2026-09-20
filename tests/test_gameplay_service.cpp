@@ -47,7 +47,6 @@
 
 #include "application/gameplay_service.h"
 #include "application/ports/message_sink.h"
-#include "application/ports/null_persistence.h"
 #include "application/request_context.h"
 #include "game/ai_player.h"
 #include "game/matchmaker.h"
@@ -154,8 +153,7 @@ int main() {
         chess::game::Matchmaker  mm(rooms);
         chess::game::AIPlayer    ai;
         FanoutCapture            cap;
-        ports::NullGameStore null_store;
-        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn(), null_store);
+        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn());
 
         FakeSink sink;
         svc.list_games(make_ctx(10), sink);
@@ -170,8 +168,7 @@ int main() {
         chess::game::Matchmaker  mm(rooms);
         chess::game::AIPlayer    ai;
         FanoutCapture            cap;
-        ports::NullGameStore null_store;
-        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn(), null_store);
+        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn());
 
         FakeSink sink;
         svc.create_game(make_ctx(20), make_actor(101, "Alice"), 600, 5, sink);
@@ -187,8 +184,7 @@ int main() {
         chess::game::Matchmaker  mm(rooms);
         chess::game::AIPlayer    ai;
         FanoutCapture            cap;
-        ports::NullGameStore null_store;
-        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn(), null_store);
+        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn());
 
         FakeSink sink;
         svc.create_game(make_ctx(30), make_actor(102, "Alice"), 600, 5, sink);
@@ -207,8 +203,7 @@ int main() {
         chess::game::Matchmaker  mm(rooms);
         chess::game::AIPlayer    ai;
         FanoutCapture            cap;
-        ports::NullGameStore null_store;
-        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn(), null_store);
+        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn());
 
         FakeSink sink;
         svc.join_game(make_ctx(40), make_actor(103, "Bob"), /*game_id=*/9999, sink);
@@ -223,8 +218,7 @@ int main() {
         chess::game::Matchmaker  mm(rooms);
         chess::game::AIPlayer    ai;
         FanoutCapture            cap;
-        ports::NullGameStore null_store;
-        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn(), null_store);
+        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn());
 
         FakeSink creator_sink;
         svc.create_game(make_ctx(50), make_actor(200, "Alice"), 600, 5, creator_sink);
@@ -258,8 +252,7 @@ int main() {
         chess::game::Matchmaker  mm(rooms);
         chess::game::AIPlayer    ai;
         FanoutCapture            cap;
-        ports::NullGameStore null_store;
-        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn(), null_store);
+        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn());
 
         FakeSink white_sink;
         svc.create_game(make_ctx(60), make_actor(300, "Alice"), 600, 5, white_sink);
@@ -293,8 +286,7 @@ int main() {
         chess::game::Matchmaker  mm(rooms);
         chess::game::AIPlayer    ai;
         FanoutCapture            cap;
-        ports::NullGameStore null_store;
-        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn(), null_store);
+        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn());
 
         FakeSink sink;
         svc.game_state(make_ctx(70), chess::protocol::GameStateRequest{}, sink);
@@ -309,8 +301,7 @@ int main() {
         chess::game::Matchmaker  mm(rooms);
         chess::game::AIPlayer    ai;
         FanoutCapture            cap;
-        ports::NullGameStore null_store;
-        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn(), null_store);
+        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn());
 
         FakeSink sink;
         svc.quick_play(make_ctx(80), make_actor(400, "Carol"), 600, 5, sink);
@@ -324,8 +315,7 @@ int main() {
         chess::game::Matchmaker  mm(rooms);
         chess::game::AIPlayer    ai;
         FanoutCapture            cap;
-        ports::NullGameStore null_store;
-        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn(), null_store);
+        GameplayService svc(rooms, mm, ai, cap.foreign_fn(), cap.spectate_fn());
 
         FakeSink sink;
         svc.cancel_queue(make_ctx(90), sink);

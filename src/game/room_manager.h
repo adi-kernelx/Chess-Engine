@@ -27,6 +27,13 @@
 #include <vector>
 #include <atomic>
 
+// Forward declarations for LLD-4.2 default-listener attach hook.
+// GameEventListenerPtr is defined in game/game_events.h, which pulls in
+// game/game_snapshot.h — leaving that include here would drag both
+// through every translation unit that already sees game_room.h. Every
+// site that attaches a listener already includes the events header
+// directly.
+
 namespace chess {
 namespace game {
 
@@ -108,10 +115,29 @@ public:
     /// buffer. Returns the number of rooms that actually removed the fd.
     size_t remove_spectator_everywhere(int connection_fd);
 
+    // --------------------------------------------------------
+    // LLD-4.2 default listener
+    // --------------------------------------------------------
+
+    /// Register a listener that will be automatically attached to every
+    /// room created AFTER this call via `create_room` / `create_ai_room`.
+    /// Passing a `nullptr` clears the default. Composition-time hook:
+    /// production wires the `GameCompletionService` here so persistence
+    /// runs off the `GameCompleted` event without every service having
+    /// to remember to add it. Only ever expected to be called once per
+    /// manager (composition root), so a plain reassign suffices.
+    void set_default_listener(GameEventListenerPtr listener);
+
 private:
     mutable std::mutex mutex_;
     std::unordered_map<GameId, std::shared_ptr<GameRoom>> rooms_;
     std::atomic<GameId> next_id_{1};  // Monotonically increasing room ID counter
+
+    /// LLD-4.2 default listener — attached to every future room.
+    /// Guarded by `mutex_` alongside the rooms map. May be null (no
+    /// default listener wired, e.g. in an in-process test that doesn't
+    /// exercise the completion pipeline).
+    GameEventListenerPtr default_listener_;
 };
 
 } // namespace game

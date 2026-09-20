@@ -38,7 +38,6 @@
 #include "core/logger.h"
 #include "protocol/json_codec.h"
 #include "protocol/response.h"
-#include "storage/game_repo.h"
 
 using nlohmann::json;
 
@@ -89,12 +88,10 @@ GameplayService::GameplayService(chess::game::RoomManager&              rooms,
                                  chess::game::Matchmaker&               matchmaker,
                                  chess::game::AIPlayer&                 ai,
                                  ForeignSender                          foreign_sender,
-                                 SpectatorBroadcaster                   spectator_broadcaster,
-                                 chess::application::ports::GameStore&  game_store)
+                                 SpectatorBroadcaster                   spectator_broadcaster)
     : rooms_(rooms), matchmaker_(matchmaker), ai_(ai),
       foreign_sender_(std::move(foreign_sender)),
-      spectator_broadcaster_(std::move(spectator_broadcaster)),
-      game_store_(game_store) {
+      spectator_broadcaster_(std::move(spectator_broadcaster)) {
     // Both callables MUST be non-null. A default-constructed std::function
     // would let a routine silently drop a foreign notification — the exact
     // silent-failure mode LLD-1's generation guard also tries to prevent.
@@ -154,7 +151,9 @@ void GameplayService::make_move(const RequestContext&                    ctx,
             int opp_fd = room->get_opponent_fd(ctx.caller.fd);
             if (opp_fd >= 0) foreign_sender_(opp_fd, game_over);
             spectator_broadcaster_(*room, game_over);
-            persist_game(room.get(), GameStatus::TIMEOUT);
+            // LLD-4.2: persistence runs via `GameCompletionService`,
+            // fired from the `GameCompleted` event emitted by
+            // `finish_game` inside `submit_move`'s critical section.
         } else {
             caller_sink.send(reject);
         }
@@ -188,7 +187,7 @@ void GameplayService::make_move(const RequestContext&                    ctx,
             "Game " + std::to_string(room->get_id()) + " ended: " +
             room->get_result_string() + " (" +
             status_to_reason(result.game_status) + ")");
-        persist_game(room.get(), result.game_status);
+        // LLD-4.2: persistence via GameCompletionService listener.
     }
 
     if (result.game_status == GameStatus::ONGOING && room->is_ai_game()) {
@@ -224,8 +223,7 @@ void GameplayService::resign(const RequestContext&                 ctx,
     chess::core::Logger::info("game", "GameplayService",
         "Game " + std::to_string(room->get_id()) + ": player resigned → " +
         room->get_result_string());
-
-    persist_game(room.get(), chess::GameStatus::RESIGNATION);
+    // LLD-4.2: persistence via GameCompletionService listener.
 }
 
 // ── game_state ────────────────────────────────────────────────────────
@@ -554,62 +552,9 @@ void GameplayService::trigger_ai_move(std::shared_ptr<chess::game::GameRoom> roo
         chess::core::Logger::info("game", "GameplayService",
             "AI Game " + std::to_string(room->get_id()) + " ended: " +
             room->get_result_string() + " (" + status_to_reason(result.game_status) + ")");
-
-        persist_game(room.get(), result.game_status);
-    }
-}
-
-// ── persist_game (private) ────────────────────────────────────────────
-
-void GameplayService::persist_game(chess::game::GameRoom* room,
-                                   chess::GameStatus status) {
-    if (!game_store_.capable()) return;                       // Persistence disabled
-    if (room->is_ai_game()) return;                           // AI games are not persisted
-
-    int64_t w_id = room->get_db_player_id(chess::Color::WHITE);
-    int64_t b_id = room->get_db_player_id(chess::Color::BLACK);
-    if (w_id <= 0 || b_id <= 0) return;                       // Unauthenticated players
-
-    chess::storage::CompletedGame game;
-    game.white_id     = w_id;
-    game.black_id     = b_id;
-    game.white_elo    = room->get_elo(chess::Color::WHITE);
-    game.black_elo    = room->get_elo(chess::Color::BLACK);
-    game.result       = room->get_result_string();
-    game.termination  = status_to_reason(status);
-    game.time_control = room->get_time_control().to_string();
-    game.started_at   = room->get_started_at_iso();
-    game.ended_at     = room->get_ended_at_iso();
-
-    auto history = room->get_move_history();
-    game.move_count = static_cast<int>(history.size());
-
-    std::string moves;
-    for (size_t i = 0; i < history.size(); ++i) {
-        if (i > 0) moves += ' ';
-        moves += history[i].move.to_uci();
-        game.think_times.push_back({
-            static_cast<int>(i + 1),
-            (i % 2 == 0) ? w_id : b_id,
-            history[i].think_time_ms
-        });
-    }
-    game.moves = std::move(moves);
-
-    auto result = game_store_.save_completed_game(game);
-
-    if (result.ok()) {
-        chess::core::Logger::info("game", "GameplayService",
-            "Game " + std::to_string(room->get_id()) +
-            " persisted (DB id=" + std::to_string(result.game_id) +
-            ", white ELO " + std::to_string(game.white_elo) + "→" +
-            std::to_string(result.elo.white_new) +
-            ", black ELO " + std::to_string(game.black_elo) + "→" +
-            std::to_string(result.elo.black_new) + ")");
-    } else {
-        chess::core::Logger::error("game", "GameplayService",
-            "Failed to persist game " + std::to_string(room->get_id()) +
-            " (" + chess::storage::to_string(result.code) + "): " + result.error);
+        // LLD-4.2: persistence via GameCompletionService listener.
+        // (No-op for AI games — the listener's own is_ai_game guard
+        //  short-circuits before hitting the store.)
     }
 }
 

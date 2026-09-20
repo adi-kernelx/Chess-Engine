@@ -280,6 +280,9 @@ bool prepare_schema(Database& db) {
     if (!db.apply_migration("0003_phase9_4_tournaments",
             read_file(source_path("src/storage/migrations/0003_phase9_4_tournaments.sql")),
             applied, err)) return false;
+    if (!db.apply_migration("0004_lld4_completion_uuid",
+            read_file(source_path("src/storage/migrations/0004_lld4_completion_uuid.sql")),
+            applied, err)) return false;
     return true;
 }
 

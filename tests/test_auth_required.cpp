@@ -104,6 +104,12 @@ bool prepare_schema(Database& db) {
                                            mig, applied, err)) {
         std::cerr << "\n  migration failed: " << err << '\n'; return false;
     }
+    const auto mig4 = read_file(source_path(
+        "src/storage/migrations/0004_lld4_completion_uuid.sql"));
+    if (mig4.empty() || !db.apply_migration("0004_lld4_completion_uuid",
+                                            mig4, applied, err)) {
+        std::cerr << "\n  migration 0004 failed: " << err << '\n'; return false;
+    }
     return true;
 }
 

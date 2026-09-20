@@ -110,6 +110,15 @@ bool prepare(Database& db) {
         std::cerr << "\nmigration failed: " << error << '\n';
         return false;
     }
+
+    const std::string mig4 = read_file(source_path(
+        "src/storage/migrations/0004_lld4_completion_uuid.sql"));
+    if (mig4.empty() ||
+        !db.apply_migration("0004_lld4_completion_uuid", mig4,
+                            applied, error)) {
+        std::cerr << "\nmigration 0004 failed: " << error << '\n';
+        return false;
+    }
     return true;
 }
 

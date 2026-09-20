@@ -40,6 +40,14 @@ struct CompletedGame {
     std::string ended_at;       ///< ISO 8601 timestamp
     int         move_count;     ///< Total plies
 
+    /// LLD-4.2 idempotency key. When non-empty, `save_completed_game`
+    /// looks up an existing row with this uuid before inserting; a hit
+    /// short-circuits the whole transaction with `already_persisted =
+    /// true`. When empty, the call falls through to the plain INSERT
+    /// path (pre-LLD-4.2 behaviour; kept so a caller that hasn't been
+    /// migrated to the completion service still works).
+    std::string completion_uuid;
+
     /// Per-ply think time for anti-cheat and analysis.
     struct PlyTime {
         int     ply_number;     ///< 1-based (ply, not chess move number)
@@ -57,6 +65,14 @@ struct SaveGameResult {
     int64_t     game_id = 0;
     EloUpdate   elo{};
     std::string error;
+
+    /// LLD-4.2: true when the row already existed under
+    /// `CompletedGame::completion_uuid` and this call was a no-op. The
+    /// returned `game_id` is the id of the pre-existing row; `elo` is
+    /// zero-initialised (no rating change happened on this call). The
+    /// completion service uses this flag to log "already persisted"
+    /// instead of "persisted" without treating the retry as a failure.
+    bool        already_persisted = false;
 };
 
 /// A full game record retrieved from the database, including player names

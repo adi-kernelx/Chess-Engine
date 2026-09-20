@@ -68,6 +68,7 @@
 
 #include "application/analysis_service.h"
 #include "application/auth/identity_extractor.h"
+#include "application/game_completion_service.h"
 #include "application/game_query_service.h"
 #include "application/gameplay_service.h"
 #include "application/ports/game_store.h"
@@ -171,6 +172,14 @@ private:
 
     std::unique_ptr<application::TournamentService>       tournament_service_;
     std::unique_ptr<handlers::TournamentHandler>          tournament_handler_;
+
+    // ── LLD-4.2 objects, constructed on register_handlers ──
+    //
+    // Held as a shared_ptr because `RoomManager::set_default_listener`
+    // stores a `GameEventListenerPtr` (== `shared_ptr<GameEventListener>`)
+    // and every room the manager creates thereafter copies that pointer
+    // into its own listener list.
+    std::shared_ptr<application::GameCompletionService>   completion_service_;
 };
 
 } // namespace game

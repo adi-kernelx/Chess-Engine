@@ -61,6 +61,13 @@ struct SaveGameOutcome {
     int64_t                      game_id = 0;
     chess::storage::EloUpdate    elo{};
     std::string                  error;  ///< adapter's raw message for logs
+
+    /// LLD-4.2: true when the store found an existing row under
+    /// `CompletedGame::completion_uuid` and the call was a no-op —
+    /// `game_id` is the pre-existing row's id and no ELO/stat updates
+    /// happened. Distinct from `!ok()`: the call still succeeded.
+    bool already_persisted = false;
+
     bool ok() const { return code == chess::storage::StorageError::Ok; }
 };
 

@@ -67,6 +67,27 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
                                    int k_factor) {
     SaveGameResult out;
 
+    // ── LLD-4.2 idempotency check ────────────────────────────────────
+    // A retry of the same terminal transition — same completion_uuid —
+    // must NOT insert a second games row, must NOT update ELO/stats a
+    // second time. The lookup runs BEFORE `BEGIN` because it is
+    // read-only and a hit skips the write path entirely; on a miss the
+    // subsequent INSERT still owns the row via the partial unique index
+    // (`idx_games_completion_uuid`), so a race where two workers try to
+    // persist the same completion loses one of them with a typed
+    // UniqueViolation the caller reclassifies as "already_persisted".
+    if (!game.completion_uuid.empty()) {
+        auto probe = db.exec(
+            "SELECT id FROM games WHERE completion_uuid = $1",
+            {Param::text(game.completion_uuid)});
+        if (probe.ok && !probe.empty()) {
+            out.ok                = true;
+            out.already_persisted = true;
+            out.game_id           = std::stoll(probe.first().at(0));
+            return out;
+        }
+    }
+
     // ── Pre-calculate ELO before touching the database ──────────────
     out.elo = calculate_elo(game.white_elo, game.black_elo,
                             game.result, k_factor);
@@ -79,13 +100,19 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
     }
 
     // ── 1. INSERT the game record ───────────────────────────────────
+    // `completion_uuid` is passed as NULL when the caller left it empty
+    // — matches the migration's partial-unique-index behaviour (NULLs
+    // do not collide, so old code paths still work).
+    Param completion_param = game.completion_uuid.empty()
+        ? Param::null()
+        : Param::text(game.completion_uuid);
     auto game_insert = db.exec(
         "INSERT INTO games(white_id, black_id, moves, result, termination,"
         " opening_eco, white_elo, black_elo, time_control,"
-        " started_at, ended_at, move_count)"
+        " started_at, ended_at, move_count, completion_uuid)"
         " VALUES($1::bigint, $2::bigint, $3, $4, $5, $6,"
         " $7::integer, $8::integer, $9,"
-        " $10::timestamptz, $11::timestamptz, $12::integer)"
+        " $10::timestamptz, $11::timestamptz, $12::integer, $13)"
         " RETURNING id",
         {Param::int64(game.white_id), Param::int64(game.black_id),
          Param::text(game.moves), Param::text(game.result),
@@ -94,7 +121,8 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
          Param::int64(game.white_elo), Param::int64(game.black_elo),
          Param::text(game.time_control),
          Param::text(game.started_at), Param::text(game.ended_at),
-         Param::int64(game.move_count)});
+         Param::int64(game.move_count),
+         completion_param});
 
     if (!game_insert.ok || game_insert.empty()) {
         out.error = "Failed to insert game: " + game_insert.error;

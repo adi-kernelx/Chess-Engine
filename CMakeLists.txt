@@ -33,6 +33,7 @@ include_directories(third_party)
 set(SOURCES
     src/main.cpp
     src/core/logger.cpp
+    src/core/uuid.cpp
     src/net/connection.cpp
     src/net/tcp_server.cpp
     src/net/websocket.cpp
@@ -59,6 +60,8 @@ set(SOURCES
     src/application/analysis_service.cpp
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
+    # LLD-4.2 — completion service (listener) + snapshot idempotency
+    src/application/game_completion_service.cpp
     src/game/matchmaker.cpp
     src/game/ai_player.cpp
     # Phase 7 — hand-written cryptographic primitives
@@ -156,6 +159,7 @@ add_executable(test_game_room
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
 )
 target_include_directories(test_game_room PRIVATE src)
@@ -174,6 +178,7 @@ add_executable(test_matchmaker
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
 )
@@ -454,6 +459,7 @@ add_executable(test_ai_integration
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
 )
 target_include_directories(test_ai_integration PRIVATE src)
@@ -493,6 +499,7 @@ add_executable(test_game_persistence
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
@@ -521,11 +528,13 @@ add_executable(test_auth_required
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
+    src/application/game_completion_service.cpp
     src/application/auth/identity_extractor.cpp
     src/storage/postgres_game_store.cpp
     src/storage/postgres_player_queries.cpp
@@ -577,11 +586,13 @@ add_executable(test_spectator
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
+    src/application/game_completion_service.cpp
     src/application/auth/identity_extractor.cpp
     src/storage/postgres_game_store.cpp
     src/storage/postgres_player_queries.cpp
@@ -632,11 +643,13 @@ add_executable(test_replay
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
+    src/application/game_completion_service.cpp
     src/application/auth/identity_extractor.cpp
     src/storage/postgres_game_store.cpp
     src/storage/postgres_player_queries.cpp
@@ -688,11 +701,13 @@ add_executable(test_anti_cheat
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/game/game_handler.cpp
     src/game/handlers/gameplay_handler.cpp
     src/application/gameplay_service.cpp
+    src/application/game_completion_service.cpp
     src/application/auth/identity_extractor.cpp
     src/storage/postgres_game_store.cpp
     src/storage/postgres_player_queries.cpp
@@ -784,9 +799,11 @@ add_executable(test_gameplay_service
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/application/gameplay_service.cpp
+    src/application/game_completion_service.cpp
     src/storage/storage_error.cpp
     src/storage/database.cpp
     src/storage/game_repo.cpp
@@ -814,6 +831,7 @@ add_executable(test_game_query_service
     src/chess/engine.cpp
     src/game/ai_player.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/room_manager.cpp
     src/game/matchmaker.cpp
     src/application/game_query_service.cpp
@@ -885,6 +903,7 @@ add_executable(test_game_events
     src/chess/move_gen.cpp
     src/chess/notation.cpp
     src/game/game_room.cpp
+    src/core/uuid.cpp
     src/game/ai_player.cpp
     src/chess/transposition_table.cpp
     src/chess/evaluator.cpp
@@ -892,3 +911,33 @@ add_executable(test_game_events
 )
 target_include_directories(test_game_events PRIVATE src)
 target_link_libraries(test_game_events PRIVATE Threads::Threads)
+
+# Test: LLD-4.2 GameCompletionService — idempotency + capability guards.
+# Unit path uses a RecordingStore + NullGameStore, no libpq. The DB-
+# backed retry-stability check runs only when $DATABASE_URL is set;
+# skipped gracefully otherwise, same discipline as test_game_persistence.
+add_executable(test_game_completion
+    tests/test_game_completion.cpp
+    src/core/logger.cpp
+    src/core/uuid.cpp
+    src/chess/zobrist.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/transposition_table.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/game_room.cpp
+    src/game/room_manager.cpp
+    src/game/ai_player.cpp
+    src/application/game_completion_service.cpp
+    src/storage/database.cpp
+    src/storage/game_repo.cpp
+    src/storage/postgres_game_store.cpp
+    src/storage/storage_error.cpp
+    src/analysis/cheat_report_repo.cpp
+)
+target_compile_definitions(test_game_completion PRIVATE
+    CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(test_game_completion PRIVATE src third_party)
+target_link_libraries(test_game_completion PRIVATE Threads::Threads OpenSSL::Crypto PostgreSQL::PostgreSQL)

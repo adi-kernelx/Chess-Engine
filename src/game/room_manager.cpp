@@ -29,8 +29,16 @@ std::shared_ptr<GameRoom> RoomManager::create_room(PlayerId creator_id,
     auto room = std::make_shared<GameRoom>(id, creator_id, creator_name, creator_fd, tc,
                                            db_player_id, elo);
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    rooms_[id] = room;
+    GameEventListenerPtr listener_copy;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        rooms_[id] = room;
+        listener_copy = default_listener_;
+    }
+    // Attach outside the manager mutex — `add_listener` takes the room's
+    // own mutex, and we never nest room-level acquires inside the
+    // manager-level acquire.
+    if (listener_copy) room->add_listener(listener_copy);
     return room;
 }
 
@@ -43,9 +51,19 @@ std::shared_ptr<GameRoom> RoomManager::create_ai_room(PlayerId creator_id,
 
     auto room = std::make_shared<GameRoom>(id, creator_id, creator_name, creator_fd, tc, difficulty);
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    rooms_[id] = room;
+    GameEventListenerPtr listener_copy;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        rooms_[id] = room;
+        listener_copy = default_listener_;
+    }
+    if (listener_copy) room->add_listener(listener_copy);
     return room;
+}
+
+void RoomManager::set_default_listener(GameEventListenerPtr listener) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    default_listener_ = std::move(listener);
 }
 
 std::shared_ptr<GameRoom> RoomManager::find_room(GameId id) const {
