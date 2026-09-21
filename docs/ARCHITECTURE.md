@@ -181,3 +181,117 @@ Worth naming explicitly, because their absence is a design choice, not a TODO:
 - **No `new` / `delete` in application code.** `std::unique_ptr`, `std::shared_ptr`, RAII wrappers. If you find a raw `new` outside a placement-new inside a container, that is a bug.
 - **No per-connection PQC channel.** Deliberate scope-cut in Phase 7 rev 2; see [SECURITY.md](SECURITY.md) and `implementation_phase_7.md`.
 - **No production of a hand-rolled Kyber implementation on the shipping path.** A study implementation lives in `research/kyber_reference/` (planned) and is validated against NIST KATs; nothing under `src/` links against it.
+
+---
+
+## 7. The LLD refactor (2026-09, LLD-0 through LLD-7)
+
+The nine-phase implementation plan produced a working platform whose top-level classes had grown wide. `GameHandler` alone owned 24 routes, all authentication extraction, all JSON parsing, matchmaking orchestration, room lifecycle, persistence, spectator broadcast, and inline error frames — ~1300 lines carrying six concerns. The LLD refactor cut that down to a set of narrow adapters + cohesive services + explicit boundaries, without changing a single wire frame or breaking any of the 40+ test binaries.
+
+The seven phases are all recorded in `docs/implementation_log.md` (kept local per convention); the summary below is the shape you can rely on when reading the code today.
+
+### 7.1 Four layers, one rule
+
+```
+Transport            src/net/          WebSocket framing, delivery, generation-guarded handles
+Protocol             src/protocol/     Route policies, request pipeline, JSON codec, DTOs
+Application          src/application/  Ports (interfaces), services (use-case orchestration)
+Domain               src/chess/, game/ Board, engine, rules, GameRoom
+Infrastructure       src/storage/,     Postgres adapters, sealed registry adapter, crypto
+                     src/crypto/
+```
+
+**Dependency rule:** application depends on domain values and narrow ports; infrastructure implements ports. Nothing in `src/chess/` or `src/game/` includes `nlohmann/json`, `libpq`, or `openssl` — that's the boundary. `src/game/` holds domain state (rooms, matchmaker), which is why it isn't merged into `src/chess/`.
+
+### 7.2 The request pipeline
+
+Every incoming WebSocket message flows through one auditable path:
+
+```
+raw frame → SealOpen → ParseJson → Auth → Dispatch          (typed routes)
+raw frame → SealOpen → Dispatch                             (raw routes — AuthHandler)
+```
+
+`RequestPipeline` (`src/protocol/request_pipeline.h`) owns the stages. Each route declares its `RoutePolicy` alongside its handler:
+
+```cpp
+pipeline.register_route(
+    RoutePolicy{"create_game", AuthRequirement::Required},
+    [this](RequestContext& c, const json& m, MessageSink& s) { ... });
+```
+
+* **SealOpen** consults an injected `SealOpenFn` (in production a lambda wrapping `crypto::SealedRegistry::inspect`). Rejected → silent drop; Rewritten → replaces the raw message with plaintext; Continue → passthrough.
+* **ParseJson** runs `nlohmann::json::parse` once at the boundary. Malformed → `{type:"error", message:"Invalid JSON: ..."}`.
+* **Auth** consults an injected `IdentityExtractor`. Missing/invalid token on an `AuthRequirement::Required` route → `{type:"error", code:"auth_required", message:"..."}`.
+
+AuthHandler registers as **raw routes** — it keeps its own `auth_error{code:...}` frame shape, its five per-surface `RateLimiter` members, and the login-per-account deceptive rate-limit that returns `invalid_credentials` (not `rate_limited`) so the wire cannot enumerate accounts.
+
+### 7.3 The port catalogue
+
+| Port | Header | Real adapter | Fake / Null |
+|------|--------|--------------|-------------|
+| `MessageSink` | `application/ports/message_sink.h` | `net::SocketMessageSink` | `FakeSink` in tests |
+| `GameStore` | `application/ports/game_store.h` | `storage::PostgresGameStore` | `ports::NullGameStore` |
+| `PlayerQueries` | `application/ports/player_queries.h` | `storage::PostgresPlayerQueries` | `ports::NullPlayerQueries` |
+| `Clock` | `application/ports/clock.h` | `ports::SystemClock` | `ports::FakeClock` |
+| `MoveSelector` | `application/ports/move_selector.h` | `chess::EngineMoveSelector` | `FakeMoveSelector` in tests |
+| `IdentityExtractor` | `application/auth/identity_extractor.h` | (uses DB + signer) | null-args extractor fails closed |
+
+The `Null*` adapters implement the "capability-disabled" pattern: when the server starts without `DATABASE_URL`, services receive real non-null references that always return `{ok:false, code:Disconnected}`. Handlers never branch on `if (!db_)` — the port's `capable()` flag is the only signal.
+
+### 7.4 GameRoom completion path
+
+```
+submit_move → board.make_move → status?
+                                  │
+                                  └─ terminal → finish_game (under mutex_)
+                                                  │
+                                                  ├─ build_snapshot_locked
+                                                  │     (immutable value:
+                                                  │      board, timings, seats,
+                                                  │      completion_uuid, revision)
+                                                  │
+                                                  └─ queue GameCompleted event
+LockAndDrain destructor: releases mutex, then fires
+                          on_game_completed(ev) on every listener
+                                                  │
+                                                  ▼
+                          GameCompletionService::on_game_completed
+                                                  │
+                                                  ├─ short-circuit if AI game / no auth / store !capable
+                                                  │
+                                                  └─ store.save_completed_game(snapshot)
+                                                        │
+                                                        ├─ SELECT id WHERE completion_uuid = $1
+                                                        │     ← already_persisted retry short-circuit
+                                                        │
+                                                        └─ BEGIN → INSERT games + moves + rating updates → COMMIT
+                                                              │
+                                                              └─ partial unique index on completion_uuid
+                                                                 catches the concurrent-retry race
+```
+
+Idempotency key is a v4 UUID generated once at snapshot build (`src/core/uuid.cpp`, not CSPRNG because the use is uniqueness not security). A retry with the same snapshot returns `already_persisted=true` and does not re-increment ELO/stats.
+
+Notification of participants and spectators is a **separate** path — inline in `GameplayService`, using the caller's `MessageSink`. Broadcast cannot swallow a persist failure and vice versa.
+
+### 7.5 Concurrency invariants (LLD-6)
+
+Three additive invariants make future async work safely possible; none of them is exercised under the current serialized event loop, but every one of them is testable today.
+
+**ConnectionHandle generation (LLD-1)** — `Connection` holds a `uint64_t generation_` bumped in `TcpServer::handle_new_connection`. `ConnectionHandle{fd, generation}` is the stable identity a foreign-fd sender remembers. `SocketMessageSink::send` compares generations before writing; a fd reused for a new client cannot receive frames queued for the previous holder.
+
+**Bounded write buffer (LLD-6.4)** — `Connection::MAX_WRITE_BUFFER_BYTES = 4 MB`. Every append checks the cap; overflow flips a sticky `write_buffer_overflowed()` flag and drops the write. `TcpServer::handle_client_data` closes the connection on the flag. A slow client cannot force RAM growth.
+
+**GameRoom revision counter (LLD-6.4)** — `std::atomic<uint64_t> revision_` bumped at the top of every mutating public method. `GameSnapshot` pins the revision at build time. A future async consumer holding a snapshot compares `snapshot.revision` against `room->revision()` before applying its result and discards on mismatch. Read-only accessors do not bump.
+
+### 7.6 What was NOT changed
+
+The plan flagged the following as **out of scope**:
+
+* Rating semantics — the pre-refactor snapshot-based ELO math is preserved bit-for-bit; concurrent-game rating policy is a separate future decision.
+* The global `connections_mutex_` (recursive) is retained — plan §6.4 forbids removing it "just to improve a benchmark." Per-connection single-flight is already provided by holding it end-to-end in `handle_client_data`; per-fd atomic flags would add nothing today.
+* AI move computation is synchronous. Async extraction needs a benchmark first proving current serialization is a bottleneck — none exists.
+* Frontend visual redesign — no CSS changes, no new screens; only the `Screen::unmount` teardown was hardened (LLD-7).
+
+See `docs/SEQUENCES.md` for the four sequence diagrams (move accept, completion + failed-save retry, sealed login, disconnect + revision-guarded stale result) the plan asked for. See `implementation_log.md` for the phase-by-phase record of what changed and why.

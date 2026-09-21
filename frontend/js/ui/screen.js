@@ -36,16 +36,29 @@ export class Screen {
     }
 
     unmount() {
-        this.onUnmount();
+        // LLD-7: subscription-cleanup guarantee. `onUnmount()` runs
+        // subclass-specific teardown that may throw (a mis-shaped
+        // ResizeObserver, an already-detached listener). Even if it
+        // does, every registered subscription / RAF / interval /
+        // timeout below MUST still be released — otherwise a screen
+        // that fails to unmount cleanly leaks handlers into the next
+        // one, which caused Phase 9 "ghost move_made after
+        // navigation" bugs in the pre-refactor code.
+        try { this.onUnmount(); }
+        catch (err) { console.error('[screen] onUnmount threw:', err); }
         for (const off of this._subs)     { try { off(); } catch (_) {} }
-        for (const id of this._rafs)      cancelAnimationFrame(id);
-        for (const id of this._intervals) clearInterval(id);
-        for (const id of this._timeouts)  clearTimeout(id);
+        for (const id of this._rafs)      { try { cancelAnimationFrame(id); } catch (_) {} }
+        for (const id of this._intervals) { try { clearInterval(id); }       catch (_) {} }
+        for (const id of this._timeouts)  { try { clearTimeout(id); }        catch (_) {} }
         this._subs = [];
         this._rafs.clear();
         this._intervals.clear();
         this._timeouts.clear();
-        if (this.root && this.root.parentNode) this.root.parentNode.removeChild(this.root);
+        try {
+            if (this.root && this.root.parentNode) this.root.parentNode.removeChild(this.root);
+        } catch (err) {
+            console.error('[screen] root removeChild threw:', err);
+        }
         this.root = null;
     }
 
