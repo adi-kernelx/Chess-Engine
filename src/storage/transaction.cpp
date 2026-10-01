@@ -5,7 +5,8 @@
 namespace chess {
 namespace storage {
 
-Transaction::Transaction(Database& db) : db_(db) {
+Transaction::Transaction(Database& db)
+    : db_(db), operation_guard_(db.acquire_operation()) {
     auto r = db_.exec("BEGIN");
     if (r.ok) {
         state_ = State::Open;

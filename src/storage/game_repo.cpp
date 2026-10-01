@@ -77,6 +77,12 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
         return out;
     }
 
+    // Retain exclusive use of the shared PostgreSQL session from the
+    // idempotency probe through COMMIT/ROLLBACK. Locking only individual
+    // exec() calls would allow an auth or maintenance query to become part of
+    // this transaction between statements.
+    [[maybe_unused]] auto database_operation = db.acquire_operation();
+
     // ── LLD-4.2 idempotency check ────────────────────────────────────
     // A retry of the same terminal transition — same completion_uuid —
     // must NOT insert a second games row, must NOT update ELO/stats a

@@ -25,6 +25,20 @@ std::string sqlstate_of(PGresult* r) {
 
 } // namespace
 
+Database::Database(Database&& other) noexcept {
+    [[maybe_unused]] auto operation = other.acquire_operation();
+    conn_ = std::move(other.conn_);
+    last_sqlstate_ = std::move(other.last_sqlstate_);
+}
+
+Database& Database::operator=(Database&& other) noexcept {
+    if (this == &other) return *this;
+    std::scoped_lock operations(operation_mutex_, other.operation_mutex_);
+    conn_ = std::move(other.conn_);
+    last_sqlstate_ = std::move(other.last_sqlstate_);
+    return *this;
+}
+
 bool Database::connect_from_env(std::string& out_error) {
     const char* url = std::getenv("DATABASE_URL");
     if (url == nullptr || url[0] == '\0') {
@@ -35,6 +49,7 @@ bool Database::connect_from_env(std::string& out_error) {
 }
 
 bool Database::connect(const std::string& conninfo, std::string& out_error) {
+    [[maybe_unused]] auto operation = acquire_operation();
     conn_.reset(PQconnectdb(conninfo.c_str()));
     if (!conn_ || PQstatus(conn_.get()) != CONNECTION_OK) {
         // Never include the conninfo in this message: it usually contains a
@@ -47,8 +62,19 @@ bool Database::connect(const std::string& conninfo, std::string& out_error) {
     return true;
 }
 
+bool Database::connected() const {
+    [[maybe_unused]] auto operation = acquire_operation();
+    return conn_ != nullptr && PQstatus(conn_.get()) == CONNECTION_OK;
+}
+
+std::string Database::last_sqlstate() const {
+    [[maybe_unused]] auto operation = acquire_operation();
+    return last_sqlstate_;
+}
+
 QueryResult Database::exec(const std::string& sql,
                            const std::vector<Param>& params) {
+    [[maybe_unused]] auto operation = acquire_operation();
     QueryResult result;
     if (!connected()) {
         result.error = "not connected";
@@ -118,6 +144,7 @@ QueryResult Database::exec(const std::string& sql,
 }
 
 bool Database::run_script(const std::string& sql, std::string& out_error) {
+    [[maybe_unused]] auto operation = acquire_operation();
     if (!connected()) { out_error = "not connected"; return false; }
 
     // PQexec (no params) accepts multiple semicolon-separated statements, which
@@ -142,6 +169,7 @@ bool Database::apply_migration(const std::string& version,
                                std::string& out_error) {
     out_applied = false;
     out_error.clear();
+    [[maybe_unused]] auto operation = acquire_operation();
 
     if (!connected()) {
         out_error = "not connected";

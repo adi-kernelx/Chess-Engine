@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -63,6 +64,7 @@ private:
     std::mutex pending_mutex_;
     std::map<CheckInKey, PendingSeat> pending_seats_;
     std::map<std::pair<int64_t,int>, std::string> notified_states_;
+    std::atomic<bool> maintenance_error_logged_{false};
 };
 
 } // namespace chess::application

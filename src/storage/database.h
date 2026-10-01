@@ -50,6 +50,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -133,8 +134,8 @@ public:
 
     Database(const Database&)            = delete;
     Database& operator=(const Database&) = delete;
-    Database(Database&&) noexcept        = default;
-    Database& operator=(Database&&) noexcept = default;
+    Database(Database&& other) noexcept;
+    Database& operator=(Database&& other) noexcept;
 
     ~Database() = default;
 
@@ -150,7 +151,16 @@ public:
     /// Explicit form for tests. Same rules: no logging of the string.
     bool connect(const std::string& conninfo, std::string& out_error);
 
-    bool connected() const { return conn_ != nullptr && PQstatus(conn_.get()) == CONNECTION_OK; }
+    bool connected() const;
+
+    // A PGconn may be used by only one thread at a time. exec() locks each
+    // statement automatically. Multi-statement transactions retain this
+    // recursive guard from BEGIN through COMMIT/ROLLBACK so another request
+    // cannot join the same PostgreSQL session mid-transaction.
+    using OperationGuard = std::unique_lock<std::recursive_mutex>;
+    OperationGuard acquire_operation() const {
+        return OperationGuard(operation_mutex_);
+    }
 
     /**
      * The ONLY entry point. `sql` uses `$1, $2, …` placeholders; parameters go
@@ -179,9 +189,10 @@ public:
                          std::string& out_error);
 
     /// Escape-hatch-free view of libpq: the SQLSTATE of the last failure.
-    const std::string& last_sqlstate() const { return last_sqlstate_; }
+    std::string last_sqlstate() const;
 
 private:
+    mutable std::recursive_mutex operation_mutex_;
     PGconnPtr    conn_;
     std::string  last_sqlstate_;
 };

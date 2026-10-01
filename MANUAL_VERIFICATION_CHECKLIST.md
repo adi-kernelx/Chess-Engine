@@ -534,6 +534,10 @@ Player B, and Player C.
 
 ### 14.1 Creation, local time, and registration
 
+- [ ] Sign in from at least two browser sessions while the tournament page is
+      open for one minute. The backend shows no `SSL SYSCALL`, `packet length
+      too long`, `another command is already in progress`, or repeated
+      `maintenance failed` errors.
 - [ ] Creator opens **Create tournament**. The dialog contains name, rounds,
       base time, increment, registration deadline, first-round start, and
       round spacing/check-in window.

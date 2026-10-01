@@ -29,11 +29,13 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <atomic>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "storage/database.h"
@@ -278,6 +280,33 @@ int main() {
         // has entered an error state. The wrapper must leave it usable.
         auto good = db.exec("SELECT 1");
         return good.ok && good.first().at(0) == "1";
+    });
+
+    run_test("one PGconn safely serializes concurrent callers", [&] {
+        constexpr int thread_count = 6;
+        constexpr int queries_per_thread = 40;
+        std::atomic<bool> start{false};
+        std::atomic<int> failures{0};
+        std::vector<std::thread> workers;
+        workers.reserve(thread_count);
+        for (int worker = 0; worker < thread_count; ++worker) {
+            workers.emplace_back([&, worker] {
+                while (!start.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                }
+                for (int query = 0; query < queries_per_thread; ++query) {
+                    const int expected = worker * queries_per_thread + query;
+                    auto result = db.exec("SELECT $1::integer", {Param::int64(expected)});
+                    if (!result.ok || result.empty()
+                        || result.first().at(0) != std::to_string(expected)) {
+                        failures.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+            });
+        }
+        start.store(true, std::memory_order_release);
+        for (auto& worker : workers) worker.join();
+        return failures.load(std::memory_order_relaxed) == 0 && db.connected();
     });
 
     run_test("connect() with a bad URL fails cleanly", [] {

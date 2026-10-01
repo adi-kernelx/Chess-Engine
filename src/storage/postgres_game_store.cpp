@@ -27,6 +27,10 @@ PostgresGameStore::PostgresGameStore(Database& db) : db_(db) {}
 
 app_ports::SaveGameOutcome
 PostgresGameStore::save_completed_game(const CompletedGame& game) {
+    // Retain the same exclusive database operation through classification and
+    // the duplicate-id probe; another request must not replace sqlstate in
+    // between the repository failure and this adapter's decision.
+    [[maybe_unused]] auto database_operation = db_.acquire_operation();
     // Delegate to the existing free function. It runs its own multi-
     // statement transaction (BEGIN + inserts + UPDATEs + COMMIT) and
     // returns `SaveGameResult { ok, game_id, elo, error }`.
@@ -68,6 +72,7 @@ PostgresGameStore::save_cheat_report(
         int64_t                                player_id,
         const std::string&                     side,
         const chess::analysis::AnalysisReport& report) {
+    [[maybe_unused]] auto database_operation = db_.acquire_operation();
     auto res = chess::analysis::save_cheat_report(db_, game_id, player_id,
                                                   side, report);
 

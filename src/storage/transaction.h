@@ -57,10 +57,10 @@
 
 #include <string>
 
+#include "storage/database.h"
+
 namespace chess {
 namespace storage {
-
-class Database;
 
 class Transaction {
 public:
@@ -111,9 +111,10 @@ private:
         RolledBack, ///< ROLLBACK ran (explicit or from the destructor).
     };
 
-    Database&    db_;
-    State        state_ = State::Failed;
-    std::string  error_;
+    Database&                db_;
+    Database::OperationGuard operation_guard_;
+    State                    state_ = State::Failed;
+    std::string              error_;
 };
 
 } // namespace storage

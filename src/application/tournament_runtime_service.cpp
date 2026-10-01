@@ -156,9 +156,15 @@ void TournamentRuntimeService::maintenance_tick() {
     tournament::TournamentManager manager(*db_, clock_);
     auto result = manager.maintenance_tick();
     if (!result.ok) {
-        core::Logger::error("tournament", "TournamentRuntimeService",
-                            "maintenance failed: " + result.error);
+        if (!maintenance_error_logged_.exchange(true)) {
+            core::Logger::error("tournament", "TournamentRuntimeService",
+                                "maintenance failed: " + result.error);
+        }
         return;
+    }
+    if (maintenance_error_logged_.exchange(false)) {
+        core::Logger::info("tournament", "TournamentRuntimeService",
+                           "maintenance recovered");
     }
     ensure_live_rooms();
     // A no-show may resolve a pairing without ever starting its reserved
