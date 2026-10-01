@@ -115,6 +115,11 @@ void GameQueryService::get_profile(const RequestContext& /*ctx*/,
     // Read failure here is soft — same behaviour as the pre-refactor
     // free function which logs internally and returns empty on error.
     const auto& recent = recent_res.value;
+    auto rating_res = queries_.get_rating_history(profile->player_id,
+                                                  profile->elo_rating);
+    // Rating history is supplementary. A failed history read must not hide an
+    // otherwise valid profile, matching the soft-failure policy for recents.
+    const auto& rating_history = rating_res.value;
 
     json response;
     response["type"]         = "profile";
@@ -124,6 +129,13 @@ void GameQueryService::get_profile(const RequestContext& /*ctx*/,
     response["wins"]         = profile->wins;
     response["losses"]       = profile->losses;
     response["draws"]        = profile->draws;
+
+    response["rating_history"] = json::array();
+    for (const auto& point : rating_history) {
+        response["rating_history"].push_back({
+            {"ts", point.ts}, {"rating", point.rating}
+        });
+    }
 
     response["recent_games"] = json::array();
     for (const auto& g : recent) {
@@ -137,6 +149,7 @@ void GameQueryService::get_profile(const RequestContext& /*ctx*/,
         entry["started_at"]    = g.started_at;
         entry["move_count"]    = g.move_count;
         entry["time_control"]  = g.time_control;
+        entry["rated"]         = g.rated;
         response["recent_games"].push_back(entry);
     }
 
@@ -220,6 +233,7 @@ void GameQueryService::get_history(const RequestContext& /*ctx*/,
         row["played_at"]    = g.started_at;
         row["move_count"]   = g.move_count;
         row["time_control"] = g.time_control;
+        row["rated"]        = g.rated;
         response["games"].push_back(row);
     }
 
@@ -309,6 +323,7 @@ void GameQueryService::get_game(const RequestContext& /*ctx*/,
     response["started_at"]   = stored->started_at;
     response["ended_at"]     = stored->ended_at;
     response["move_count"]   = stored->move_count;
+    response["rated"]        = stored->rated;
     response["positions"]    = positions;
 
     caller_sink.send(response.dump());

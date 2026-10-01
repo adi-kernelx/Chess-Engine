@@ -103,6 +103,7 @@ private:
      * @return        Best score found from this position
      */
     int alpha_beta(Board& board, int depth, int ply, int alpha, int beta);
+    int quiescence(Board& board, int ply, int alpha, int beta);
 
     /**
      * Order moves for better alpha-beta pruning.

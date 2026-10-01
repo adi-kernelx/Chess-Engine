@@ -282,7 +282,10 @@ static void reset(Database& db) {
     // 9 cheat_reports/tournaments) before dropping players itself, or the FK
     // constraints leave the schema half-loaded and later inserts crash.
     std::string err;
-    db.run_script("DROP TABLE IF EXISTS tournament_pairings; "
+    db.run_script("DROP TABLE IF EXISTS tournament_result_overrides; "
+                  "DROP TABLE IF EXISTS tournament_round_checkins; "
+                  "DROP TABLE IF EXISTS tournament_rounds; "
+                  "DROP TABLE IF EXISTS tournament_pairings; "
                   "DROP TABLE IF EXISTS tournament_players; "
                   "DROP TABLE IF EXISTS tournaments; "
                   "DROP TABLE IF EXISTS cheat_reports; "

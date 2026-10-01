@@ -50,6 +50,9 @@ public:
     chess::application::ports::ReadOutcome<std::vector<GameSummary>>
         get_player_games(int64_t player_id, int limit, int offset) override;
 
+    chess::application::ports::ReadOutcome<std::vector<RatingHistoryPoint>>
+        get_rating_history(int64_t player_id, int current_elo) override;
+
     chess::application::ports::ReadOutcome<std::optional<StoredGame>>
         find_game_by_id(int64_t game_id) override;
 

@@ -79,6 +79,9 @@ Database open_db() {
 bool prepare(Database& db) {
     std::string error;
     if (!db.run_script(
+            "DROP TABLE IF EXISTS tournament_result_overrides;"
+            "DROP TABLE IF EXISTS tournament_round_checkins;"
+            "DROP TABLE IF EXISTS tournament_rounds;"
             "DROP TABLE IF EXISTS tournament_pairings;"
             "DROP TABLE IF EXISTS tournament_players;"
             "DROP TABLE IF EXISTS tournaments;"
@@ -117,6 +120,14 @@ bool prepare(Database& db) {
         !db.apply_migration("0004_lld4_completion_uuid", mig4,
                             applied, error)) {
         std::cerr << "\nmigration 0004 failed: " << error << '\n';
+        return false;
+    }
+    const std::string mig9 = read_file(source_path(
+        "src/storage/migrations/0009_persist_unrated_ai_games.sql"));
+    if (mig9.empty() ||
+        !db.apply_migration("0009_persist_unrated_ai_games", mig9,
+                            applied, error)) {
+        std::cerr << "\nmigration 0009 failed: " << error << '\n';
         return false;
     }
     return true;
@@ -356,6 +367,35 @@ int main() {
                wp->draws == 1 && wp->games_played == 1 && wp->wins == 0 &&
                bp->draws == 1 && bp->games_played == 1 && bp->wins == 0 &&
                result.elo.white_delta == 0 && result.elo.black_delta == 0;
+    });
+
+    run_test("unrated AI game is replayable without changing player stats", [&] {
+        if (!prepare(db)) return false;
+        const int64_t human = insert_player(db, "Human", 800);
+        if (human < 0) return false;
+
+        auto game = make_game(human, 0, 800, 0, "0-1", "checkmate");
+        game.rated = false;
+        game.black_display_name = "AI (Hard)";
+        auto saved = save_completed_game(db, game);
+        if (!saved.ok || saved.game_id <= 0) return false;
+
+        const auto player = find_player_by_id(db, human);
+        const auto stored = find_game_by_id(db, saved.game_id);
+        const auto history = get_player_games(db, human, 10, 0);
+        auto ai_ply = db.exec(
+            "SELECT player_id IS NULL FROM move_times"
+            " WHERE game_id=$1 AND ply_number=2",
+            {Param::int64(saved.game_id)});
+
+        return player && player->elo_rating == 800
+            && player->games_played == 0 && player->wins == 0
+            && player->losses == 0 && player->draws == 0
+            && stored && !stored->rated && stored->black_id == 0
+            && stored->black_name == "AI (Hard)"
+            && history.size() == 1 && !history[0].rated
+            && history[0].opponent_name == "AI (Hard)"
+            && ai_ply.ok && !ai_ply.empty() && ai_ply.first().at(0) == "t";
     });
 
     run_test("save_completed_game persists think times", [&] {

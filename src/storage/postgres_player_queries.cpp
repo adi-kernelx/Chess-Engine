@@ -54,6 +54,12 @@ PostgresPlayerQueries::get_player_games(int64_t player_id, int limit, int offset
         [&] { return chess::storage::get_player_games(db_, player_id, limit, offset); });
 }
 
+app_ports::ReadOutcome<std::vector<RatingHistoryPoint>>
+PostgresPlayerQueries::get_rating_history(int64_t player_id, int current_elo) {
+    return guarded<std::vector<RatingHistoryPoint>>(db_,
+        [&] { return chess::storage::get_rating_history(db_, player_id, current_elo); });
+}
+
 app_ports::ReadOutcome<std::optional<StoredGame>>
 PostgresPlayerQueries::find_game_by_id(int64_t game_id) {
     return guarded<std::optional<StoredGame>>(db_,

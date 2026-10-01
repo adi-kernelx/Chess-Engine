@@ -149,6 +149,23 @@ int main() {
         return ok && got == R"({"type":"pong"})";
     });
 
+    run_test("direct SocketMessageSink flushes before a long handler returns", []() {
+        auto p = make_socketpair();
+        if (p.server_fd < 0) return false;
+        Connection conn(p.server_fd, "127.0.0.1");
+        conn.set_upgraded(true);
+
+        // This is the caller-side constructor used by RequestPipeline. The
+        // peer must be able to read immediately; no simulated event-loop
+        // drain occurs after send().
+        SocketMessageSink sink(conn);
+        const bool ok = sink.send(R"({"type":"move_made"})");
+        const std::string got = read_frame_payload(p.peer_fd);
+        ::close(p.peer_fd);
+        return ok && got == R"({"type":"move_made"})"
+            && !conn.has_data_to_write();
+    });
+
     // ── SocketMessageSink generation guard ──────────────────────────────
 
     run_test("SocketMessageSink refuses stale generation without writing",

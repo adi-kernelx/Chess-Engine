@@ -17,7 +17,9 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -36,7 +38,12 @@ struct StoredTournament {
     int         current_round             = 0;
     int         time_control_initial_ms   = 0;
     int         time_control_increment_ms = 0;
-    std::string status;                       ///< "registration" | "in_progress" | "completed"
+    std::string status;                       ///< registration | scheduled | in_progress | completed
+    int64_t     registration_deadline_unix = 0;
+    int64_t     first_round_starts_at_unix = 0;
+    int         round_duration_seconds = 0;
+    bool        registration_open = false;
+    int64_t     registration_closed_at_unix = 0;
     int64_t     created_by                = 0;
     std::string created_at;                   ///< ISO 8601
     std::string started_at;                   ///< ISO 8601, empty if NULL
@@ -61,7 +68,19 @@ struct StoredPairing {
     std::optional<int64_t> black_player_id;              ///< empty ⇔ bye
     std::optional<int64_t> game_id;                      ///< empty until wired
     std::string            result;                       ///< "pending" | "1-0" | "0-1" | "1/2-1/2" | "bye"
+    std::string            result_source;
+    int64_t                result_recorded_at_unix = 0;
     std::string            created_at;
+};
+
+struct StoredTournamentRound {
+    int64_t tournament_id = 0;
+    int round = 0;
+    int64_t earliest_start_at_unix = 0;
+    int64_t actual_start_at_unix = 0;
+    int64_t check_in_closes_at_unix = 0;
+    int64_t completed_at_unix = 0;
+    std::string status;
 };
 
 // ── Result types ─────────────────────────────────────────────────────
@@ -80,7 +99,10 @@ CreateTournamentResult create_tournament(storage::Database& db,
                                          int rounds,
                                          int time_control_initial_ms,
                                          int time_control_increment_ms,
-                                         int64_t created_by);
+                                         int64_t created_by,
+                                         int64_t registration_deadline_unix = 0,
+                                         int64_t first_round_starts_at_unix = 0,
+                                         int round_duration_seconds = 3600);
 
 /// Load a tournament by id. Returns nullopt if missing.
 std::optional<StoredTournament> find_tournament(storage::Database& db, int64_t id);
@@ -115,11 +137,35 @@ struct JoinTournamentResult {
 JoinTournamentResult add_participant(storage::Database& db,
                                      int64_t tournament_id,
                                      int64_t player_id,
-                                     int initial_elo);
+                                     int initial_elo,
+                                     int64_t now_unix = 0);
+JoinTournamentResult remove_participant(storage::Database& db,
+                                        int64_t tournament_id,
+                                        int64_t player_id,
+                                        int64_t now_unix);
+
+bool set_registration_open(storage::Database& db, int64_t tournament_id,
+                           bool open, int64_t now_unix);
+
+std::vector<StoredTournamentRound> get_rounds(storage::Database& db,
+                                               int64_t tournament_id);
+
+bool check_in_player(storage::Database& db, int64_t tournament_id, int round,
+                     int64_t player_id, int64_t now_unix, std::string& error);
+
+std::set<int64_t> get_round_checkins(storage::Database& db,
+                                     int64_t tournament_id, int round);
 
 /// Load all participants of a tournament.
 std::vector<StoredTournamentPlayer> get_participants(storage::Database& db,
                                                      int64_t tournament_id);
+
+/// Resolve the tournament creator and registered participant ids to their
+/// current display usernames.
+/// Kept separate from StoredTournamentPlayer so pairing/ranking domain logic
+/// continues to operate on stable ids while application DTOs can show names.
+std::map<int64_t, std::string> get_participant_usernames(storage::Database& db,
+                                                         int64_t tournament_id);
 
 /// Apply a per-round delta to one participant: adds `score_delta`, sets
 /// received_bye if `bye`, and increments whites_played if `played_white`.
@@ -154,13 +200,25 @@ std::vector<StoredPairing> get_pairings(storage::Database& db,
 std::vector<StoredPairing> get_pairings_for_round(storage::Database& db,
                                                   int64_t tournament_id,
                                                   int round);
+std::optional<StoredPairing> find_pairing(storage::Database& db, int64_t pairing_id);
+std::vector<StoredPairing> get_live_pending_pairings(storage::Database& db);
+int64_t max_pairing_game_id(storage::Database& db);
+bool set_pairing_game_id(storage::Database& db, int64_t pairing_id, int64_t game_id);
 
 /// Set the result column on one pairing row (identified by id).
 /// The allowed values are the schema's CHECK set. Returns false if the
 /// row was not found or the DB rejected the update.
 bool set_pairing_result(storage::Database& db,
                         int64_t pairing_id,
-                        const std::string& result);
+                        const std::string& result,
+                        const std::string& source = "manual");
+
+bool recompute_participant_totals(storage::Database& db, int64_t tournament_id);
+
+bool audit_and_override_result(storage::Database& db, int64_t pairing_id,
+                               int64_t actor_player_id,
+                               const std::string& new_result,
+                               const std::string& reason);
 
 } // namespace tournament
 } // namespace chess

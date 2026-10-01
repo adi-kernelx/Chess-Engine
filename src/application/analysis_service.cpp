@@ -255,10 +255,14 @@ void AnalysisService::analyze_game(const RequestContext& /*ctx*/,
         auto save_w = game_store_.save_cheat_report(stored->game_id,
                                                     stored->white_id, "w",
                                                     white_report);
-        auto save_b = game_store_.save_cheat_report(stored->game_id,
-                                                    stored->black_id, "b",
-                                                    black_report);
-        if (!save_w.ok() || !save_b.ok()) {
+        chess::application::ports::SaveCheatReportOutcome save_b;
+        const bool has_human_black = stored->rated && stored->black_id > 0;
+        if (has_human_black) {
+            save_b = game_store_.save_cheat_report(stored->game_id,
+                                                   stored->black_id, "b",
+                                                   black_report);
+        }
+        if (!save_w.ok() || (has_human_black && !save_b.ok())) {
             const auto& failed = save_w.ok() ? save_b : save_w;
             chess::core::Logger::warn("game", "AntiCheat",
                 "Failed to persist cheat report for game "

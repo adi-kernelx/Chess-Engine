@@ -1,10 +1,9 @@
 /**
  * capability.js — Live-vs-preview probe with graceful demo fallback.
  *
- * Reusable primitive so preview screens (auth, profile, leaderboard,
- * spectate, replay, tournaments) do NOT copy this logic. Each one calls
- * `request(...)` and gets `{ data, live }` back. If `live === false`,
- * the Screen base class renders the "Preview — backend pending" badge.
+ * Reusable primitive so live screens do not copy request/reply timeout logic.
+ * Each caller receives `{ data, live }` and is responsible for rendering an
+ * explicit unavailable state when `live === false`.
  *
  * Semantics:
  *   1. If the outbound type is already known-unsupported this session,
@@ -42,9 +41,12 @@ export class Capability {
      * @param {string} opts.expect  Reply message type to listen for on success.
      * @param {Function} opts.demo  () => demo data (used on preview/timeout).
      * @param {number} [opts.timeout=1500]
-     * @returns {Promise<{ data: any, live: boolean }>}
+     * @param {boolean} [opts.failOnError=false] Resolve immediately when the
+     * server returns a regular error. Use only for an isolated request whose
+     * error cannot be confused with another concurrent operation.
+     * @returns {Promise<{ data: any, live: boolean, error?: any }>}
      */
-    request(message, { expect, demo, timeout = DEFAULT_TIMEOUT }) {
+    request(message, { expect, demo, timeout = DEFAULT_TIMEOUT, failOnError = false }) {
         if (!message || !message.type) {
             return Promise.resolve({ data: demo(), live: false });
         }
@@ -78,6 +80,8 @@ export class Capability {
                 const norm = Inbound.normalize(raw);
                 if (norm.isUnknownType) {
                     finish({ data: demo(), live: false }, 'preview');
+                } else if (failOnError) {
+                    finish({ data: demo(), live: false, error: norm }, null);
                 }
                 // Other errors: ignore — the request may still legitimately produce `expect`.
             }));

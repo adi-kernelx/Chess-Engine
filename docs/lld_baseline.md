@@ -68,7 +68,7 @@ Seal means the payload must arrive inside a Phase-7.4 sealed envelope
 | `cancel_queue`             | fd   | Removes caller's fd from the queue if present. |
 | `list_games`               | –   | Public. Returns `WAITING` rooms. |
 | `game_state`               | fd   | Reads current room by fd (must be seated). |
-| `play_ai`                  | ✓   | Auth required even though AI games are not persisted — keeps the wire contract uniform. |
+| `play_ai`                  | ✓   | Auth required so AI games can be recovered and stored as unrated replay history. |
 | `get_profile`              | –   | Public. Reads `players` row by id. |
 | `get_leaderboard`          | –   | Public. Top-N by ELO. |
 | `spectate`                 | ✓   | Auth via `extract_identity`. Adds fd to room's spectator list. |
@@ -78,12 +78,15 @@ Seal means the payload must arrive inside a Phase-7.4 sealed envelope
 | `get_history`              | –   | Public. Persisted history by username. |
 | `analyze_position`         | –   | Public. Engine analysis of a FEN with bounded depth ≤15, time ≤3s. |
 | `analyze_game`             | –   | Public. Statistical anti-cheat report on a persisted game. |
-| `create_tournament`        | ✓   | Auth required. Creator captured for later `report_tournament_result` auth. |
-| `join_tournament`          | ✓   | Auth required. Rejects duplicates. |
-| `start_tournament`         | ✓   | Auth required. Creator-only in current implementation. |
-| `tournament_state`         | –   | Public. Standings + pairings + tournament row. |
+| `create_tournament`        | ✓   | Creator supplies rounds, time control, registration deadline, first-round time, and round spacing. |
+| `join_tournament`          | ✓   | Registers the player only while authoritative registration is open. Duplicate join is idempotent. |
+| `leave_tournament`         | ✓   | Unregisters only before registration closes; returns `not_registered` or `registration_closed` otherwise. |
+| `start_tournament`         | ✓   | Creator-only transition from registration to the scheduled lifecycle. |
+| `set_tournament_registration` | ✓ | Creator-only early close/reopen; reopen is rejected after the deadline or pairing lock. |
+| `check_in_tournament_round` | ✓  | Registered player checks in and binds their reserved seat; idempotent and identity-based. |
+| `tournament_state`         | –   | Public schedule, standings, rounds, check-ins, pairings, game ids, and result sources. |
 | `list_tournaments`         | –   | Public. Optional `status` filter. |
-| `report_tournament_result` | ✓   | Auth required. Creator-only. **Current tournament model does not auto-create live rooms** — results are creator-reported. |
+| `report_tournament_result` | ✓   | Creator-only audited correction with mandatory reason. Normal results come from persisted games, not this command. |
 
 ### Server-initiated frames
 
@@ -96,20 +99,31 @@ Emitted by handlers, not in response to a specific client message from the recip
 | `game_over`      | both seats + all spectators            | terminal-transition path in `handle_make_move` / `handle_resign` / timeout handler |
 | `spectate_start` | joining spectator                      | `handle_spectate` — full snapshot at join time |
 | `spectate_end`   | spectator ejected because the room ended | (implied when a spectator's room hits FINISHED) |
+| `tournament_game_ready` | a checked-in paired player | `TournamentRuntimeService` after the pairing-to-room mapping is durable; includes game, pairing, tournament, and assigned color. |
 
 ### Disconnect behavior
 
 `GameHandler::on_player_disconnect(fd)`:
 1. Removes the fd from the matchmaker queue.
-2. Finds the fd's room (if any) and calls `room->on_disconnect(fd)` — pauses clock, waits for reconnect up to 60 s (Phase 4.1).
+2. Finds the fd's room (if any) and calls `room->on_disconnect(fd)` — the
+   chess clock keeps running while a separate 120-second reconnect grace timer
+   starts. The transient fd is cleared immediately because the OS may reuse
+   the same number for an unrelated socket. Re-authentication by durable player
+   ID may bind a replacement fd (including the same numeric value safely);
+   otherwise the maintenance tick completes the game by abandonment. Normal
+   socket closure is immediate; a server WebSocket heartbeat bounds silent
+   network-failure detection to roughly 60 seconds (30-second ping interval
+   plus 30-second response timeout) before that grace begins. Any complete,
+   valid inbound WebSocket frame also refreshes peer liveness, so active game
+   traffic cannot be mistaken for a failed heartbeat.
 3. Sweeps the fd out of every room's spectator list (`room_mgr_.remove_spectator_everywhere(fd)`) — prevents an OS-recycled fd from silently receiving broadcasts from someone else's game.
 
-### Persistence gating (`GameHandler::persist_game`)
+### Persistence gating (`GameCompletionService`)
 
-- Skipped if `room->is_ai_game()` — AI games are not persisted (see the comment on `handle_play_ai`).
-- Skipped if the room has fewer than 2 human db_player_ids.
-- Otherwise calls `storage::save_completed_game` — one SQL transaction covering `games` insert + `move_times` inserts + ELO + stats updates for both players.
-- **No idempotency key on the write.** Two calls with the same room can double-count stats. This is a known gap and is the driving concern for LLD-4's completion service.
+- Skipped when persistence is unavailable or the human seat has no durable database identity.
+- Human games require two authenticated players and atomically store the game, move times, ELO, and statistics.
+- AI games store replay/move-time history with a nullable computer seat and `rated=false`; no ELO or aggregate player statistics are changed.
+- `completion_uuid` makes repeat completion delivery idempotent.
 - On DB failure the game state remains FINISHED, but nothing is persisted and nothing is retried in this process.
 
 ## Test-DB safeguard
@@ -247,6 +261,10 @@ Both fixes are test-support changes only — no `src/` code path is affected.
 
 ### Enumerated known failures (before LLD-1 starts)
 
+Update 2026-10-01: entry 1 below is historical. Quiescence search is now
+implemented and the Release engine suite passes 25/25, including that case.
+The repository planner assertions remain separate known failures.
+
 1. **`test_engine` — "Start pos near 0"**
    - **Test line:** `test_engine.cpp:227` — asserts `abs(score) < 100` after `engine.search(500)` from the starting position.
    - **Symptom under Release:** returns ~157 cp, fails.
@@ -322,7 +340,7 @@ to enforce the same behavior.
 - [ ] Rate limiter fires **before** any expensive work (Argon2id, JWT verify, key generation).
 - [ ] `on_player_disconnect` performs all three cleanups: matchmaker dequeue, room disconnect, spectator sweep.
 - [ ] `save_completed_game` remains a single SQL transaction covering game + move_times + ratings + stats.
-- [ ] AI games are excluded from persistence.
+- [ ] AI games persist as unrated replay history without changing ELO or rated statistics.
 - [ ] Sealed-envelope confidentiality: no `password`, no decrypted plaintext, and no bearer/refresh token appears in any log line at any level.
 - [ ] Frame-size cap enforced by the WebSocket parser before allocation, not just by handler input validation.
 - [ ] Every `move_made` broadcast carries a valid FEN string reflecting the post-move position.

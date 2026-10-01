@@ -32,11 +32,12 @@ RegisterResult register_password_user(Database& db,
 
     const std::string username_ci = to_lower_ascii(username);
     auto ins = db.exec(
-        "INSERT INTO players(username, username_ci, password_hash)"
-        " VALUES($1,$2,$3) RETURNING id, elo_rating",
+        "INSERT INTO players(username, username_ci, password_hash, elo_rating)"
+        " VALUES($1,$2,$3,$4) RETURNING id, elo_rating",
         {Param::text(username),
          Param::text(username_ci),
-         Param::text(phc)});
+         Param::text(phc),
+         Param::int64(INITIAL_ELO)});
 
     if (!ins.ok) {
         // 23505 is unique_violation. The trigger and the CHECK produce their

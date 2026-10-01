@@ -18,7 +18,8 @@ This project was built as an educational systems exercise: **anything I have for
 - Completed games are **persisted** in Postgres and can be replayed move-by-move in the browser with optional engine evaluation at each ply.
 - Anyone can play against the built-in **chess engine** — alpha-beta + iterative deepening + Zobrist transposition table + MVV-LVA move ordering.
 - Full authenticated identity: password + Argon2id, or **Google Sign-In via Supabase Auth**. Password-carrying messages travel inside a **post-quantum sealed envelope** (ML-KEM-768 + X25519 + ML-DSA-65 + AES-256-CTR + HMAC-SHA-384).
-- **Swiss tournaments** with server-generated pairings and live standings.
+- **Scheduled Swiss tournaments** with registration deadlines, round check-in,
+  reserved live games, automatic results, no-show handling, and live standings.
 - Statistical **anti-cheat** analysis of persisted games based on move-time correlation with position complexity.
 
 ---
@@ -88,6 +89,9 @@ cd frontend && python3 -m http.server 8000
 | `JWT_SIGNING_KEY`            | Base64-encoded 32-byte key for HS384 access-token signing | Auth |
 | `SERVER_IDENTITY_KEY_PATH`   | Path to the ML-DSA-65 private key file          | Sealed-envelope register/login |
 | `SUPABASE_JWT_SECRET`        | Supabase project's legacy HS256 secret          | Google Sign-In |
+
+Local Google OAuth setup and the current HS256/JWKS compatibility boundary are
+documented in [`docs/SUPABASE_GOOGLE_AUTH_SETUP.md`](docs/SUPABASE_GOOGLE_AUTH_SETUP.md).
 
 ---
 

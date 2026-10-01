@@ -16,12 +16,17 @@ bool SocketMessageSink::send(std::string frame) {
     // Direct-connection path (LLD-2.1): we already own the target
     // connection. No lookup, no generation check — the caller is
     // answering the request that arrived on this exact socket. The
-    // event-loop thread will drain the write buffer when it returns
-    // from the handler; unlike the foreign-fd path, we do NOT
-    // manually drain here, because doing so would double-drain on
-    // the caller side of every request.
+    // Most handlers return immediately and the worker's normal drain is
+    // enough. AI search is intentionally synchronous, however, and may keep
+    // this handler active for several seconds. Drain now so an accepted human
+    // move reaches the browser before the engine starts thinking. The normal
+    // post-handler drain remains a harmless fallback for EAGAIN/partial writes.
     if (direct_conn_ != nullptr) {
         WebSocket::write_frame(*direct_conn_, WsOpcode::TEXT, frame);
+        while (direct_conn_->has_data_to_write()) {
+            const int written = direct_conn_->write_to_socket();
+            if (written <= 0) break;
+        }
         return true;
     }
 

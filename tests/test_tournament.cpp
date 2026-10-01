@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -26,6 +27,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "tournament/swiss.h"
@@ -75,6 +77,22 @@ void run_algorithm_tests() {
         std::vector<PlayerStanding> s;
         auto out = pair_swiss_round(s, {});
         return out.empty();
+    });
+
+    run_test("schedule validation enforces gap and duration", [] {
+        return TournamentManager::valid_schedule(100, 130, 60)
+            && !TournamentManager::valid_schedule(100, 129, 60)
+            && !TournamentManager::valid_schedule(100, 130, 59)
+            && TournamentManager::earliest_round_start(130, 60, 3) == 250;
+    });
+
+    run_test("no-show policy covers one or neither arrival", [] {
+        auto white = TournamentManager::no_show_result(true, false);
+        auto black = TournamentManager::no_show_result(false, true);
+        auto neither = TournamentManager::no_show_result(false, false);
+        return white && *white == "1-0" && black && *black == "0-1"
+            && neither && *neither == "double_forfeit"
+            && !TournamentManager::no_show_result(true, true).has_value();
     });
 
     run_test("two players → one pairing, no bye", [] {
@@ -257,6 +275,9 @@ std::string source_path(const std::string& rel) {
 bool prepare_schema(Database& db) {
     std::string err;
     if (!db.run_script(
+            "DROP TABLE IF EXISTS tournament_result_overrides;"
+            "DROP TABLE IF EXISTS tournament_round_checkins;"
+            "DROP TABLE IF EXISTS tournament_rounds;"
             "DROP TABLE IF EXISTS tournament_pairings;"
             "DROP TABLE IF EXISTS tournament_players;"
             "DROP TABLE IF EXISTS tournaments;"
@@ -282,6 +303,12 @@ bool prepare_schema(Database& db) {
             applied, err)) return false;
     if (!db.apply_migration("0004_lld4_completion_uuid",
             read_file(source_path("src/storage/migrations/0004_lld4_completion_uuid.sql")),
+            applied, err)) return false;
+    if (!db.apply_migration("0009_persist_unrated_ai_games",
+            read_file(source_path("src/storage/migrations/0009_persist_unrated_ai_games.sql")),
+            applied, err)) return false;
+    if (!db.apply_migration("0010_live_tournament_runtime",
+            read_file(source_path("src/storage/migrations/0010_live_tournament_runtime.sql")),
             applied, err)) return false;
     return true;
 }
@@ -311,7 +338,9 @@ TourneyOutcome run_full_8_player_swiss(Database& db,
     TourneyOutcome out;
 
     auto cr = create_tournament(db, "Test Swiss", /*rounds=*/4,
-                                /*tc_init=*/300000, /*tc_inc=*/3000, creator);
+                                /*tc_init=*/300000, /*tc_inc=*/3000, creator,
+                                /*registration deadline=*/100,
+                                /*first round=*/200, /*round duration=*/60);
     if (!cr.ok) return out;
 
     for (int64_t pid : players) {
@@ -319,9 +348,12 @@ TourneyOutcome run_full_8_player_swiss(Database& db,
         if (!j.ok) return out;
     }
 
-    TournamentManager tm(db);
+    application::ports::FakeClock clock;
+    TournamentManager tm(db, clock);
     auto s = tm.start(cr.id, creator);
     if (!s.ok) return out;
+    clock.advance(std::chrono::seconds(200));
+    if (!tm.maintenance_tick().ok) return out;
 
     // Play through rounds. Each round, walk that round's pairings and
     // record "1-0" — the deterministic decider. Skip byes (already
@@ -333,6 +365,10 @@ TourneyOutcome run_full_8_player_swiss(Database& db,
             if (p.result != "pending") continue;
             auto r = tm.report_result(p.id, "1-0");
             if (!r.ok) return out;
+        }
+        if (round < 4) {
+            clock.advance(std::chrono::seconds(60));
+            if (!tm.maintenance_tick().ok) return out;
         }
     }
 
@@ -404,6 +440,11 @@ int main() {
         if (!a.ok || !b.ok) return false;
         auto ps = get_participants(db, created_tid);
         return ps.size() == 1 && ps[0].player_id == alice_id;
+    });
+
+    run_test("participant display names resolve from player ids", [&] {
+        auto names = get_participant_usernames(db, created_tid);
+        return names.size() == 1 && names[alice_id] == "Alice";
     });
 
     run_test("insert_pairing stores a bye with NULL black + result='bye'", [&] {
@@ -547,7 +588,129 @@ int main() {
         // Reuse the completed 8-player tournament.
         TournamentManager tm(db);
         auto r = tm.join(out.final_state.id, alice_id, 1500);
-        return !r.ok && r.error == "tournament_not_in_registration";
+        return !r.ok && r.error == "registration_closed";
+    });
+
+    std::cout << "\n=== Layer 4: durable lifecycle ===\n";
+    int64_t lifecycle_tid = 0;
+    int64_t lifecycle_pairing = 0;
+    application::ports::FakeClock lifecycle_clock;
+    TournamentManager lifecycle(db, lifecycle_clock);
+
+    run_test("player can unregister and re-register while registration is open", [&] {
+        auto cr = create_tournament(db, "Leave Cup", 1, 60000, 0, creator,
+                                    100, 200, 60);
+        if (!cr.ok || !lifecycle.join(cr.id, creator, 1500).ok) return false;
+        if (!lifecycle.leave(cr.id, creator).ok
+            || !get_participants(db, cr.id).empty()) return false;
+        if (!lifecycle.join(cr.id, creator, 1500).ok) return false;
+        if (!lifecycle.set_registration(cr.id, creator, false).ok) return false;
+        auto closed = lifecycle.leave(cr.id, creator);
+        return !closed.ok && closed.error == "registration_closed"
+            && get_participants(db, cr.id).size() == 1;
+    });
+
+    run_test("deadline rejects stale join and creator can reopen only before it", [&] {
+        auto cr = create_tournament(db, "Deadline Cup", 1, 60000, 0, creator,
+                                    100, 200, 60);
+        if (!cr.ok) return false;
+        if (!lifecycle.join(cr.id, creator, 1500).ok) return false;
+        if (!lifecycle.set_registration(cr.id, creator, false).ok) return false;
+        if (lifecycle.join(cr.id, players[1], 1500).ok) return false;
+        if (!lifecycle.set_registration(cr.id, creator, true).ok) return false;
+        lifecycle_clock.advance(std::chrono::seconds(101));
+        auto late = lifecycle.join(cr.id, players[1], 1500);
+        return !late.ok && late.error == "registration_closed";
+    });
+
+    run_test("scheduled round starts once and single arrival wins by forfeit", [&] {
+        auto cr = create_tournament(db, "No-show Cup", 1, 60000, 0, creator,
+                                    300, 400, 60);
+        if (!cr.ok) return false;
+        lifecycle_tid = cr.id;
+        if (!lifecycle.join(cr.id, creator, 1500).ok
+            || !lifecycle.join(cr.id, players[1], 1400).ok) return false;
+        if (!lifecycle.start(cr.id, creator).ok) return false;
+        if (!lifecycle.check_in(cr.id, 1, creator).ok) return false;
+        lifecycle_clock.advance(std::chrono::seconds(299)); // now 400
+        if (!lifecycle.maintenance_tick().ok || !lifecycle.maintenance_tick().ok) return false;
+        auto ps = get_pairings_for_round(db, cr.id, 1);
+        if (ps.size() != 1) return false;
+        lifecycle_pairing = ps[0].id;
+        lifecycle_clock.advance(std::chrono::seconds(60));
+        if (!lifecycle.maintenance_tick().ok) return false;
+        auto st = lifecycle.get_state(cr.id);
+        return st && st->tournament.status == "completed"
+            && st->all_pairings.size() == 1
+            && st->all_pairings[0].result == "1-0"
+            && st->all_pairings[0].result_source == "forfeit"
+            && st->standings[0].player_id == creator
+            && st->standings[0].score == 1.0;
+    });
+
+    run_test("late check-in is rejected", [&] {
+        auto r = lifecycle.check_in(lifecycle_tid, 1, players[1]);
+        return !r.ok && r.error == "check_in_closed_or_not_registered";
+    });
+
+    run_test("creator override is audited and standings are recomputed", [&] {
+        auto r = lifecycle.override_result(lifecycle_pairing, creator, "0-1",
+                                           "Correct arbiter ruling");
+        if (!r.ok) return false;
+        auto audit = db.exec(
+            "SELECT old_result,new_result,reason FROM tournament_result_overrides WHERE pairing_id=$1",
+            {Param::int64(lifecycle_pairing)});
+        auto st = lifecycle.get_state(lifecycle_tid);
+        return audit.ok && audit.rows.size() == 1
+            && audit.first().at(0) == "1-0" && audit.first().at(1) == "0-1"
+            && st && st->standings[0].player_id == players[1]
+            && st->standings[0].score == 1.0;
+    });
+
+    run_test("override requires a reason", [&] {
+        auto r = lifecycle.override_result(lifecycle_pairing, creator, "1-0", "");
+        return !r.ok && r.error == "override_reason_required";
+    });
+
+    run_test("neither player checking in produces zero-point double forfeit", [&] {
+        auto cr = create_tournament(db, "Double Forfeit Cup", 1, 60000, 0, creator,
+                                    500, 600, 60);
+        if (!cr.ok || !lifecycle.join(cr.id, creator, 1500).ok
+            || !lifecycle.join(cr.id, players[1], 1400).ok
+            || !lifecycle.start(cr.id, creator).ok) return false;
+        lifecycle_clock.advance(std::chrono::seconds(140)); // 460 -> 600
+        if (!lifecycle.maintenance_tick().ok) return false;
+        lifecycle_clock.advance(std::chrono::seconds(60));
+        if (!lifecycle.maintenance_tick().ok) return false;
+        auto st = lifecycle.get_state(cr.id);
+        return st && st->tournament.status == "completed"
+            && st->all_pairings.size() == 1
+            && st->all_pairings[0].result == "double_forfeit"
+            && st->standings.size() == 2
+            && st->standings[0].score == 0.0 && st->standings[1].score == 0.0;
+    });
+
+    run_test("concurrent maintenance ticks generate one round", [&] {
+        auto cr = create_tournament(db, "Tick Race Cup", 1, 60000, 0, creator,
+                                    700, 800, 60);
+        if (!cr.ok || !lifecycle.join(cr.id, creator, 1500).ok
+            || !lifecycle.join(cr.id, players[1], 1400).ok
+            || !lifecycle.start(cr.id, creator).ok) return false;
+        lifecycle_clock.advance(std::chrono::seconds(140)); // 660 -> 800
+
+        Database second_db;
+        std::string second_error;
+        if (!second_db.connect_from_env(second_error)) return false;
+        application::ports::FakeClock second_clock(
+            application::ports::Clock::SteadyPoint{},
+            application::ports::Clock::SystemPoint(std::chrono::seconds(800)));
+        TournamentManager second_manager(second_db, second_clock);
+        bool first_ok = false, second_ok = false;
+        std::thread a([&] { first_ok = lifecycle.maintenance_tick().ok; });
+        std::thread b([&] { second_ok = second_manager.maintenance_tick().ok; });
+        a.join(); b.join();
+        return first_ok && second_ok
+            && get_pairings_for_round(db, cr.id, 1).size() == 1;
     });
 
     std::cout << "\n========================================\n";

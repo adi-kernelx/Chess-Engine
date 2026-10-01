@@ -33,9 +33,18 @@ private:
     void handle_join_tournament         (chess::application::RequestContext& ctx,
                                          const nlohmann::json&               msg,
                                          chess::application::MessageSink&    sink);
+    void handle_leave_tournament        (chess::application::RequestContext& ctx,
+                                         const nlohmann::json&               msg,
+                                         chess::application::MessageSink&    sink);
     void handle_start_tournament        (chess::application::RequestContext& ctx,
                                          const nlohmann::json&               msg,
                                          chess::application::MessageSink&    sink);
+    void handle_set_registration        (chess::application::RequestContext& ctx,
+                                         const nlohmann::json& msg,
+                                         chess::application::MessageSink& sink);
+    void handle_check_in_round           (chess::application::RequestContext& ctx,
+                                          const nlohmann::json& msg,
+                                          chess::application::MessageSink& sink);
     void handle_report_tournament_result(chess::application::RequestContext& ctx,
                                          const nlohmann::json&               msg,
                                          chess::application::MessageSink&    sink);

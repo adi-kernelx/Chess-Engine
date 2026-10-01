@@ -27,6 +27,9 @@ struct MoveMadeResponse {
     std::string fen;               ///< board position after the move
     int white_time_ms = 0;         ///< wire field name: `white_time`
     int black_time_ms = 0;         ///< wire field name: `black_time`
+    /// Legal UCI moves for the new side to move. Produced from the same
+    /// authoritative post-move board so the client can highlight instantly.
+    std::vector<std::string> legal_moves;
     /// The original promotion string the client sent, when the move was
     /// a promotion. Emitted only when present, matching current behavior.
     std::optional<std::string> promotion;
@@ -67,6 +70,8 @@ struct GameStateResponse {
     int                           black_time_ms = 0;
     std::string                   state;          ///< "waiting"/"in_progress"/"finished"
     std::vector<MoveHistoryEntry> moves;
+    std::vector<std::string>      legal_moves;
+    std::optional<std::string>    draw_offer_from; ///< "white" / "black"
     std::optional<std::string>    result;
     std::optional<std::string>    reason;
 };

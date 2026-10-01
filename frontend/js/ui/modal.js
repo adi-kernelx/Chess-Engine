@@ -57,15 +57,16 @@ export class ModalHost {
             footer: opts.footer,
             onDismiss: opts.dismissible === false ? null : () => this._close(),
             initialFocus: opts.initialFocus,
+            className: opts.className,
         });
         return { close: () => this._close() };
     }
 
-    _open({ title, subtitle, body, footer, onDismiss, initialFocus }) {
+    _open({ title, subtitle, body, footer, onDismiss, initialFocus, className = '' }) {
         this._close(); // one modal at a time
 
         const modal = h('div', {
-            class: 'modal',
+            class: ('modal ' + className).trim(),
             role: 'dialog',
             'aria-modal': 'true',
             'aria-label': title,

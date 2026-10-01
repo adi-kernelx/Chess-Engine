@@ -274,7 +274,10 @@ static void reset(Database& db) {
     // 9 cheat_reports/tournaments) before dropping players itself, or the FK
     // constraints leave the schema half-loaded and later inserts fail.
     std::string err;
-    db.run_script("DROP TABLE IF EXISTS tournament_pairings; "
+    db.run_script("DROP TABLE IF EXISTS tournament_result_overrides; "
+                  "DROP TABLE IF EXISTS tournament_round_checkins; "
+                  "DROP TABLE IF EXISTS tournament_rounds; "
+                  "DROP TABLE IF EXISTS tournament_pairings; "
                   "DROP TABLE IF EXISTS tournament_players; "
                   "DROP TABLE IF EXISTS tournaments; "
                   "DROP TABLE IF EXISTS cheat_reports; "
@@ -314,7 +317,7 @@ static void test_service(Database& db) {
 
         auto r1 = google_sign_in(db, verifier, jwt, now + 5);
         if (r1.status != GoogleSignInStatus::Ok || !r1.created_new_account) return false;
-        if (r1.username.empty() || r1.elo_rating != 1200) return false;
+        if (r1.username.empty() || r1.elo_rating != 800) return false;
 
         // A second call must return THE SAME row, not create a duplicate.
         auto r2 = google_sign_in(db, verifier, jwt, now + 10);

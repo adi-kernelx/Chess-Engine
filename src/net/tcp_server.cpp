@@ -7,9 +7,22 @@
 #include <fcntl.h>
 #include <cstring>
 #include <cerrno>
+#include <vector>
 
 namespace chess {
 namespace net {
+
+namespace {
+
+bool contains_sensitive_json(const std::string& message) {
+    return message.find("\"password\"")      != std::string::npos ||
+           message.find("\"access_token\"")  != std::string::npos ||
+           message.find("\"refresh_token\"") != std::string::npos ||
+           message.find("\"supabase_jwt\"")   != std::string::npos ||
+           message.find("\"sealed\"")         != std::string::npos;
+}
+
+} // namespace
 
 TcpServer::TcpServer(uint16_t port, concurrent::ThreadPool& pool) 
     : port_(port), server_fd_(-1), epoll_fd_(-1), running_(false), pool_(pool) {}
@@ -199,11 +212,22 @@ void TcpServer::handle_client_data(int client_fd) {
                 close_connection(client_fd);
                 return;
             }
+            // A valid complete frame of any opcode proves liveness. This also
+            // prevents an actively playing browser from being disconnected if
+            // its explicit pong is delayed or coalesced by the network stack.
+            conn->mark_activity_received(Connection::HeartbeatClock::now());
             switch (frame.opcode) {
                 case WsOpcode::TEXT: {
                     // Convert payload to string and route to handler
                     std::string message(frame.payload.begin(), frame.payload.end());
-                    core::Logger::debug("net", "WebSocket", "Received: " + message);
+                    // Never place credentials, bearer tokens, or encrypted
+                    // auth envelopes in logs. Even local debug transcripts are
+                    // commonly pasted into bug reports.
+                    core::Logger::debug(
+                        "net", "WebSocket",
+                        contains_sensitive_json(message)
+                            ? "Received sensitive JSON frame (payload redacted)"
+                            : "Received: " + message);
                     router_.route(*conn, message);
                     break;
                 }
@@ -226,7 +250,7 @@ void TcpServer::handle_client_data(int client_fd) {
                     close_connection(client_fd);
                     return;
                 case WsOpcode::PONG:
-                    // Pong received — client is alive, nothing to do
+                    conn->mark_pong_received(Connection::HeartbeatClock::now());
                     break;
                 default:
                     core::Logger::warn("net", "WebSocket", "Unknown opcode: " 
@@ -276,11 +300,51 @@ Connection* TcpServer::get_connection(int fd) {
     return nullptr;
 }
 
+void TcpServer::run_connection_maintenance() {
+    std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
+    const auto now = Connection::HeartbeatClock::now();
+    std::vector<int> stale_fds;
+
+    for (auto& [fd, owned] : connections_) {
+        Connection& conn = *owned;
+        if (!conn.is_upgraded()) continue;
+
+        if (conn.heartbeat_expired(now, HEARTBEAT_TIMEOUT)) {
+            stale_fds.push_back(fd);
+            continue;
+        }
+
+        if (!conn.heartbeat_due(now, HEARTBEAT_INTERVAL)) continue;
+
+        WebSocket::write_frame(conn, WsOpcode::PING, "chess-heartbeat");
+        conn.mark_ping_sent(now);
+
+        while (conn.has_data_to_write()) {
+            const int written = conn.write_to_socket();
+            if (written > 0) continue;
+            if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
+            stale_fds.push_back(fd);
+            break;
+        }
+
+        if (conn.write_buffer_overflowed()) stale_fds.push_back(fd);
+    }
+
+    for (const int fd : stale_fds) {
+        if (connections_.find(fd) == connections_.end()) continue;
+        core::Logger::warn("net", "TcpServer",
+            "Closing unresponsive WebSocket connection (heartbeat timeout)");
+        close_connection(fd);
+    }
+}
+
 void TcpServer::run() {
     struct epoll_event events[MAX_EVENTS];
 
     while (running_) {
-        int num_events = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
+        // Wake periodically even when no socket has traffic so game deadlines
+        // are enforced server-side.
+        int num_events = epoll_wait(epoll_fd_, events, MAX_EVENTS, 250);
         
         if (num_events < 0) {
             if (errno == EINTR) continue;
@@ -312,6 +376,9 @@ void TcpServer::run() {
                 }
             }
         }
+
+        if (running_) run_connection_maintenance();
+        if (running_ && maintenance_cb_) maintenance_cb_();
     }
 }
 

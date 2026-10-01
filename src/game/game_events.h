@@ -72,6 +72,8 @@ struct GameStarted {
     int64_t      white_db_id  = 0;
     int64_t      black_db_id  = 0;
     bool         is_ai_game   = false;
+    int64_t      tournament_id = 0;
+    int64_t      pairing_id = 0;
 };
 
 /// Fired when a room transitions IN_PROGRESS → FINISHED (terminal

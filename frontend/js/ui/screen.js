@@ -10,8 +10,9 @@
  * Subscriptions and setInterval/animationFrame handles registered with
  * `this.sub(off)` and `this.raf(id)` are auto-cleaned on unmount.
  *
- * Screens set `this.preview = true` in their constructor to display the
- * "Preview — backend pending" badge in their header block automatically.
+ * Production screens must render one of three truthful states: live data, an
+ * empty state, or an explicit unavailable/error state. The old automatic
+ * preview badge was removed after the backend contracts were implemented.
  */
 
 import { h } from '../core/dom.js';
@@ -20,7 +21,6 @@ export class Screen {
     constructor(ctx) {
         this.ctx = ctx;
         this.root = null;
-        this.preview = false;
         this._subs = [];
         this._rafs = new Set();
         this._intervals = new Set();
@@ -75,17 +75,12 @@ export class Screen {
 
     /* ── Header helper — every screen calls this to keep the layout consistent ── */
     header(title, subtitle, right) {
-        const badges = [];
-        if (this.preview) {
-            badges.push(h('span', { class: 'badge badge--preview' }, 'Preview — backend pending'));
-        }
         return h('div', { class: 'screen__header' },
             h('div', { class: 'screen__title-block' },
                 h('div', {},
                     h('h1', { class: 'screen__title' }, title),
                     subtitle ? h('div', { class: 'screen__subtitle' }, subtitle) : null
                 ),
-                ...badges
             ),
             right || null
         );

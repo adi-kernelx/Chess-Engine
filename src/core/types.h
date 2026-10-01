@@ -134,7 +134,8 @@ enum class GameStatus : uint8_t {
     DRAW_THREEFOLD_REPETITION,
     DRAW_AGREEMENT,
     RESIGNATION,
-    TIMEOUT
+    TIMEOUT,
+    ABANDONMENT
 };
 
 // ============================================================

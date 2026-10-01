@@ -146,6 +146,7 @@ export class BoardTestScreen extends Screen {
 
     onMount() {
         this.renderer = new BoardRenderer(this._canvas, BoardTheme.classic());
+        this.renderer.onRastersReady = () => this._recomputeCaptured();
         this.interaction = new BoardInteraction(this._canvas, this.renderer);
         this.promotion = new PromotionPicker(this._container, this.renderer);
 
@@ -282,12 +283,8 @@ export class BoardTestScreen extends Screen {
         const pieces = h('div', { class: 'captured__pieces' });
         for (const t of list) {
             const key = `${capturedColor}_${t}`;
-            const img = this.renderer.rasters[key];
-            if (!img) continue;
-            const clone = new Image();
-            clone.src = img.src;
-            clone.className = 'captured__piece';
-            pieces.appendChild(clone);
+            const thumbnail = this.renderer.createPieceThumbnail(key, 'captured__piece');
+            if (thumbnail) pieces.appendChild(thumbnail);
         }
         wrap.appendChild(pieces);
         if (advantage > 0) {

@@ -47,6 +47,7 @@
 #pragma once
 
 #include "application/ports/game_store.h"
+#include "application/ports/tournament_completion_sink.h"
 #include "game/game_events.h"
 
 namespace chess::application {
@@ -57,7 +58,9 @@ public:
     /// to. In capability-disabled composition the injected store is a
     /// `NullGameStore` whose `capable()` returns false; the callback
     /// short-circuits before touching it.
-    explicit GameCompletionService(chess::application::ports::GameStore& store);
+    explicit GameCompletionService(
+        chess::application::ports::GameStore& store,
+        chess::application::ports::TournamentCompletionSink* tournament_sink = nullptr);
 
     /// GameRoom's terminal-transition callback. Runs on the worker
     /// thread that observed the transition, outside the room mutex.
@@ -67,6 +70,7 @@ public:
 
 private:
     chess::application::ports::GameStore& store_;
+    chess::application::ports::TournamentCompletionSink* tournament_sink_;
 };
 
 } // namespace chess::application

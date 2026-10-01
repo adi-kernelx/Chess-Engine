@@ -164,6 +164,9 @@ int main() {
     server.set_disconnect_callback([&game_handler](int fd) {
         game_handler.on_player_disconnect(fd);
     });
+    server.set_maintenance_callback([&game_handler]() {
+        game_handler.expire_disconnected_games();
+    });
 
     // ── Auth layer (optional; graceful skip if not configured) ──
     //

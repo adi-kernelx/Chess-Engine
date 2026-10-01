@@ -37,6 +37,13 @@ struct PlayerProfile {
     int         draws;
 };
 
+/// One point on a player's rated-game timeline. `ts` is Unix epoch
+/// milliseconds so the browser can pass it directly to Date.
+struct RatingHistoryPoint {
+    int64_t ts;
+    int     rating;
+};
+
 /// A leaderboard row: PlayerProfile plus a 1-based rank computed via
 /// ROW_NUMBER() in the query, so pagination gives globally correct ranks.
 struct LeaderboardEntry : PlayerProfile {
@@ -53,12 +60,20 @@ std::optional<PlayerProfile> find_player_by_username(Database& db,
                                                      const std::string& username);
 
 /// Return the top players sorted by ELO descending. Players with zero
-/// games played are excluded (they'd clutter the board with default-1200
+/// games played are excluded (they'd clutter the board with default-rating
 /// accounts that never played). Ranks are globally correct even with
 /// offset-based pagination.
 std::vector<LeaderboardEntry> get_leaderboard(Database& db,
                                               int limit = 50,
                                               int offset = 0);
+
+/// Reconstruct the durable rating timeline from rated games. Games store each
+/// participant's pre-game rating; the next game's pre-game value is therefore
+/// the previous game's post-game value, while `current_elo` closes the final
+/// segment. A player with one rated game receives two points (initial + current).
+std::vector<RatingHistoryPoint> get_rating_history(Database& db,
+                                                   int64_t player_id,
+                                                   int current_elo);
 
 /// Update a single player's ELO rating. Returns true if the player existed
 /// and was updated, false otherwise. This is a standalone utility; the

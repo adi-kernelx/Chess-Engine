@@ -52,6 +52,10 @@ export class Toaster {
     success(message, opts) { return this.show(message, { ...opts, variant: 'success' }); }
     warning(message, opts) { return this.show(message, { ...opts, variant: 'warning' }); }
     danger(message, opts)  { return this.show(message, { ...opts, variant: 'danger' }); }
+    // `error` is the semantic name used by network/auth screens. Keep it as
+    // an alias so an error path can never throw while trying to report the
+    // original failure and leave its UI permanently busy.
+    error(message, opts)   { return this.danger(message, opts); }
 
     dismiss(id) {
         const el = this.region.querySelector(`[data-toast-id="${id}"]`);

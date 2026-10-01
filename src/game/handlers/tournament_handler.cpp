@@ -39,6 +39,11 @@ void TournamentHandler::register_handlers(chess::protocol::RequestPipeline& pipe
             handle_join_tournament(c, m, s);
         });
     pipeline.register_route(
+        RoutePolicy{"leave_tournament", AuthRequirement::Required},
+        [this](RequestContext& c, const json& m, MessageSink& s) {
+            handle_leave_tournament(c, m, s);
+        });
+    pipeline.register_route(
         RoutePolicy{"start_tournament", AuthRequirement::Required},
         [this](RequestContext& c, const json& m, MessageSink& s) {
             handle_start_tournament(c, m, s);
@@ -48,6 +53,12 @@ void TournamentHandler::register_handlers(chess::protocol::RequestPipeline& pipe
         [this](RequestContext& c, const json& m, MessageSink& s) {
             handle_report_tournament_result(c, m, s);
         });
+    pipeline.register_route(
+        RoutePolicy{"set_tournament_registration", AuthRequirement::Required},
+        [this](RequestContext& c, const json& m, MessageSink& s) { handle_set_registration(c,m,s); });
+    pipeline.register_route(
+        RoutePolicy{"check_in_tournament_round", AuthRequirement::Required},
+        [this](RequestContext& c, const json& m, MessageSink& s) { handle_check_in_round(c,m,s); });
     pipeline.register_route(
         RoutePolicy{"tournament_state"},
         [this](RequestContext& c, const json& m, MessageSink& s) {
@@ -69,8 +80,13 @@ void TournamentHandler::handle_create_tournament(RequestContext& ctx,
     const int rounds    = msg.value("rounds",    4);
     const int time_base = msg.value("time_base", 300);
     const int time_inc  = msg.value("time_inc",  3);
+    const int64_t registration_deadline = msg.value("registration_deadline", int64_t{0});
+    const int64_t first_round_starts_at = msg.value("first_round_starts_at", int64_t{0});
+    const int round_duration = msg.value("round_duration_seconds", 3600);
     service_.create_tournament(ctx, ctx.identity->player_id,
-                               name, rounds, time_base, time_inc, sink);
+                               name, rounds, time_base, time_inc,
+                               registration_deadline, first_round_starts_at,
+                               round_duration, sink);
 }
 
 void TournamentHandler::handle_join_tournament(RequestContext& ctx,
@@ -81,6 +97,15 @@ void TournamentHandler::handle_join_tournament(RequestContext& ctx,
     const int64_t tid = has_tid ? msg["tournament_id"].get<int64_t>() : 0;
     service_.join_tournament(ctx, ctx.identity->player_id, ctx.identity->elo_rating,
                              has_tid, tid, sink);
+}
+
+void TournamentHandler::handle_leave_tournament(RequestContext& ctx,
+                                                const json& msg,
+                                                MessageSink& sink) {
+    const bool has_tid = msg.contains("tournament_id")
+                      && msg["tournament_id"].is_number_integer();
+    service_.leave_tournament(ctx, ctx.identity->player_id, has_tid,
+        has_tid ? msg["tournament_id"].get<int64_t>() : 0, sink);
 }
 
 void TournamentHandler::handle_start_tournament(RequestContext& ctx,
@@ -99,8 +124,25 @@ void TournamentHandler::handle_report_tournament_result(RequestContext& ctx,
                       && msg["pairing_id"].is_number_integer();
     const int64_t pid = has_pid ? msg["pairing_id"].get<int64_t>() : 0;
     const std::string result = msg.value("result", std::string{});
+    const std::string reason = msg.value("reason", std::string{});
     service_.report_tournament_result(ctx, ctx.identity->player_id,
-                                      has_pid, pid, result, sink);
+                                      has_pid, pid, result, reason, sink);
+}
+
+void TournamentHandler::handle_set_registration(RequestContext& ctx,
+                                                const json& msg, MessageSink& sink) {
+    const bool has_tid = msg.contains("tournament_id") && msg["tournament_id"].is_number_integer();
+    service_.set_registration(ctx, ctx.identity->player_id, has_tid,
+        has_tid ? msg["tournament_id"].get<int64_t>() : 0,
+        msg.value("open", false), sink);
+}
+
+void TournamentHandler::handle_check_in_round(RequestContext& ctx,
+                                              const json& msg, MessageSink& sink) {
+    const bool has_tid = msg.contains("tournament_id") && msg["tournament_id"].is_number_integer();
+    service_.check_in_round(ctx, ctx.identity->player_id, has_tid,
+        has_tid ? msg["tournament_id"].get<int64_t>() : 0,
+        msg.value("round", 0), sink);
 }
 
 // ── public routes ────────────────────────────────────────────────────

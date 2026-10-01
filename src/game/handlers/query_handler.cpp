@@ -21,6 +21,16 @@ using chess::application::MessageSink;
 using chess::protocol::AuthRequirement;
 using chess::protocol::RoutePolicy;
 
+namespace {
+
+int64_t integer_field_or_zero(const json& msg, const char* key) {
+    const auto it = msg.find(key);
+    if (it == msg.end() || !it->is_number_integer()) return 0;
+    return it->get<int64_t>();
+}
+
+} // namespace
+
 QueryHandler::QueryHandler(chess::application::GameQueryService& service,
                            chess::net::ConnectionLookup          lookup)
     : service_(service), lookup_(std::move(lookup)) {}
@@ -84,7 +94,7 @@ void QueryHandler::handle_get_history(RequestContext& ctx,
 void QueryHandler::handle_get_game(RequestContext& ctx,
                                    const json& msg,
                                    MessageSink& sink) {
-    int64_t game_id = msg.value("game_id", static_cast<int64_t>(0));
+    int64_t game_id = integer_field_or_zero(msg, "game_id");
     service_.get_game(ctx, game_id, sink);
 }
 
@@ -101,7 +111,7 @@ void QueryHandler::handle_list_live_games(RequestContext& ctx,
 void QueryHandler::handle_spectate(RequestContext& ctx,
                                    const json& msg,
                                    MessageSink& sink) {
-    int64_t game_id = msg.value("game_id", static_cast<int64_t>(0));
+    int64_t game_id = integer_field_or_zero(msg, "game_id");
     service_.spectate(ctx, ctx.identity->username, game_id, sink);
 }
 
@@ -110,7 +120,7 @@ void QueryHandler::handle_spectate(RequestContext& ctx,
 void QueryHandler::handle_stop_spectating(RequestContext& ctx,
                                           const json& msg,
                                           MessageSink& sink) {
-    int64_t game_id = msg.value("game_id", static_cast<int64_t>(0));
+    int64_t game_id = integer_field_or_zero(msg, "game_id");
     service_.stop_spectating(ctx, game_id, sink);
 }
 

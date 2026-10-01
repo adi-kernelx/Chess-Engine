@@ -14,8 +14,9 @@
 import { Screen } from '../ui/screen.js';
 import { h, q, icon, clear } from '../core/dom.js';
 import { parseAndFormatTimeControl, timeCategory, initials } from '../core/format.js';
-import { absoluteUrl, copyText, shareUrl } from '../core/share.js';
+import { absoluteUrl, copyText } from '../core/share.js';
 import { BOTS, DEFAULT_BOT_ID, botById } from '../core/bots.js';
+import { INITIAL_RATING } from '../core/rating.js';
 
 const TIME_PRESETS = [
     { label: '1+0',    base: 60,  inc: 0  },
@@ -50,7 +51,7 @@ export class LobbyScreen extends Screen {
             this.header('Play',
                 'Pick a mode and challenge someone — or the engine.',
                 h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
-                    h('span', { class: 'badge' }, 'Rating ' + (session.elo || 1200))
+                    h('span', { class: 'badge' }, 'Rating ' + (session.elo ?? INITIAL_RATING))
                 )
             ),
             h('div', { class: 'screen__body' },
@@ -208,6 +209,7 @@ export class LobbyScreen extends Screen {
         this.sub(socket.on('game_created',  raw => this._onGameCreated(raw)));
         this.sub(socket.on('game_start',    raw => this._onGameStart(raw)));
         this.sub(socket.on('game_joined',   raw => this._onGameJoined(raw)));
+        this.sub(socket.on('active_game',   raw => this._onActiveGame(raw)));
         this.sub(socket.on('match_found',   raw => this._onMatchFound(raw)));
         this.sub(socket.on('queued',        raw => this._onQueued(raw)));
         this.sub(socket.on('queue_cancelled', () => this._onQueueCancelled()));
@@ -225,6 +227,10 @@ export class LobbyScreen extends Screen {
 
         // Poll the open games list every 5s while on the lobby.
         this._refreshTimer = this.interval(() => this._refreshGamesList(), 5000);
+        // A pushed game_start is the fast path. This authenticated poll is a
+        // recovery path for a notification lost during a reconnect or brief
+        // socket back-pressure while the host is on the invite panel.
+        this._waitingRecoveryTimer = this.interval(() => this._recoverCreatedGame(), 1500);
         this._refreshGamesList();
         this._renderGamesList({ games: [] });
         this._renderQuickActionInto();
@@ -338,7 +344,9 @@ export class LobbyScreen extends Screen {
             timeIncSec:  preset.inc,
             difficulty: pending && pending.difficulty || null,
         });
-        this.ctx.router.go('/game');
+        // Keep the URL tied to the authoritative room from the first frame;
+        // recovery and refresh can then verify the same game explicitly.
+        this.ctx.router.go('/game/' + norm.gameId);
     }
 
     _onGameCreated(raw) {
@@ -350,6 +358,26 @@ export class LobbyScreen extends Screen {
         this._renderInvitePanel(norm.gameId);
         this.ctx.toast.info(`Game #${norm.gameId} posted — share the link to bring a friend.`,
             { duration: 3200 });
+        this._recoverCreatedGame();
+    }
+
+    _recoverCreatedGame() {
+        if (!this._createdGameId || !this.ctx.socket.isConnected()) return;
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (token) this.ctx.socket.send(this.ctx.Outbound.activeGame(token));
+    }
+
+    _onActiveGame(raw) {
+        if (!this._createdGameId) return;
+        const norm = this.ctx.Inbound.normalize(raw);
+        const game = norm && norm.game;
+        if (!game || game.state !== 'in_progress'
+            || Number(game.gameId) !== Number(this._createdGameId)) return;
+        this._createdGameId = null;
+        this._startFrom(this._pending, {
+            ...game,
+            color: game.color === 'b' ? 'black' : 'white',
+        });
     }
 
     _renderInvitePanel(gameId) {
@@ -357,6 +385,7 @@ export class LobbyScreen extends Screen {
         // eye already is; if it's not there, no-op cleanly.
         if (!this._gamesList) return;
         const link = absoluteUrl('#/join/' + gameId);
+        let linkInput = null;
         const panel = h('div', { class: 'invite-panel' },
             h('div', { class: 'invite-panel__body' },
                 h('div', {},
@@ -368,20 +397,22 @@ export class LobbyScreen extends Screen {
                         class: 'input mono invite-row__input',
                         readonly: true,
                         value: link,
+                        ref: el => { linkInput = el; },
                         onclick: (e) => e.target.select(),
                     }),
                     h('button', {
                         class: 'btn btn--sm btn--primary',
                         onclick: async () => {
-                            const shared = await shareUrl({
-                                title: 'Play me in chess',
-                                text: 'Join my game — one click, no signup.',
-                                url: link,
-                            });
-                            if (shared.ok) return;
                             const res = await copyText(link);
                             if (res.ok) this.ctx.toast.success('Link copied.', { duration: 1800 });
-                            else this.ctx.toast.warning('Copy blocked — select the field manually.', { duration: 2600 });
+                            else {
+                                if (linkInput) {
+                                    linkInput.focus();
+                                    linkInput.select();
+                                }
+                                this.ctx.toast.warning('Copy was blocked. The link is selected — press Ctrl+C.',
+                                    { duration: 4200 });
+                            }
                         },
                     }, 'Copy link'),
                 ),
@@ -461,6 +492,12 @@ export class LobbyScreen extends Screen {
 
     _renderGamesList(payload) {
         if (!this._gamesList) return;
+        // list_games polling must not erase the host's persistent invite
+        // panel. The created room is intentionally absent from its own list.
+        if (this._createdGameId) {
+            this._renderInvitePanel(this._createdGameId);
+            return;
+        }
         clear(this._gamesList);
         const games = payload.games || [];
         // Hide the game you just created from your own list.

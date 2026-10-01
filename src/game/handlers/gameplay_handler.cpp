@@ -54,10 +54,35 @@ void GameplayHandler::register_handlers(chess::protocol::RequestPipeline& pipeli
         [this](RequestContext& ctx, const json& m, MessageSink& s) {
             handle_play_ai(ctx, m, s);
         });
+    pipeline.register_route(
+        RoutePolicy{"offer_draw", AuthRequirement::Required},
+        [this](RequestContext& ctx, const json& m, MessageSink& s) {
+            handle_offer_draw(ctx, m, s);
+        });
+    pipeline.register_route(
+        RoutePolicy{"draw_response", AuthRequirement::Required},
+        [this](RequestContext& ctx, const json& m, MessageSink& s) {
+            handle_draw_response(ctx, m, s);
+        });
+    pipeline.register_route(
+        RoutePolicy{"offer_rematch", AuthRequirement::Required},
+        [this](RequestContext& ctx, const json& m, MessageSink& s) {
+            handle_offer_rematch(ctx, m, s);
+        });
+    pipeline.register_route(
+        RoutePolicy{"rematch_response", AuthRequirement::Required},
+        [this](RequestContext& ctx, const json& m, MessageSink& s) {
+            handle_rematch_response(ctx, m, s);
+        });
+    pipeline.register_route(
+        RoutePolicy{"get_pending_rematch", AuthRequirement::Required},
+        [this](RequestContext& ctx, const json& m, MessageSink& s) {
+            handle_get_pending_rematch(ctx, m, s);
+        });
 
     // Public routes (no auth): the request either carries no user
-    // identity (make_move, resign, game_state — the caller's seat is
-    // implied by the fd) or is a lookup that anyone can perform
+    // identity (make_move and resign — the caller's seat is implied by
+    // the fd) or is a lookup that anyone can perform
     // (list_games, cancel_queue).
     pipeline.register_route(
         RoutePolicy{"make_move"},
@@ -70,9 +95,14 @@ void GameplayHandler::register_handlers(chess::protocol::RequestPipeline& pipeli
             handle_resign(ctx, m, s);
         });
     pipeline.register_route(
-        RoutePolicy{"game_state"},
+        RoutePolicy{"game_state", AuthRequirement::Required},
         [this](RequestContext& ctx, const json& m, MessageSink& s) {
             handle_game_state(ctx, m, s);
+        });
+    pipeline.register_route(
+        RoutePolicy{"get_active_game", AuthRequirement::Required},
+        [this](RequestContext& ctx, const json& m, MessageSink& s) {
+            handle_get_active_game(ctx, m, s);
         });
     pipeline.register_route(
         RoutePolicy{"cancel_queue"},
@@ -110,7 +140,12 @@ void GameplayHandler::handle_create_game(RequestContext& ctx,
 void GameplayHandler::handle_join_game(RequestContext& ctx,
                                        const json& msg,
                                        MessageSink& sink) {
-    int64_t game_id = msg.value("game_id", static_cast<int64_t>(0));
+    const auto game_id_it = msg.find("game_id");
+    if (game_id_it == msg.end() || !game_id_it->is_number_integer()) {
+        send_error(sink, "Missing or invalid game_id");
+        return;
+    }
+    const int64_t game_id = game_id_it->get<int64_t>();
     service_.join_game(ctx, *ctx.identity, game_id, sink);
 }
 
@@ -150,10 +185,57 @@ void GameplayHandler::handle_resign(RequestContext& ctx,
     service_.resign(ctx, chess::protocol::ResignRequest{}, sink);
 }
 
+void GameplayHandler::handle_offer_draw(RequestContext& ctx,
+                                        const json& /*msg*/,
+                                        MessageSink& sink) {
+    service_.offer_draw(ctx, sink);
+}
+
+void GameplayHandler::handle_draw_response(RequestContext& ctx,
+                                           const json& msg,
+                                           MessageSink& sink) {
+    if (!msg.contains("accept") || !msg["accept"].is_boolean()) {
+        send_error(sink, "Missing boolean 'accept'");
+        return;
+    }
+    service_.respond_to_draw(ctx, msg["accept"].get<bool>(), sink);
+}
+
+void GameplayHandler::handle_offer_rematch(RequestContext& ctx,
+                                           const json& msg,
+                                           MessageSink& sink) {
+    const int64_t game_id = msg.value("game_id", static_cast<int64_t>(0));
+    service_.offer_rematch(ctx, *ctx.identity, game_id, sink);
+}
+
+void GameplayHandler::handle_rematch_response(RequestContext& ctx,
+                                              const json& msg,
+                                              MessageSink& sink) {
+    if (!msg.contains("accept") || !msg["accept"].is_boolean()) {
+        send_error(sink, "Missing boolean 'accept'");
+        return;
+    }
+    const int64_t game_id = msg.value("game_id", static_cast<int64_t>(0));
+    service_.respond_to_rematch(
+        ctx, *ctx.identity, game_id, msg["accept"].get<bool>(), sink);
+}
+
+void GameplayHandler::handle_get_pending_rematch(RequestContext& ctx,
+                                                 const json& /*msg*/,
+                                                 MessageSink& sink) {
+    service_.get_pending_rematch(ctx, *ctx.identity, sink);
+}
+
 void GameplayHandler::handle_game_state(RequestContext& ctx,
                                         const json& /*msg*/,
                                         MessageSink& sink) {
     service_.game_state(ctx, chess::protocol::GameStateRequest{}, sink);
+}
+
+void GameplayHandler::handle_get_active_game(RequestContext& ctx,
+                                             const json& /*msg*/,
+                                             MessageSink& sink) {
+    service_.get_active_game(ctx, *ctx.identity, sink);
 }
 
 void GameplayHandler::handle_cancel_queue(RequestContext& ctx,

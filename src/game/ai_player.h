@@ -60,7 +60,8 @@ public:
 
     /// Compute the best move for the given position and difficulty.
     /// Blocking call — returns when the engine finishes searching.
-    AIMove compute_move(const Board& board, AIDifficulty difficulty);
+    AIMove compute_move(const Board& board, AIDifficulty difficulty,
+                        int remaining_ms = -1, int increment_ms = 0);
 
 private:
     engine::Engine engine_;

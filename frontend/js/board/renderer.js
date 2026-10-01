@@ -119,6 +119,7 @@ export class BoardRenderer {
 
         this._animating = false;
         this._loadPromise = null;
+        this.onRastersReady = null;
     }
 
     /* ────────────────────────────────────────────────────────────
@@ -168,6 +169,26 @@ export class BoardRenderer {
         const rasterPx = Math.round(this.squareSize * 2);
         this._loadPromise = loadRasters(this.pieceSetUrl, rasterPx);
         this.rasters = await this._loadPromise;
+        if (this.onRastersReady) this.onRastersReady();
+    }
+
+    /**
+     * Build a stable captured-piece thumbnail from the in-memory raster.
+     * Raster images use short-lived Blob URLs that are revoked after load, so
+     * cloning `img.src` produces a broken image. Drawing the loaded Image onto
+     * a small canvas keeps the pixels without retaining Blob URLs.
+     */
+    createPieceThumbnail(pieceId, className = '') {
+        const img = this.rasters[pieceId];
+        if (!img) return null;
+        const canvas = document.createElement('canvas');
+        const size = Math.max(1, img.naturalWidth || img.width || 64);
+        canvas.width = size;
+        canvas.height = size;
+        canvas.className = className;
+        canvas.setAttribute('aria-hidden', 'true');
+        canvas.getContext('2d').drawImage(img, 0, 0, size, size);
+        return canvas;
     }
 
     /* ────────────────────────────────────────────────────────────

@@ -39,6 +39,8 @@ struct CompletedGame {
     std::string started_at;     ///< ISO 8601 timestamp
     std::string ended_at;       ///< ISO 8601 timestamp
     int         move_count;     ///< Total plies
+    bool        rated = true;   ///< false for human-vs-computer replay records
+    std::string black_display_name; ///< required when rated=false / black_id=0
 
     /// LLD-4.2 idempotency key. When non-empty, `save_completed_game`
     /// looks up an existing row with this uuid before inserting; a hit
@@ -92,6 +94,7 @@ struct StoredGame {
     std::string started_at;
     std::string ended_at;
     int         move_count;
+    bool        rated = true;
 };
 
 /// Compact game summary for "recent games" in a player's profile view.
@@ -106,6 +109,7 @@ struct GameSummary {
     std::string started_at;
     int         move_count;
     std::string time_control;
+    bool        rated = true;
 };
 
 /// Persist a completed game in a single atomic transaction:

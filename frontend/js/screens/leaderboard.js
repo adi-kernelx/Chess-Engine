@@ -1,27 +1,23 @@
 /**
- * leaderboard.js — PREVIEW screen (Phase 8).
+ * leaderboard.js — Live leaderboard screen (Phase 8).
  *
  * Expected backend contract:
- *   → { type: 'leaderboard', limit }
+ *   → { type: 'get_leaderboard', limit }
  *   ← { type: 'leaderboard', players: [{
  *         rank, username, elo, wins, losses, draws, games_played
  *     }] }
  *
- * On live: renders straight from server data.
- * On preview: renders a deterministic demo roster.
+ * The backend currently has one global rating. Time-control categories are
+ * omitted until the persistence model can answer them truthfully.
  */
 
 import { Screen } from '../ui/screen.js';
 import { h, clear, icon } from '../core/dom.js';
 import { initials, formatElo } from '../core/format.js';
 
-const CATEGORIES = ['All', 'Bullet', 'Blitz', 'Rapid'];
-
 export class LeaderboardScreen extends Screen {
     constructor(ctx) {
         super(ctx);
-        this.preview = true;
-        this._category = 'All';
     }
 
     render() {
@@ -32,9 +28,11 @@ export class LeaderboardScreen extends Screen {
                     h('div', { class: 'card__header' },
                         icon('trophy', 'icon--sm'),
                         h('div', { class: 'card__title' }, 'Top players'),
-                        h('div', {
+                        h('button', {
+                            class: 'btn btn--ghost btn--sm',
                             style: { marginLeft: 'auto' },
-                        }, this._categoryPicker())
+                            onclick: () => this._load(),
+                        }, 'Refresh')
                     ),
                     h('div', { style: { padding: 0 }, ref: el => this._tableWrap = el },
                         h('div', { class: 'empty' }, 'Loading rankings…')
@@ -44,47 +42,31 @@ export class LeaderboardScreen extends Screen {
         );
     }
 
-    _categoryPicker() {
-        return h('div', { class: 'pill-group' },
-            ...CATEGORIES.map(c =>
-                h('button', {
-                    class: 'pill-group__item' + (c === this._category ? ' is-active' : ''),
-                    onclick: (e) => this._changeCategory(c, e.currentTarget),
-                }, c)
-            )
-        );
-    }
+    async onMount() { await this._load(); }
 
-    _changeCategory(c, btn) {
-        this._category = c;
-        for (const el of btn.parentElement.children) el.classList.remove('is-active');
-        btn.classList.add('is-active');
-        // Re-render table with the (demo) reshuffled data for this category
-        this._renderTable(this._filterByCategory(this._data));
-    }
-
-    async onMount() {
-        const { data, live } = await this.ctx.capability.request(
+    async _load() {
+        clear(this._tableWrap);
+        this._tableWrap.appendChild(h('div', { class: 'empty' }, 'Loading rankings…'));
+        const { data, live, error } = await this.ctx.capability.request(
             this.ctx.Outbound.leaderboard(100),
             {
                 expect: 'leaderboard',
-                timeout: 1500,
-                demo: () => this._demo(),
+                timeout: 5000,
+                demo: () => null,
+                failOnError: true,
             }
         );
-        this._data = data;
-        this._renderTable(this._filterByCategory(data));
-    }
-
-    _filterByCategory(data) {
-        if (this._category === 'All') return data.players || [];
-        // Preview: seed a small shuffle by category name.
-        const players = (data.players || []).slice();
-        const seed = this._category.charCodeAt(0);
-        return players
-            .map((p, i) => ({ p, k: (p.elo * 7 + i * 3 + seed) % 10000 }))
-            .sort((a, b) => b.k - a.k)
-            .map((x, i) => ({ ...x.p, rank: i + 1 }));
+        if (!live || !data) {
+            clear(this._tableWrap);
+            const detail = error && error.message
+                ? error.message
+                : 'Check the server and database connection.';
+            this._tableWrap.appendChild(h('div', { class: 'empty' },
+                h('div', {}, 'Leaderboard unavailable.'),
+                h('div', { class: 'field__hint', style: { marginTop: '8px' } }, detail)));
+            return;
+        }
+        this._renderTable(data.players || []);
     }
 
     _renderTable(players) {
@@ -139,26 +121,4 @@ export class LeaderboardScreen extends Screen {
         return h('span', { class: 'rank-num' }, String(rank));
     }
 
-    _demo() {
-        const NAMES = [
-            'Marta', 'Kai', 'Fen', 'Aria', 'Nikko', 'Jae', 'Rue', 'Vex', 'Oli', 'Zed',
-            'Marlow', 'Sable', 'Corvin', 'Tam', 'Rio', 'Ash', 'Ley', 'Bram', 'Nova', 'Odin',
-            'Wren', 'Poe', 'Milo', 'Jinx', 'Rosa', 'Grim', 'Hex', 'Ivo', 'Sasha', 'Yuki',
-        ];
-        const myself = this.ctx.store.session.username || 'Player';
-        const players = NAMES.map((n, i) => {
-            const elo = 2400 - i * 35 - Math.floor(Math.random() * 20);
-            const games = 100 + Math.floor(Math.random() * 500);
-            const wins   = Math.floor(games * 0.55);
-            const losses = Math.floor(games * 0.35);
-            const draws  = games - wins - losses;
-            return { rank: i + 1, username: n, elo, wins, losses, draws, gamesPlayed: games };
-        });
-        // Splice the current user into a plausible mid-pack rank so "You" chip shows.
-        players.splice(12, 0, {
-            rank: 13, username: myself, elo: 1200, wins: 3, losses: 5, draws: 1, gamesPlayed: 9,
-        });
-        players.forEach((p, i) => p.rank = i + 1);
-        return { type: 'leaderboard', players };
-    }
 }

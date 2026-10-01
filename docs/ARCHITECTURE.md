@@ -295,3 +295,49 @@ The plan flagged the following as **out of scope**:
 * Frontend visual redesign — no CSS changes, no new screens; only the `Screen::unmount` teardown was hardened (LLD-7).
 
 See `docs/SEQUENCES.md` for the four sequence diagrams (move accept, completion + failed-save retry, sealed login, disconnect + revision-guarded stale result) the plan asked for. See `implementation_log.md` for the phase-by-phase record of what changed and why.
+
+### 7.7 Scheduled live tournament path
+
+Tournament chess reuses the normal authoritative game and completion pipeline;
+it does not introduce a second game implementation:
+
+```text
+browser create/register/check-in commands
+                 │
+                 ▼
+TournamentHandler → TournamentService → TournamentManager → PostgreSQL
+                                              │ scheduled maintenance tick
+                                              ▼
+                                  TournamentRuntimeService
+                                      │ reserves durable seats
+                                      ▼
+                                   RoomManager → GameRoom
+                                      │ terminal immutable snapshot
+                                      ▼
+GameCompletionService → PostgresGameStore → TournamentCompletionSink
+                                              │ idempotent pairing result
+                                              ▼
+                         recomputed tournament score + Buchholz + next round
+```
+
+`TournamentManager` owns deadlines, lifecycle transitions, Swiss state, and
+audited corrections. `GameRoom` owns chess rules and clocks.
+`TournamentRuntimeService` is the Facade/Mediator that creates or reconstructs
+scheduled rooms and binds sockets only when the authenticated database player
+id matches a reserved seat. A `pairing_id` survives in the immutable
+completion snapshot, so only a successfully persisted game can resolve the
+pairing automatically. Duplicate completion delivery is a no-op at both the
+game and tournament boundaries.
+
+The browser is a projection of this state. It displays local-time schedules,
+one contextual countdown, registration/check-in controls, pairings, and live
+game links, but it never decides whether a deadline passed or a result counts.
+`tournament_game_ready` is emitted only after `pairing.game_id` is durable;
+refresh recovery uses public `tournament_state` plus authenticated
+`get_active_game`. Creator overrides change tournament standings and Buchholz
+only; they intentionally do not rewrite the immutable replay, profile record,
+or global rating.
+
+Scheduled but unstarted rooms can be reconstructed after process loss.
+Already-moving rooms are still process-memory state, so the first Cloud Run
+deployment must remain single-instance and must not claim active-game failover.

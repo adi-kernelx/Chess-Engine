@@ -1,5 +1,5 @@
 /**
- * replay.js — PREVIEW screens (Phase 9).
+ * replay.js — live persisted-game replay screens.
  *
  * Two entries:
  *   /replay             → ReplayListScreen (recent games)
@@ -22,21 +22,24 @@ import { h, clear, icon } from '../core/dom.js';
 import { BoardRenderer } from '../board/renderer.js';
 import { THEMES } from '../board/theme.js';
 import { START_FEN, parseFen, findKingSquare } from '../board/chess.js';
-import { initials, relativeTime, parseAndFormatTimeControl, formatElo, resultLabel, reasonLabel } from '../core/format.js';
-import { SCHOLARS_MATE } from './spectate.js';
+import { initials, relativeTime, parseAndFormatTimeControl, formatElo, reasonLabel } from '../core/format.js';
 
 /* ─── List ─────────────────────────────────────────────── */
 
 export class ReplayListScreen extends Screen {
     constructor(ctx) {
         super(ctx);
-        this.preview = true;
+        this._loading = false;
+        this._loaded = false;
+        this._liveHandlersBound = false;
     }
 
     render() {
         return h('div', { class: 'screen' },
             this.header('Replays', 'Browse and replay your saved games.'),
             h('div', { class: 'screen__body' },
+                h('div', { ref: el => this._rematch = el }),
+                h('div', { ref: el => this._active = el }),
                 h('div', { class: 'card' },
                     h('div', { class: 'card__header' },
                         icon('replay', 'icon--sm'),
@@ -50,18 +53,199 @@ export class ReplayListScreen extends Screen {
         );
     }
 
-    async onMount() {
-        const username = this.ctx.store.session.username || 'Player';
+    onMount() {
+        this.sub(this.ctx.session.on('change', () => this._beginLoading()));
+        this._beginLoading();
+    }
+
+    _bindLiveHandlers() {
+        if (this._liveHandlersBound) return;
+        this._liveHandlersBound = true;
+        this.sub(this.ctx.socket.on('rematch_offered', raw => {
+            this._renderPendingRematch({
+                gameId: Number(raw.game_id),
+                from: String(raw.from || 'Opponent'),
+                role: 'recipient',
+                expiresInMs: Number(raw.expires_in_ms || 45_000),
+            });
+        }));
+        this.sub(this.ctx.socket.on('rematch_declined', () => this._renderPendingRematch(null)));
+        this.sub(this.ctx.socket.on('rematch_offer_resolved', () => this._renderPendingRematch(null)));
+        this.sub(this.ctx.socket.on('rematch_started', raw =>
+            this._onRematchStarted(this.ctx.Inbound.normalize(raw))));
+        this.sub(this.ctx.socket.on('error', raw => {
+            if (!this._rematchResponding) return;
+            this._rematchResponding = false;
+            this._renderPendingRematch(this._pendingRematch);
+            const error = this.ctx.Inbound.normalize(raw);
+            this.ctx.toast.danger(error.message || 'Could not respond to the rematch offer.');
+        }));
+    }
+
+    async _beginLoading() {
+        if (!this.root || this._loading) return;
+
+        const session = this.ctx.session;
+        if (!session || !session.accessToken) {
+            this._loaded = false;
+            clear(this._active);
+            clear(this._rematch);
+            if (session && session.hasRefreshToken) {
+                clear(this._body);
+                this._body.appendChild(h('div', {
+                    class: 'empty', role: 'status', 'aria-live': 'polite',
+                }, 'Restoring your session…'));
+            } else {
+                this._renderSignedOut();
+            }
+            return;
+        }
+        if (this._loaded) return;
+
+        this._loading = true;
+        this._bindLiveHandlers();
+
+        try {
+            await this._loadPendingRematch();
+            await this._loadActive();
+            if (!this.root) return;
+            const username = this.ctx.session.username;
+            const { data, live, error } = await this.ctx.capability.request(
+                this.ctx.Outbound.getHistory(username, 30),
+                { expect: 'history', timeout: 5000, demo: () => null, failOnError: true },
+            );
+            if (!this.root) return;
+            if (!live || !data) {
+                this._renderUnavailable(error);
+                return;
+            }
+            this._loaded = true;
+            this._render(data.games || []);
+        } finally {
+            this._loading = false;
+        }
+    }
+
+    async _loadPendingRematch() {
+        const token = this.ctx.session.accessToken;
+        if (!token) { this._renderPendingRematch(null); return; }
         const { data, live } = await this.ctx.capability.request(
-            this.ctx.Outbound.getHistory(username, 30),
-            { expect: 'history', timeout: 1500, demo: () => this._demo(username) },
+            this.ctx.Outbound.pendingRematch(token),
+            { expect: 'pending_rematch', timeout: 3000, demo: () => null, failOnError: true },
         );
-        // Phase 9.2 — the demo blob is already camelCase; the live payload is
-        // snake_case and needs the Inbound normalizer. Skipping normalization
-        // on the demo keeps its hand-authored shape untouched.
-        const normalized = live ? this.ctx.Inbound.normalize(data) : data;
-        if (live) this.preview = false;
-        this._render(normalized.games || []);
+        this._renderPendingRematch(live && data ? data.offer : null);
+    }
+
+    _renderPendingRematch(offer) {
+        if (!this._rematch) return;
+        clear(this._rematch);
+        this._pendingRematch = offer || null;
+        if (!offer || !offer.gameId) return;
+
+        const recipient = offer.role === 'recipient';
+        const actions = recipient
+            ? h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+                h('button', {
+                    class: 'btn btn--primary',
+                    disabled: !!this._rematchResponding,
+                    onclick: () => this._respondToRematch(true),
+                }, this._rematchResponding ? 'Starting…' : 'Accept rematch'),
+                h('button', {
+                    class: 'btn',
+                    disabled: !!this._rematchResponding,
+                    onclick: () => this._respondToRematch(false),
+                }, 'Decline'))
+            : h('span', { class: 'badge' }, 'Waiting for opponent');
+
+        this._rematch.appendChild(h('div', {
+            class: 'card', style: { marginBottom: 'var(--sp-4)' },
+        }, h('div', {
+            class: 'card__body',
+            style: { display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' },
+        },
+            h('div', { style: { flex: 1, minWidth: '220px' } },
+                h('div', { class: 'card__title' }, recipient
+                    ? `${offer.from} offered a rematch`
+                    : 'Rematch offer pending'),
+                h('div', { class: 'field__hint' },
+                    'This offer expires after 45 seconds.')),
+            actions)));
+    }
+
+    _respondToRematch(accept) {
+        const token = this.ctx.session.accessToken;
+        const offer = this._pendingRematch;
+        if (!token || !offer || !offer.gameId || this._rematchResponding) return;
+        this._rematchResponding = true;
+        this._renderPendingRematch(offer);
+        this.ctx.socket.send(this.ctx.Outbound.rematchResponse(
+            token, offer.gameId, accept));
+        if (!accept) this._renderPendingRematch(null);
+    }
+
+    _onRematchStarted(msg) {
+        if (!msg || !msg.gameId) return;
+        this.ctx.store.setGame({
+            gameId: msg.gameId,
+            color: msg.color === 'black' ? 'b' : 'w',
+            opponent: msg.opponent,
+            isAI: false,
+            whiteMs: msg.whiteMs,
+            blackMs: msg.blackMs,
+            timeBaseSec: msg.timeBaseSec,
+            timeIncSec: msg.timeIncSec,
+            difficulty: null,
+        });
+        this.ctx.router.go('/game/' + msg.gameId);
+    }
+
+    async _loadActive() {
+        const token = this.ctx.session.accessToken;
+        if (!token) {
+            this._renderActive();
+            return;
+        }
+        const { data, live } = await this.ctx.capability.request(
+            this.ctx.Outbound.activeGame(token),
+            { expect: 'active_game', timeout: 3000, demo: () => null, failOnError: true },
+        );
+        if (live && data) {
+            this.ctx.store.setGame(data.game || null);
+        }
+        this._renderActive();
+    }
+
+    _renderActive() {
+        clear(this._active);
+        const game = this.ctx.store.game;
+        if (!game || !game.gameId) return;
+        this._active.appendChild(h('div', { class: 'card', style: { marginBottom: 'var(--sp-4)' } },
+            h('div', { class: 'card__body', style: { display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' } },
+                h('div', { style: { flex: 1, minWidth: '220px' } },
+                    h('div', { class: 'card__title' }, 'Live game in progress'),
+                    h('div', { class: 'field__hint', role: 'status', 'aria-atomic': 'true' },
+                        `Game #${game.gameId} against ${game.opponent || 'Opponent'} can be resumed.`)),
+                h('button', {
+                    class: 'btn btn--primary',
+                    onclick: () => this.ctx.router.go('/game/' + game.gameId),
+                }, 'Resume game'))));
+    }
+
+    _renderSignedOut() {
+        clear(this._body);
+        this._body.appendChild(h('div', { class: 'empty' },
+            h('div', {}, 'Sign in to browse your saved games.'),
+            h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '16px' } },
+                h('a', { class: 'btn btn--primary', href: '#/login' }, 'Sign in'),
+                h('a', { class: 'btn btn--ghost', href: '#/register' }, 'Create account'))));
+    }
+
+    _renderUnavailable(error) {
+        clear(this._body);
+        const detail = error && error.message ? error.message : 'Check the server and database connection.';
+        this._body.appendChild(h('div', { class: 'empty' },
+            h('div', {}, 'Saved games could not be loaded.'),
+            h('div', { class: 'field__hint', style: { marginTop: '8px' } }, detail)));
     }
 
     _render(games) {
@@ -91,7 +275,8 @@ export class ReplayListScreen extends Screen {
                                 h('div', { class: 'avatar avatar--sm' }, initials(g.opponent)),
                                 h('div', {},
                                     h('div', {}, g.opponent),
-                                    h('div', { style: { fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)' } }, formatElo(g.opponentElo)),
+                                    h('div', { style: { fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)' } },
+                                        g.rated ? formatElo(g.opponentElo) : 'Unrated'),
                                 )
                             )
                         ),
@@ -110,18 +295,6 @@ export class ReplayListScreen extends Screen {
         );
     }
 
-    _demo(username) {
-        // Any of the DEMO_GAMES ids works for the detail view.
-        return {
-            type: 'history',
-            games: [
-                { gameId: 'demo-scholars', opponent: 'Kai',    opponentElo: 1620, result: 'w', playedAt: Date.now() - 3600_000,     timeControl: '600+5',  moves: 7 },
-                { gameId: 'demo-fools',    opponent: 'Sable',  opponentElo: 1350, result: 'l', playedAt: Date.now() - 86_400_000,   timeControl: '300+3',  moves: 4 },
-                { gameId: 'demo-scholars', opponent: 'Marta',  opponentElo: 1874, result: 'w', playedAt: Date.now() - 2 * 86_400_000, timeControl: '600+5',  moves: 7 },
-                { gameId: 'demo-scholars', opponent: 'Rue',    opponentElo: 1980, result: 'd', playedAt: Date.now() - 3 * 86_400_000, timeControl: '900+10', moves: 7 },
-            ],
-        };
-    }
 }
 
 /* ─── Detail (move-by-move) ────────────────────────────── */
@@ -129,8 +302,7 @@ export class ReplayListScreen extends Screen {
 export class ReplayDetailScreen extends Screen {
     constructor(ctx, params) {
         super(ctx);
-        this.preview = true;
-        this._gameId = params.gameId;
+        this._gameId = Number(params.gameId);
         this._ply = 0;
         this._playing = false;
         this._playTimer = null;
@@ -202,16 +374,22 @@ export class ReplayDetailScreen extends Screen {
         this.renderer.pieceSetUrl = `assets/pieces/${this.ctx.store.prefs.pieceSet || 'classic'}.svg`;
         this._boot();
 
-        const { data, live } = await this.ctx.capability.request(
+        if (!Number.isSafeInteger(this._gameId) || this._gameId <= 0) {
+            this._renderLoadError('Invalid game ID.');
+            return;
+        }
+
+        const { data, live, error } = await this.ctx.capability.request(
             this.ctx.Outbound.getGame(this._gameId),
-            { expect: 'game', timeout: 1500, demo: () => this._demo() },
+            { expect: 'game', timeout: 5000, demo: () => null, failOnError: true },
         );
-        // Same live/demo split as the list screen — normalize only real
-        // payloads. The Scholar's / Fool's Mate demos still ship with the
-        // hand-authored snake_case positions shape that the render code
-        // has read since Phase 9 preview.
-        this._game = live ? this.ctx.Inbound.normalize(data) : data;
-        if (live) this.preview = false;
+        if (!live || !data) {
+            this._renderLoadError(error && error.message
+                ? error.message
+                : 'Replay could not be loaded. Check the server and database connection.');
+            return;
+        }
+        this._game = data;
         this._renderMeta();
         this._renderMoves();
         this._goto(0);
@@ -227,6 +405,13 @@ export class ReplayDetailScreen extends Screen {
             e.stopPropagation();
         };
         window.addEventListener('keydown', this._keyHandler);
+    }
+
+    _renderLoadError(message) {
+        clear(this._meta);
+        this._meta.appendChild(h('div', { class: 'empty' }, message));
+        clear(this._moveList);
+        this._moveList.appendChild(h('div', { class: 'move-list__empty' }, 'No replay loaded.'));
     }
 
     onUnmount() {
@@ -320,13 +505,15 @@ export class ReplayDetailScreen extends Screen {
                     h('div', { style: { flex: 1 } },
                         h('div', {}, g.white, h('span', { style: { color: 'var(--text-muted)', marginLeft: '6px' } }, formatElo(g.white_elo))),
                         h('div', { style: { color: 'var(--text-muted)', fontSize: 'var(--fs-xs)' } }, 'vs'),
-                        h('div', {}, g.black, h('span', { style: { color: 'var(--text-muted)', marginLeft: '6px' } }, formatElo(g.black_elo))),
+                        h('div', {}, g.black, h('span', { style: { color: 'var(--text-muted)', marginLeft: '6px' } },
+                            g.rated ? formatElo(g.black_elo) : 'Unrated')),
                     ),
                 ),
                 h('div', { style: { display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' } },
                     h('span', { class: 'badge' }, parseAndFormatTimeControl(g.time_control)),
                     h('span', { class: 'badge badge--accent' }, g.result || '*'),
                     h('span', { class: 'badge' }, reasonLabel(g.reason)),
+                    !g.rated ? h('span', { class: 'badge' }, 'AI game · Unrated') : null,
                 ),
             ),
         );
@@ -393,40 +580,4 @@ export class ReplayDetailScreen extends Screen {
         );
     }
 
-    _demo() {
-        // Two demo games available; both use SCHOLARS_MATE data with pseudo eval scores.
-        const evals = [0, 40, 30, 50, 30, 250, 200, 100000];
-        const positions = SCHOLARS_MATE.positions.map((p, i) => ({
-            fen: p.fen, san: p.san || '', from: p.from, to: p.to,
-            white_ms: p.white_time, black_ms: p.black_time,
-            think_ms: p.think_ms || 0,
-            eval_cp: evals[i] || 0,
-        }));
-        const isFools = this._gameId === 'demo-fools';
-        if (isFools) {
-            // Fool's Mate override
-            return {
-                type: 'game', game_id: this._gameId,
-                white: 'Sable', black: this.ctx.store.session.username || 'You',
-                white_elo: 1350, black_elo: 1200,
-                result: '0-1', reason: 'checkmate', event: "Demo — Fool's Mate",
-                time_control: '300+3', played_at: Date.now() - 86_400_000,
-                positions: [
-                    { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', san: '', eval_cp: 0 },
-                    { fen: 'rnbqkbnr/pppppppp/8/8/8/5P2/PPPPP1PP/RNBQKBNR b KQkq - 0 1', san: 'f3', from: 'f2', to: 'f3', eval_cp: -60 },
-                    { fen: 'rnbqkbnr/pppp1ppp/8/4p3/8/5P2/PPPPP1PP/RNBQKBNR w KQkq e6 0 2', san: 'e5', from: 'e7', to: 'e5', eval_cp: -40 },
-                    { fen: 'rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2', san: 'g4', from: 'g2', to: 'g4', eval_cp: -900 },
-                    { fen: 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3', san: 'Qh4#', from: 'd8', to: 'h4', eval_cp: -100000 },
-                ],
-            };
-        }
-        return {
-            type: 'game', game_id: this._gameId,
-            white: this.ctx.store.session.username || 'You', black: 'Kai',
-            white_elo: 1200, black_elo: 1620,
-            result: '1-0', reason: 'checkmate', event: "Demo — Scholar's Mate",
-            time_control: '600+5', played_at: Date.now() - 3_600_000,
-            positions,
-        };
-    }
 }

@@ -91,6 +91,29 @@ bool round_is_complete(const std::vector<StoredPairing>& pairings, int round) {
 
 } // namespace
 
+bool TournamentManager::valid_schedule(int64_t registration_deadline_unix,
+                                       int64_t first_round_start_unix,
+                                       int round_duration_seconds) {
+    return registration_deadline_unix > 0
+        && first_round_start_unix >= registration_deadline_unix + 30
+        && round_duration_seconds >= 60;
+}
+
+int64_t TournamentManager::earliest_round_start(int64_t first_round_start_unix,
+                                                int round_duration_seconds,
+                                                int round) {
+    if (round <= 0) return first_round_start_unix;
+    return first_round_start_unix + static_cast<int64_t>(round - 1) * round_duration_seconds;
+}
+
+std::optional<std::string> TournamentManager::no_show_result(bool white_checked_in,
+                                                             bool black_checked_in) {
+    if (white_checked_in && !black_checked_in) return std::string("1-0");
+    if (!white_checked_in && black_checked_in) return std::string("0-1");
+    if (!white_checked_in && !black_checked_in) return std::string("double_forfeit");
+    return std::nullopt;
+}
+
 std::set<PlayerPair> TournamentManager::gather_played(
         const std::vector<StoredPairing>& pairings) const {
     std::set<PlayerPair> out;
@@ -110,14 +133,32 @@ ManagerResult TournamentManager::join(int64_t tournament_id,
 
     auto t = find_tournament(db_, tournament_id);
     if (!t) { out.error = "tournament_not_found"; return out; }
-    if (t->status != "registration") {
-        out.error = "tournament_not_in_registration";
+    if (t->status != "registration" || !t->registration_open
+        || clock_.unix_seconds() >= t->registration_deadline_unix) {
+        out.error = "registration_closed";
         return out;
     }
 
-    JoinTournamentResult jr = add_participant(db_, tournament_id, player_id, player_elo);
+    JoinTournamentResult jr = add_participant(db_, tournament_id, player_id, player_elo,
+                                              clock_.unix_seconds());
     if (!jr.ok) { out.error = jr.error; return out; }
 
+    out.ok = true;
+    return out;
+}
+
+ManagerResult TournamentManager::leave(int64_t tournament_id, int64_t player_id) {
+    ManagerResult out;
+    auto t = find_tournament(db_, tournament_id);
+    if (!t) { out.error = "tournament_not_found"; return out; }
+    if (t->status != "registration" || !t->registration_open
+        || clock_.unix_seconds() >= t->registration_deadline_unix) {
+        out.error = "registration_closed";
+        return out;
+    }
+    auto removed = remove_participant(db_, tournament_id, player_id,
+                                      clock_.unix_seconds());
+    if (!removed.ok) { out.error = removed.error; return out; }
     out.ok = true;
     return out;
 }
@@ -143,20 +184,38 @@ ManagerResult TournamentManager::start(int64_t tournament_id, int64_t initiator_
     for (const auto& p : participants) if (!p.withdrawn) ++alive;
     if (alive < 2) { out.error = "not_enough_players"; return out; }
 
-    // Flip status and current_round in that order — the pairings insert
-    // is what actually starts round 1, so failing to insert leaves the
-    // tournament visibly non-empty (in_progress, round 1, no pairings)
-    // which the client can retry from cleanly.
-    if (!set_tournament_status(db_, tournament_id, "in_progress")) {
-        out.error = "set_status_failed"; return out;
-    }
-    if (!set_tournament_round(db_, tournament_id, 1)) {
-        out.error = "set_round_failed"; return out;
-    }
+    return set_registration(tournament_id, initiator_id, false);
+}
 
-    auto gr = generate_round_pairings(tournament_id, 1);
-    if (!gr.ok) return gr;
+ManagerResult TournamentManager::set_registration(int64_t tournament_id,
+                                                   int64_t initiator_id,
+                                                   bool open) {
+    ManagerResult out;
+    auto t = find_tournament(db_, tournament_id);
+    if (!t) { out.error = "tournament_not_found"; return out; }
+    if (t->created_by != initiator_id) { out.error = "not_creator"; return out; }
+    if (t->status != "registration" && t->status != "scheduled") {
+        out.error = "registration_state_locked"; return out;
+    }
+    if (open && clock_.unix_seconds() >= t->registration_deadline_unix) {
+        out.error = "registration_deadline_passed"; return out;
+    }
+    if (!set_registration_open(db_, tournament_id, open, clock_.unix_seconds())) {
+        out.error = "set_registration_failed"; return out;
+    }
+    out.ok = true;
+    return out;
+}
 
+ManagerResult TournamentManager::check_in(int64_t tournament_id, int round,
+                                          int64_t player_id) {
+    ManagerResult out;
+    std::string error;
+    if (round <= 0) { out.error = "invalid_round"; return out; }
+    if (!check_in_player(db_, tournament_id, round, player_id,
+                         clock_.unix_seconds(), error)) {
+        out.error = error; return out;
+    }
     out.ok = true;
     return out;
 }
@@ -218,30 +277,6 @@ ManagerResult TournamentManager::report_result(int64_t pairing_id,
         out.error = "set_pairing_result_failed"; return out;
     }
 
-    // Apply score/whites deltas.
-    if (is_bye) {
-        // +1 point, no colour change (byer did not play a real side).
-        if (!bump_participant(db_, p.tournament_id, p.white_player_id,
-                              /*score_delta=*/1.0, /*played_white=*/false,
-                              /*bye=*/true)) {
-            out.error = "bump_participant_failed"; return out;
-        }
-    } else {
-        double white_delta = 0.0, black_delta = 0.0;
-        if      (result == "1-0")     { white_delta = 1.0; black_delta = 0.0; }
-        else if (result == "0-1")     { white_delta = 0.0; black_delta = 1.0; }
-        else /* 1/2-1/2 */            { white_delta = 0.5; black_delta = 0.5; }
-
-        if (!bump_participant(db_, p.tournament_id, p.white_player_id,
-                              white_delta, /*played_white=*/true, /*bye=*/false)) {
-            out.error = "bump_participant_white_failed"; return out;
-        }
-        if (!bump_participant(db_, p.tournament_id, *p.black_player_id,
-                              black_delta, /*played_white=*/false, /*bye=*/false)) {
-            out.error = "bump_participant_black_failed"; return out;
-        }
-    }
-
     return maybe_advance_after_result(p.tournament_id, p.round);
 }
 
@@ -274,18 +309,10 @@ ManagerResult TournamentManager::generate_round_pairings(int64_t tournament_id,
                                                 pr.white_id, black, init_result);
         if (!ir.ok) { out.error = "insert_pairing_failed: " + ir.error; return out; }
 
-        // A bye is auto-scored the moment it is dealt — record the +1
-        // point and set received_bye = true here rather than making a
-        // caller send report_result("bye"). This matches how a human
-        // tournament runs — the bye is not something the byer plays.
-        if (pr.is_bye) {
-            if (!bump_participant(db_, tournament_id, pr.white_id,
-                                  /*score_delta=*/1.0,
-                                  /*played_white=*/false,
-                                  /*bye=*/true)) {
-                out.error = "bye_bump_failed"; return out;
-            }
-        }
+    }
+
+    if (!recompute_participant_totals(db_, tournament_id)) {
+        out.error = "recompute_standings_failed"; return out;
     }
 
     // After dealing the pairings we may find the round is already
@@ -312,6 +339,12 @@ ManagerResult TournamentManager::maybe_advance_after_result(
         return out;
     }
 
+    auto completed_round = db_.exec(
+        "UPDATE tournament_rounds SET status='completed', completed_at=now() "
+        "WHERE tournament_id=$1 AND round=$2 AND status<>'completed'",
+        {storage::Param::int64(tournament_id), storage::Param::int64(round)});
+    if (!completed_round.ok) { out.error = "complete_round_failed"; return out; }
+
     if (round >= t->rounds) {
         // Final round done — mark completed.
         if (!set_tournament_status(db_, tournament_id, "completed")) {
@@ -321,12 +354,142 @@ ManagerResult TournamentManager::maybe_advance_after_result(
         return out;
     }
 
-    // Advance the round counter and pair the next round.
+    // The next round remains scheduled. The maintenance tick starts it only
+    // after both its durable earliest-start timestamp and the prior result set.
     int next = round + 1;
     if (!set_tournament_round(db_, tournament_id, next)) {
         out.error = "set_round_failed"; return out;
     }
-    return generate_round_pairings(tournament_id, next);
+    out.ok = true;
+    return out;
+}
+
+ManagerResult TournamentManager::override_result(int64_t pairing_id,
+                                                 int64_t initiator_id,
+                                                 const std::string& result,
+                                                 const std::string& reason) {
+    ManagerResult out;
+    if (reason.empty()) { out.error = "override_reason_required"; return out; }
+    if (result != "1-0" && result != "0-1" && result != "1/2-1/2"
+        && result != "double_forfeit") {
+        out.error = "invalid_result"; return out;
+    }
+    auto q = db_.exec(
+        "SELECT p.tournament_id,p.round,t.created_by FROM tournament_pairings p "
+        "JOIN tournaments t ON t.id=p.tournament_id WHERE p.id=$1",
+        {storage::Param::int64(pairing_id)});
+    if (!q.ok || q.empty()) { out.error = "pairing_not_found"; return out; }
+    const int64_t tid = std::stoll(q.first().at(0));
+    const int round = std::stoi(q.first().at(1));
+    if (std::stoll(q.first().at(2)) != initiator_id) {
+        out.error = "not_creator"; return out;
+    }
+    if (!audit_and_override_result(db_, pairing_id, initiator_id, result, reason)) {
+        out.error = "override_failed"; return out;
+    }
+    return maybe_advance_after_result(tid, round);
+}
+
+ManagerResult TournamentManager::record_game_result(int64_t pairing_id,
+                                                    const std::string& result) {
+    ManagerResult out;
+    if (result != "1-0" && result != "0-1" && result != "1/2-1/2") {
+        out.error = "invalid_result"; return out;
+    }
+    auto pairing = find_pairing(db_, pairing_id);
+    if (!pairing) { out.error = "pairing_not_found"; return out; }
+    if (pairing->result != "pending") {
+        if (pairing->result == result) { out.ok = true; return out; }
+        out.error = "result_already_recorded"; return out;
+    }
+    if (!set_pairing_result(db_, pairing_id, result, "game")) {
+        // A concurrent completion may have won the conditional update.
+        pairing = find_pairing(db_, pairing_id);
+        if (pairing && pairing->result == result) { out.ok = true; return out; }
+        out.error = "set_pairing_result_failed"; return out;
+    }
+    return maybe_advance_after_result(pairing->tournament_id, pairing->round);
+}
+
+ManagerResult TournamentManager::start_due_round(int64_t tournament_id, int round,
+                                                 int64_t now_unix) {
+    ManagerResult out;
+    auto claimed = db_.exec(
+        "UPDATE tournament_rounds tr SET status='live',actual_start_at=to_timestamp($3) "
+        "WHERE tr.tournament_id=$1 AND tr.round=$2 AND tr.status='scheduled' "
+        " AND tr.earliest_start_at<=to_timestamp($3) "
+        " AND ($2=1 OR EXISTS (SELECT 1 FROM tournament_rounds prev "
+        "   WHERE prev.tournament_id=$1 AND prev.round=$2-1 AND prev.status='completed')) "
+        "RETURNING round",
+        {storage::Param::int64(tournament_id), storage::Param::int64(round),
+         storage::Param::int64(now_unix)});
+    if (!claimed.ok) { out.error = claimed.error; return out; }
+    if (claimed.empty()) { out.ok = true; return out; } // another tick claimed it
+
+    if (!set_tournament_status(db_, tournament_id, "in_progress")
+        || !set_tournament_round(db_, tournament_id, round)) {
+        out.error = "start_round_state_failed"; return out;
+    }
+    auto existing = get_pairings_for_round(db_, tournament_id, round);
+    if (existing.empty()) return generate_round_pairings(tournament_id, round);
+    out.ok = true;
+    return out;
+}
+
+ManagerResult TournamentManager::adjudicate_no_shows(int64_t tournament_id,
+                                                     int round) {
+    ManagerResult out;
+    const auto checked = get_round_checkins(db_, tournament_id, round);
+    const auto pairings = get_pairings_for_round(db_, tournament_id, round);
+    for (const auto& p : pairings) {
+        if (p.result != "pending" || !p.black_player_id) continue;
+        auto result = no_show_result(checked.count(p.white_player_id) != 0,
+                                     checked.count(*p.black_player_id) != 0);
+        if (!result) continue; // both arrived: Phase 2's game result will decide it
+        if (!set_pairing_result(db_, p.id, *result, "forfeit")) {
+            out.error = "no_show_adjudication_failed"; return out;
+        }
+    }
+    return maybe_advance_after_result(tournament_id, round);
+}
+
+ManagerResult TournamentManager::maintenance_tick() {
+    ManagerResult out;
+    const int64_t now = clock_.unix_seconds();
+
+    auto closed = db_.exec(
+        "UPDATE tournaments SET registration_open=FALSE,status='scheduled', "
+        " registration_closed_at=COALESCE(registration_closed_at,to_timestamp($1)) "
+        "WHERE status='registration' AND registration_deadline<=to_timestamp($1)",
+        {storage::Param::int64(now)});
+    if (!closed.ok) { out.error = closed.error; return out; }
+
+    auto due = db_.exec(
+        "SELECT tr.tournament_id,tr.round FROM tournament_rounds tr "
+        "JOIN tournaments t ON t.id=tr.tournament_id "
+        "WHERE tr.status='scheduled' AND tr.earliest_start_at<=to_timestamp($1) "
+        " AND t.status IN ('scheduled','in_progress') "
+        " AND (tr.round=1 OR EXISTS (SELECT 1 FROM tournament_rounds prev "
+        "  WHERE prev.tournament_id=tr.tournament_id AND prev.round=tr.round-1 AND prev.status='completed')) "
+        "ORDER BY tr.earliest_start_at,tr.tournament_id",
+        {storage::Param::int64(now)});
+    if (!due.ok) { out.error = due.error; return out; }
+    for (const auto& row : due.rows) {
+        auto r = start_due_round(std::stoll(row.at(0)), std::stoi(row.at(1)), now);
+        if (!r.ok) return r;
+    }
+
+    auto expired = db_.exec(
+        "SELECT tournament_id,round FROM tournament_rounds "
+        "WHERE status='live' AND check_in_closes_at<=to_timestamp($1)",
+        {storage::Param::int64(now)});
+    if (!expired.ok) { out.error = expired.error; return out; }
+    for (const auto& row : expired.rows) {
+        auto r = adjudicate_no_shows(std::stoll(row.at(0)), std::stoi(row.at(1)));
+        if (!r.ok) return r;
+    }
+    out.ok = true;
+    return out;
 }
 
 // ── get_state ────────────────────────────────────────────────────────
@@ -338,6 +501,7 @@ std::optional<TournamentState> TournamentManager::get_state(int64_t tournament_i
     TournamentState st;
     st.tournament   = *t;
     st.all_pairings = get_pairings(db_, tournament_id);
+    st.rounds       = get_rounds(db_, tournament_id);
 
     auto participants = get_participants(db_, tournament_id);
     auto buchholz     = compute_buchholz(participants, st.all_pairings);

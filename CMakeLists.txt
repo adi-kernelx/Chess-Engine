@@ -61,6 +61,7 @@ set(SOURCES
     src/application/analysis_service.cpp
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
+    src/application/tournament_runtime_service.cpp
     # LLD-4.2 — completion service (listener) + snapshot idempotency
     src/application/game_completion_service.cpp
     src/game/matchmaker.cpp
@@ -136,6 +137,19 @@ add_executable(test_move_gen
 )
 target_include_directories(test_move_gen PRIVATE src)
 target_link_libraries(test_move_gen PRIVATE Threads::Threads)
+
+# Bundled puzzle positions are frontend data, but their legal target lists are
+# generated/validated against the same authoritative C++ move generator used
+# by live games. This keeps the offline puzzle UI from duplicating chess rules.
+add_executable(test_puzzle_data
+    tests/test_puzzle_data.cpp
+    src/chess/zobrist.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+)
+target_include_directories(test_puzzle_data PRIVATE src third_party)
+target_compile_definitions(test_puzzle_data PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_puzzle_data PRIVATE Threads::Threads)
 
 # Test: Notation & PGN (Phase 3.3)
 add_executable(test_notation
@@ -592,6 +606,7 @@ add_executable(test_auth_required
     src/application/analysis_service.cpp
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
+    src/application/tournament_runtime_service.cpp
     src/protocol/json_codec.cpp
     src/protocol/request_pipeline.cpp
     src/net/socket_message_sink.cpp
@@ -651,6 +666,7 @@ add_executable(test_spectator
     src/application/analysis_service.cpp
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
+    src/application/tournament_runtime_service.cpp
     src/protocol/json_codec.cpp
     src/protocol/request_pipeline.cpp
     src/net/socket_message_sink.cpp
@@ -709,6 +725,7 @@ add_executable(test_replay
     src/application/analysis_service.cpp
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
+    src/application/tournament_runtime_service.cpp
     src/protocol/json_codec.cpp
     src/protocol/request_pipeline.cpp
     src/net/socket_message_sink.cpp
@@ -768,6 +785,7 @@ add_executable(test_anti_cheat
     src/application/analysis_service.cpp
     src/game/handlers/tournament_handler.cpp
     src/application/tournament_service.cpp
+    src/application/tournament_runtime_service.cpp
     src/protocol/json_codec.cpp
     src/protocol/request_pipeline.cpp
     src/net/socket_message_sink.cpp
@@ -994,6 +1012,34 @@ add_executable(test_tournament_service
 )
 target_include_directories(test_tournament_service PRIVATE src third_party)
 target_link_libraries(test_tournament_service PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
+
+# Phase 2 live tournament runtime: reserved seats, scheduled room materialization,
+# persistence-driven pairing completion, recovery, and idempotency.
+add_executable(test_tournament_runtime
+    tests/test_tournament_runtime.cpp
+    src/core/logger.cpp
+    src/core/uuid.cpp
+    src/chess/zobrist.cpp
+    src/chess/transposition_table.cpp
+    src/chess/board.cpp
+    src/chess/move_gen.cpp
+    src/chess/notation.cpp
+    src/chess/evaluator.cpp
+    src/chess/engine.cpp
+    src/game/ai_player.cpp
+    src/game/game_room.cpp
+    src/game/room_manager.cpp
+    src/application/game_completion_service.cpp
+    src/application/tournament_runtime_service.cpp
+    src/tournament/swiss.cpp
+    src/tournament/tournament_repo.cpp
+    src/tournament/tournament_manager.cpp
+    src/storage/database.cpp
+    src/storage/storage_error.cpp
+)
+target_include_directories(test_tournament_runtime PRIVATE src third_party)
+target_compile_definitions(test_tournament_runtime PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_tournament_runtime PRIVATE Threads::Threads PostgreSQL::PostgreSQL)
 
 # Test: LLD-4.1 GameEvents / GameSnapshot / listener plumbing.
 # Pure logic — no DB, no sockets. Verifies add/remove_listener,

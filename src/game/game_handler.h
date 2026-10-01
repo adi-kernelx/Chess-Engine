@@ -28,12 +28,14 @@
  *     { "type": "cancel_queue" }
  *     { "type": "play_ai",         "access_token": "…", "difficulty": "medium", "time_base": 600, "time_inc": 5 }
  *     { "type": "list_games" }
- *     { "type": "game_state" }
+ *     { "type": "game_state",      "access_token": "…" }
+ *     { "type": "get_active_game", "access_token": "…" }
  *     { "type": "list_live_games" }                                     // Phase 9.1
  *     { "type": "spectate",        "access_token": "…", "game_id": 1 }  // Phase 9.1
  *     { "type": "stop_spectating", "game_id": 1 }                       // Phase 9.1
  *
- *   Auth-required routes (create_game/join_game/quick_play/play_ai/spectate/
+ *   Auth-required routes (create_game/join_game/quick_play/play_ai/game_state/
+ *   get_active_game/spectate/
  *   analyze_game/create_tournament/join_tournament/start_tournament/
  *   report_tournament_result) reply with:
  *     { "type": "error", "code": "auth_required", "message": "…" }
@@ -73,6 +75,7 @@
 #include "application/ports/game_store.h"
 #include "application/ports/player_queries.h"
 #include "application/tournament_service.h"
+#include "application/tournament_runtime_service.h"
 #include "game/ai_player.h"
 #include "game/handlers/analysis_handler.h"
 #include "game/handlers/gameplay_handler.h"
@@ -103,6 +106,9 @@ public:
     /// gameplay service (room+queue cleanup); the unmigrated families
     /// currently have no disconnect hook.
     void on_player_disconnect(int connection_fd);
+
+    /// Called by the transport maintenance tick.
+    void expire_disconnected_games();
 
     /// Setters used by main during composition.
     void set_connection_lookup(std::function<net::Connection*(int fd)> lookup) {
@@ -164,6 +170,7 @@ private:
     // ── LLD-2.4 objects, constructed on register_handlers ──
 
     std::unique_ptr<application::TournamentService>       tournament_service_;
+    std::unique_ptr<application::TournamentRuntimeService> tournament_runtime_service_;
     std::unique_ptr<handlers::TournamentHandler>          tournament_handler_;
 
     // ── LLD-4.2 objects, constructed on register_handlers ──

@@ -98,6 +98,7 @@ std::string encode_move_made(const MoveMadeResponse& r) {
     append_field(out, "white_time", json(r.white_time_ms), false);
     append_field(out, "black_time", json(r.black_time_ms), false);
     append_field(out, "fen",        json(r.fen),         false);
+    append_field(out, "legal_moves", json(r.legal_moves), false);
     if (r.promotion.has_value()) {
         append_field(out, "promotion", json(*r.promotion), false);
     }
@@ -147,6 +148,10 @@ std::string encode_game_state(const GameStateResponse& r) {
         moves.push_back(std::move(entry));
     }
     append_field(out, "moves", moves, false);
+    append_field(out, "legal_moves", json(r.legal_moves), false);
+    if (r.draw_offer_from.has_value()) {
+        append_field(out, "draw_offer_from", json(*r.draw_offer_from), false);
+    }
 
     if (r.result.has_value())  append_field(out, "result", json(*r.result), false);
     if (r.reason.has_value())  append_field(out, "reason", json(*r.reason), false);

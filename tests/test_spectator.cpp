@@ -83,6 +83,9 @@ std::string source_path(const std::string& rel) {
 bool prepare_schema(Database& db) {
     std::string err;
     if (!db.run_script(
+            "DROP TABLE IF EXISTS tournament_result_overrides;"
+            "DROP TABLE IF EXISTS tournament_round_checkins;"
+            "DROP TABLE IF EXISTS tournament_rounds;"
             "DROP TABLE IF EXISTS tournament_pairings;"
             "DROP TABLE IF EXISTS tournament_players;"
             "DROP TABLE IF EXISTS tournaments;"
@@ -104,6 +107,10 @@ bool prepare_schema(Database& db) {
         "src/storage/migrations/0004_lld4_completion_uuid.sql"));
     if (mig4.empty() || !db.apply_migration("0004_lld4_completion_uuid",
                                             mig4, applied, err)) return false;
+    const auto mig9 = read_file(source_path(
+        "src/storage/migrations/0009_persist_unrated_ai_games.sql"));
+    if (mig9.empty() || !db.apply_migration("0009_persist_unrated_ai_games",
+                                            mig9, applied, err)) return false;
     return true;
 }
 

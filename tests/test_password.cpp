@@ -210,7 +210,10 @@ static void reset(Database& db) {
     // 9 cheat_reports/tournaments) before dropping players itself, or the FK
     // constraints leave the schema half-loaded and later inserts fail.
     std::string err;
-    db.run_script("DROP TABLE IF EXISTS tournament_pairings; "
+    db.run_script("DROP TABLE IF EXISTS tournament_result_overrides; "
+                  "DROP TABLE IF EXISTS tournament_round_checkins; "
+                  "DROP TABLE IF EXISTS tournament_rounds; "
+                  "DROP TABLE IF EXISTS tournament_pairings; "
                   "DROP TABLE IF EXISTS tournament_players; "
                   "DROP TABLE IF EXISTS tournaments; "
                   "DROP TABLE IF EXISTS cheat_reports; "
@@ -249,13 +252,13 @@ static void test_service(Database& db) {
         reset(db);
         auto r = register_password_user(db, "Adi", "hunter2!");
         if (r.status != RegisterResult::Status::Ok) return false;
-        if (r.username != "Adi" || r.elo_rating != 1200) return false;
+        if (r.username != "Adi" || r.elo_rating != 800) return false;
 
         auto l = authenticate_password(db, "adi", "hunter2!");
         return l.status == LoginResult::Status::Ok &&
                l.player_id == r.player_id &&
                l.username == "Adi" &&        // original case is what we return
-               l.elo_rating == 1200 &&
+               l.elo_rating == 800 &&
                !l.hash_needs_upgrade;        // fresh hash, nothing to upgrade
     });
 

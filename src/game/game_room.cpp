@@ -52,6 +52,7 @@ std::string snapshot_termination_reason(chess::GameStatus status) {
         case GameStatus::DRAW_AGREEMENT:             return "draw_agreement";
         case GameStatus::RESIGNATION:                return "resignation";
         case GameStatus::TIMEOUT:                    return "timeout";
+        case GameStatus::ABANDONMENT:                return "abandonment";
         default:                                     return "unknown";
     }
 }
@@ -90,7 +91,8 @@ GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_na
 }
 
 GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_name,
-                   int creator_fd, const TimeControl& tc, AIDifficulty difficulty)
+                   int creator_fd, const TimeControl& tc, AIDifficulty difficulty,
+                   int64_t db_player_id, int elo)
     : id_(id)
     , state_(RoomState::IN_PROGRESS)  // AI games start immediately
     , board_(Board::starting_position())
@@ -103,7 +105,9 @@ GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_na
     // Human is seated as White
     white_.connection_fd = creator_fd;
     white_.player_id     = creator_id;
+    white_.db_player_id  = db_player_id;
     white_.username      = creator_name;
+    white_.elo           = elo;
     white_.remaining_ms  = tc.base_time_ms;
     white_.connected     = true;
 
@@ -120,6 +124,29 @@ GameRoom::GameRoom(GameId id, PlayerId creator_id, const std::string& creator_na
     white_.clock_start = game_start_time_;
 }
 
+GameRoom::GameRoom(GameId id, int64_t tournament_id, int64_t pairing_id,
+                   int64_t white_db_id, const std::string& white_name, int white_elo,
+                   int64_t black_db_id, const std::string& black_name, int black_elo,
+                   const TimeControl& tc)
+    : id_(id)
+    , state_(RoomState::WAITING)
+    , board_(Board::starting_position())
+    , time_control_(tc)
+    , result_("*")
+    , is_tournament_reserved_(true)
+    , tournament_id_(tournament_id)
+    , pairing_id_(pairing_id)
+{
+    white_.db_player_id = white_db_id;
+    white_.username = white_name;
+    white_.elo = white_elo;
+    white_.remaining_ms = tc.base_time_ms;
+    black_.db_player_id = black_db_id;
+    black_.username = black_name;
+    black_.elo = black_elo;
+    black_.remaining_ms = tc.base_time_ms;
+}
+
 GameRoom::~GameRoom() = default;
 
 // ============================================================
@@ -134,13 +161,28 @@ GameRoom::LockAndDrain::~LockAndDrain() {
     // Snapshot any pending completion under the lock, then release.
     std::unique_ptr<GameCompleted>    ev;
     std::vector<GameEventListenerPtr> to_fire;
+    std::function<void()>             before_completion;
     if (room_.pending_completed_) {
         ev = std::move(room_.pending_completed_);
         to_fire = std::move(room_.pending_listeners_snapshot_);
+        before_completion = std::move(room_.pending_before_completion_);
     }
     lock_.unlock();
 
     if (!ev) return;
+    if (before_completion) {
+        try {
+            before_completion();
+        } catch (const std::exception& e) {
+            core::Logger::warn("game", "GameRoom",
+                "Pre-completion callback threw for game "
+                + std::to_string(ev->snapshot.room_id) + ": " + e.what());
+        } catch (...) {
+            core::Logger::warn("game", "GameRoom",
+                "Pre-completion callback threw non-standard exception for game "
+                + std::to_string(ev->snapshot.room_id));
+        }
+    }
     for (const auto& listener : to_fire) {
         if (!listener) continue;
         try {
@@ -182,6 +224,8 @@ void GameRoom::build_snapshot_locked(GameSnapshot& out) const {
     // Caller holds mutex_.
     out.room_id            = id_;
     out.is_ai_game         = is_ai_;
+    out.tournament_id      = tournament_id_;
+    out.pairing_id         = pairing_id_;
     out.status             = game_status_;
     out.result             = result_;
     out.termination_reason = snapshot_termination_reason(game_status_);
@@ -267,7 +311,7 @@ bool GameRoom::join(PlayerId player_id, const std::string& player_name, int conn
     {
         LockAndDrain lock(*this);
 
-        if (state_ != RoomState::WAITING) return false;
+        if (state_ != RoomState::WAITING || is_tournament_reserved_) return false;
         if (!black_.is_empty()) return false;
         revision_.fetch_add(1, std::memory_order_release);
 
@@ -294,6 +338,104 @@ bool GameRoom::join(PlayerId player_id, const std::string& player_name, int conn
         ev.is_ai_game  = false;
     }
     emit_started(ev);
+    return true;
+}
+
+GameRoom::ReservedBindResult GameRoom::bind_reserved_player(
+        int64_t db_player_id, PlayerId local_player_id, int connection_fd) {
+    ReservedBindResult result;
+    GameStarted ev;
+    bool fire_started = false;
+    {
+        LockAndDrain lock(*this);
+        if (!is_tournament_reserved_) {
+            result.error = "not_tournament_room";
+            return result;
+        }
+        if (state_ == RoomState::FINISHED) {
+            result.error = "game_finished";
+            return result;
+        }
+        PlayerSlot* seat = nullptr;
+        if (white_.db_player_id == db_player_id) {
+            seat = &white_; result.color = Color::WHITE;
+        } else if (black_.db_player_id == db_player_id) {
+            seat = &black_; result.color = Color::BLACK;
+        } else {
+            result.error = "not_reserved_player";
+            return result;
+        }
+        if (!seat->tournament_checked_in) {
+            result.error = "round_check_in_required";
+            return result;
+        }
+        if (seat->connected && seat->connection_fd != connection_fd) {
+            result.error = "seat_already_connected";
+            return result;
+        }
+        if (!seat->connected || seat->connection_fd != connection_fd) {
+            revision_.fetch_add(1, std::memory_order_release);
+            seat->player_id = local_player_id;
+            seat->connection_fd = connection_fd;
+            seat->connected = true;
+            seat->disconnected_at = {};
+        }
+        if (reserved_open_ && state_ == RoomState::WAITING
+            && white_.connected && black_.connected) {
+            state_ = RoomState::IN_PROGRESS;
+            game_start_time_ = clock_->steady_now();
+            wall_start_ = clock_->system_now();
+            white_.clock_start = game_start_time_;
+            ev.room_id = id_;
+            ev.white_db_id = white_.db_player_id;
+            ev.black_db_id = black_.db_player_id;
+            ev.tournament_id = tournament_id_;
+            ev.pairing_id = pairing_id_;
+            fire_started = true;
+            result.started = true;
+        }
+        result.ok = true;
+    }
+    if (fire_started) emit_started(ev);
+    return result;
+}
+
+bool GameRoom::allow_reserved_player(int64_t db_player_id) {
+    LockAndDrain lock(*this);
+    if (!is_tournament_reserved_ || state_ == RoomState::FINISHED) return false;
+    if (white_.db_player_id == db_player_id) {
+        white_.tournament_checked_in = true;
+        return true;
+    }
+    if (black_.db_player_id == db_player_id) {
+        black_.tournament_checked_in = true;
+        return true;
+    }
+    return false;
+}
+
+bool GameRoom::open_reserved() {
+    GameStarted ev;
+    bool fire_started = false;
+    {
+        LockAndDrain lock(*this);
+        if (!is_tournament_reserved_ || state_ == RoomState::FINISHED) return false;
+        reserved_open_ = true;
+        if (state_ == RoomState::WAITING && white_.connected && black_.connected) {
+            revision_.fetch_add(1, std::memory_order_release);
+            state_ = RoomState::IN_PROGRESS;
+            game_start_time_ = clock_->steady_now();
+            wall_start_ = clock_->system_now();
+            white_.clock_start = game_start_time_;
+            ev.room_id = id_;
+            ev.white_db_id = white_.db_player_id;
+            ev.black_db_id = black_.db_player_id;
+            ev.tournament_id = tournament_id_;
+            ev.pairing_id = pairing_id_;
+            fire_started = true;
+        }
+    }
+    if (fire_started) emit_started(ev);
     return true;
 }
 
@@ -374,6 +516,13 @@ GameRoom::MoveResult GameRoom::submit_move(int connection_fd, Square from, Squar
     // --- Execute the move on the authoritative board ---
     board_.make_move(matched_move);
 
+    // Making a move is an implicit decline when the mover is the offeree.
+    if (draw_offer_from_.has_value() && *draw_offer_from_ != player_color) {
+        draw_offer_from_.reset();
+        draw_offer_created_at_ = {};
+        result.draw_offer_declined = true;
+    }
+
     // --- Record the move ---
     move_history_.push_back({matched_move, san, think_time_ms});
 
@@ -409,6 +558,12 @@ GameRoom::MoveResult GameRoom::submit_move(int connection_fd, Square from, Squar
     result.game_status  = status;
     result.white_time_ms = white_.remaining_ms;
     result.black_time_ms = black_.remaining_ms;
+    result.fen = board_.to_fen();
+    if (status == GameStatus::ONGOING) {
+        for (const Move& move : move_gen::generate_legal_moves(board_)) {
+            result.legal_moves.push_back(move.to_uci());
+        }
+    }
 
     return result;
 }
@@ -438,6 +593,15 @@ GameRoom::MoveResult GameRoom::submit_move_ai(Square from, Square to,
 
     if (board_.side_to_move() != ai_color_) {
         result.error = "It is not the AI's turn";
+        return result;
+    }
+
+    // Check before applying a move or granting Fischer increment.
+    if (check_flag()) {
+        (ai_color_ == Color::WHITE ? white_ : black_).remaining_ms = 0;
+        finish_game(GameStatus::TIMEOUT, ai_color_ == Color::WHITE ? "0-1" : "1-0");
+        result.game_status = GameStatus::TIMEOUT;
+        result.error = "AI clock expired";
         return result;
     }
 
@@ -504,6 +668,12 @@ GameRoom::MoveResult GameRoom::submit_move_ai(Square from, Square to,
     result.game_status  = status;
     result.white_time_ms = white_.remaining_ms;
     result.black_time_ms = black_.remaining_ms;
+    result.fen = board_.to_fen();
+    if (status == GameStatus::ONGOING) {
+        for (const Move& move : move_gen::generate_legal_moves(board_)) {
+            result.legal_moves.push_back(move.to_uci());
+        }
+    }
 
     return result;
 }
@@ -512,7 +682,7 @@ GameRoom::MoveResult GameRoom::submit_move_ai(Square from, Square to,
 // Resign
 // ============================================================
 
-bool GameRoom::resign(int connection_fd) {
+bool GameRoom::resign(int connection_fd, std::function<void()> on_committed) {
     LockAndDrain lock(*this);
     revision_.fetch_add(1, std::memory_order_release);
 
@@ -522,7 +692,167 @@ bool GameRoom::resign(int connection_fd) {
     if (player_color == Color::NONE) return false;
 
     std::string game_result = (player_color == Color::WHITE) ? "0-1" : "1-0";
+    pending_before_completion_ = std::move(on_committed);
     finish_game(GameStatus::RESIGNATION, game_result);
+    return true;
+}
+
+bool GameRoom::offer_draw(int connection_fd, std::string& error) {
+    LockAndDrain lock(*this);
+    if (state_ != RoomState::IN_PROGRESS) {
+        error = "Game is not in progress";
+        return false;
+    }
+    if (is_ai_) {
+        error = "Draw offers are only available in human games";
+        return false;
+    }
+    const Color offerer = color_of(connection_fd);
+    if (offerer == Color::NONE) {
+        error = "You are not a player in this game";
+        return false;
+    }
+    const PlayerSlot& opponent = offerer == Color::WHITE ? black_ : white_;
+    if (!opponent.connected) {
+        error = "Your opponent is currently disconnected";
+        return false;
+    }
+    if (draw_offer_from_.has_value()) {
+        error = *draw_offer_from_ == offerer
+            ? "You already offered a draw"
+            : "Respond to your opponent's draw offer first";
+        return false;
+    }
+    revision_.fetch_add(1, std::memory_order_release);
+    draw_offer_from_ = offerer;
+    draw_offer_created_at_ = clock_->steady_now();
+    return true;
+}
+
+bool GameRoom::respond_to_draw(int connection_fd, bool accept, std::string& error) {
+    LockAndDrain lock(*this);
+    if (state_ != RoomState::IN_PROGRESS || !draw_offer_from_.has_value()) {
+        error = "There is no pending draw offer";
+        return false;
+    }
+    const Color responder = color_of(connection_fd);
+    if (responder == Color::NONE) {
+        error = "You are not a player in this game";
+        return false;
+    }
+    if (responder == *draw_offer_from_) {
+        error = "Only your opponent can respond to this draw offer";
+        return false;
+    }
+
+    revision_.fetch_add(1, std::memory_order_release);
+    draw_offer_from_.reset();
+    draw_offer_created_at_ = {};
+    if (accept) finish_game(GameStatus::DRAW_AGREEMENT, "1/2-1/2");
+    return true;
+}
+
+Color GameRoom::expire_draw_offer(std::chrono::milliseconds ttl) {
+    LockAndDrain lock(*this);
+    if (state_ != RoomState::IN_PROGRESS || !draw_offer_from_.has_value()) {
+        return Color::NONE;
+    }
+    if (clock_->steady_now() - draw_offer_created_at_ < ttl) return Color::NONE;
+
+    const Color offerer = *draw_offer_from_;
+    revision_.fetch_add(1, std::memory_order_release);
+    draw_offer_from_.reset();
+    draw_offer_created_at_ = {};
+    return offerer;
+}
+
+bool GameRoom::offer_rematch(int connection_fd, std::string& error) {
+    LockAndDrain lock(*this);
+    if (state_ != RoomState::FINISHED) {
+        error = "The current game has not finished";
+        return false;
+    }
+    if (is_ai_) {
+        error = "AI rematches start immediately";
+        return false;
+    }
+    if (is_tournament_reserved_) {
+        error = "Tournament games do not support rematches";
+        return false;
+    }
+    const Color offerer = color_of(connection_fd);
+    if (offerer == Color::NONE) {
+        error = "You are not a player in this game";
+        return false;
+    }
+    const PlayerSlot& opponent = offerer == Color::WHITE ? black_ : white_;
+    if (!opponent.connected || opponent.connection_fd < 0) {
+        error = "Your opponent is no longer connected";
+        return false;
+    }
+    if (rematch_offer_from_.has_value()) {
+        error = *rematch_offer_from_ == offerer
+            ? "You already offered a rematch"
+            : "Respond to your opponent's rematch offer first";
+        return false;
+    }
+
+    revision_.fetch_add(1, std::memory_order_release);
+    rematch_offer_from_ = offerer;
+    rematch_offer_created_at_ = clock_->steady_now();
+    return true;
+}
+
+bool GameRoom::respond_to_rematch(int connection_fd, bool accept,
+                                  Color& offerer, std::string& error) {
+    LockAndDrain lock(*this);
+    offerer = Color::NONE;
+    if (state_ != RoomState::FINISHED || !rematch_offer_from_.has_value()) {
+        error = "There is no pending rematch offer";
+        return false;
+    }
+    const Color responder = color_of(connection_fd);
+    if (responder == Color::NONE) {
+        error = "You are not a player in this game";
+        return false;
+    }
+    if (responder == *rematch_offer_from_) {
+        error = "Only your opponent can respond to this rematch offer";
+        return false;
+    }
+
+    offerer = *rematch_offer_from_;
+    revision_.fetch_add(1, std::memory_order_release);
+    rematch_offer_from_.reset();
+    rematch_offer_created_at_ = {};
+    (void)accept; // Creation belongs to GameplayService, outside this lock.
+    return true;
+}
+
+Color GameRoom::expire_rematch_offer(std::chrono::milliseconds ttl) {
+    LockAndDrain lock(*this);
+    if (state_ != RoomState::FINISHED || !rematch_offer_from_.has_value()) {
+        return Color::NONE;
+    }
+    if (clock_->steady_now() - rematch_offer_created_at_ < ttl) return Color::NONE;
+
+    const Color offerer = *rematch_offer_from_;
+    revision_.fetch_add(1, std::memory_order_release);
+    rematch_offer_from_.reset();
+    rematch_offer_created_at_ = {};
+    return offerer;
+}
+
+bool GameRoom::expire_on_time() {
+    LockAndDrain lock(*this);
+    if (state_ != RoomState::IN_PROGRESS || !check_flag()) return false;
+
+    const Color flagged = board_.side_to_move();
+    PlayerSlot& slot = flagged == Color::WHITE ? white_ : black_;
+    slot.remaining_ms = 0;
+
+    revision_.fetch_add(1, std::memory_order_release);
+    finish_game(GameStatus::TIMEOUT, flagged == Color::WHITE ? "0-1" : "1-0");
     return true;
 }
 
@@ -532,16 +862,30 @@ bool GameRoom::resign(int connection_fd) {
 
 void GameRoom::on_disconnect(int connection_fd) {
     LockAndDrain lock(*this);
-    revision_.fetch_add(1, std::memory_order_release);
 
+    PlayerSlot* disconnected = nullptr;
     if (white_.connection_fd == connection_fd) {
-        white_.connected = false;
+        disconnected = &white_;
     } else if (black_.connection_fd == connection_fd) {
-        black_.connected = false;
+        disconnected = &black_;
     }
+    if (!disconnected || !disconnected->connected) return;
+
+    revision_.fetch_add(1, std::memory_order_release);
+    disconnected->connected = false;
+    disconnected->disconnected_at = clock_->steady_now();
+    // A numeric OS descriptor can be reused immediately by an unrelated new
+    // socket. Do not leave it attached to a disconnected seat: reconnect is
+    // resolved by the durable database player id, not by this transient fd.
+    disconnected->connection_fd = -1;
+
+    // Finished rooms remain briefly available for rematch negotiation. A
+    // closed transport must still be detached so an offer is never sent to a
+    // recycled descriptor and the remaining player gets a clear rejection.
+    if (state_ == RoomState::FINISHED) return;
 
     // If the game hasn't started yet and the creator leaves, mark finished
-    if (state_ == RoomState::WAITING) {
+    if (state_ == RoomState::WAITING && !is_tournament_reserved_) {
         finish_game(GameStatus::RESIGNATION, "*");
     }
     // If the game is in progress, the clock keeps running.
@@ -557,14 +901,75 @@ bool GameRoom::on_reconnect(PlayerId player_id, int new_fd) {
     if (white_.player_id == player_id) {
         white_.connection_fd = new_fd;
         white_.connected = true;
+        white_.disconnected_at = {};
         return true;
     } else if (black_.player_id == player_id) {
         black_.connection_fd = new_fd;
         black_.connected = true;
+        black_.disconnected_at = {};
         return true;
     }
 
     return false;
+}
+
+bool GameRoom::on_reconnect_db_player(int64_t db_player_id, int new_fd) {
+    if (is_tournament_game()) {
+        return bind_reserved_player(db_player_id,
+            static_cast<PlayerId>(db_player_id), new_fd).ok;
+    }
+    LockAndDrain lock(*this);
+    if (db_player_id <= 0) return false;
+
+    PlayerSlot* seat = nullptr;
+    if (white_.db_player_id == db_player_id) seat = &white_;
+    else if (black_.db_player_id == db_player_id) seat = &black_;
+    if (!seat) return false;
+    // State requests are intentionally idempotent. The already-bound socket
+    // may request another snapshot after authentication refresh/reconciliation.
+    if (seat->connected) {
+        if (seat->connection_fd == new_fd) return true;
+        // Only finished-room rematch recovery may replace an apparently-live
+        // old descriptor by durable identity. Active games retain their
+        // stricter disconnect-then-rebind contract.
+        if (state_ != RoomState::FINISHED) return false;
+    }
+
+    revision_.fetch_add(1, std::memory_order_release);
+    seat->connection_fd = new_fd;
+    seat->connected = true;
+    seat->disconnected_at = {};
+    return true;
+}
+
+bool GameRoom::expire_disconnected(std::chrono::milliseconds grace) {
+    LockAndDrain lock(*this);
+    if (state_ != RoomState::IN_PROGRESS) return false;
+
+    const auto now = clock_->steady_now();
+    const bool white_expired = !white_.connected
+        && now - white_.disconnected_at >= grace;
+    const bool black_expired = !black_.connected
+        && now - black_.disconnected_at >= grace;
+    if (!white_expired && !black_expired) return false;
+
+    // If both seats disconnected, the one whose deadline elapsed first
+    // forfeits. Equal timestamps are resolved deterministically as a draw;
+    // this only occurs when both transports disappear in the same clock tick.
+    std::string result;
+    if (white_expired && black_expired
+        && white_.disconnected_at == black_.disconnected_at) {
+        result = "1/2-1/2";
+    } else if (white_expired && (!black_expired
+               || white_.disconnected_at < black_.disconnected_at)) {
+        result = "0-1";
+    } else {
+        result = "1-0";
+    }
+
+    revision_.fetch_add(1, std::memory_order_release);
+    finish_game(GameStatus::ABANDONMENT, result);
+    return true;
 }
 
 // ============================================================
@@ -611,6 +1016,21 @@ bool GameRoom::is_ai_game() const {
     return is_ai_;
 }
 
+bool GameRoom::is_tournament_game() const {
+    LockAndDrain lock(*this);
+    return is_tournament_reserved_;
+}
+
+int64_t GameRoom::tournament_id() const {
+    LockAndDrain lock(*this);
+    return tournament_id_;
+}
+
+int64_t GameRoom::pairing_id() const {
+    LockAndDrain lock(*this);
+    return pairing_id_;
+}
+
 AIDifficulty GameRoom::ai_difficulty() const {
     LockAndDrain lock(*this);
     return ai_difficulty_;
@@ -643,6 +1063,19 @@ bool GameRoom::has_player(int connection_fd) const {
 bool GameRoom::has_player_id(PlayerId pid) const {
     LockAndDrain lock(*this);
     return white_.player_id == pid || black_.player_id == pid;
+}
+
+bool GameRoom::has_db_player_id(int64_t db_player_id) const {
+    LockAndDrain lock(*this);
+    return db_player_id > 0
+        && (white_.db_player_id == db_player_id || black_.db_player_id == db_player_id);
+}
+
+bool GameRoom::is_connected(Color color) const {
+    LockAndDrain lock(*this);
+    if (color == Color::WHITE) return white_.connected;
+    if (color == Color::BLACK) return black_.connected;
+    return false;
 }
 
 int GameRoom::current_turn_fd() const {
@@ -679,6 +1112,26 @@ void GameRoom::get_remaining_times(int& white_ms, int& black_ms) const {
 std::vector<MoveRecord> GameRoom::get_move_history() const {
     LockAndDrain lock(*this);
     return move_history_;
+}
+
+std::vector<std::string> GameRoom::get_legal_moves_uci() const {
+    LockAndDrain lock(*this);
+    std::vector<std::string> result;
+    if (state_ != RoomState::IN_PROGRESS) return result;
+    const auto legal = move_gen::generate_legal_moves(board_);
+    result.reserve(legal.size());
+    for (const Move& move : legal) result.push_back(move.to_uci());
+    return result;
+}
+
+Color GameRoom::draw_offer_from() const {
+    LockAndDrain lock(*this);
+    return draw_offer_from_.value_or(Color::NONE);
+}
+
+Color GameRoom::rematch_offer_from() const {
+    LockAndDrain lock(*this);
+    return rematch_offer_from_.value_or(Color::NONE);
 }
 
 PlayerId GameRoom::get_player_id(Color color) const {

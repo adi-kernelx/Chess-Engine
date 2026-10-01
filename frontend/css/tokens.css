@@ -12,6 +12,8 @@
     --surface-2: #1e2125;   /* card */
     --surface-3: #262a2f;   /* elevated card / hover */
     --surface-4: #303540;   /* input, active row */
+    --nav-glass: rgba(23, 25, 28, 0.82);
+    --nav-glass-border: rgba(236, 237, 239, 0.12);
 
     /* ── Borders / dividers ── */
     --border-subtle: #2a2e34;

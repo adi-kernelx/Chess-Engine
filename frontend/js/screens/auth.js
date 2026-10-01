@@ -2,11 +2,10 @@
  * auth.js — LIVE screen (Phase 7.10).
  *
  * Password auth flow:
- *   1. capability.request sends `login` / `register` and races for `auth_ok`
- *      vs `auth_error`. On timeout / unknown-type, falls back to a local
- *      demo session so the frontend is still usable while the backend
- *      isn't configured (matches the pattern the other preview screens use).
- *   2. On live auth_ok, Session.adopt() persists the refresh token and
+ *   1. Sends `login` / `register` and waits for `auth_ok` vs `auth_error`.
+ *      Authentication fails closed on disconnect or timeout; it never creates
+ *      a local identity that could be mistaken for a real authenticated user.
+ *   2. On auth_ok, Session.adopt() persists the refresh token and
  *      schedules automatic refresh; the store's session segment is updated
  *      via the Session → store bridge in main.js.
  *
@@ -17,12 +16,13 @@
  *     hash-fragment read on the return trip.
  *   * The callback handler lives in main.js so it runs on any entry route,
  *     not just /login.
- *   * If Supabase isn't configured in `config.js`, the button is hidden.
+ *   * If Supabase isn't configured yet, the button stays visible and explains
+ *     that it becomes active after cloud deployment.
  */
 
 import { Screen } from '../ui/screen.js';
 import { h, clear } from '../core/dom.js';
-import { CONFIG, googleAuthorizeUrl } from '../config.js';
+import { googleAuthorizeUrl } from '../config.js';
 
 // auth_error codes from the server, mapped to human-readable strings. Any
 // code not listed here falls through to a generic message.
@@ -37,34 +37,45 @@ const ERROR_COPY = {
     google_disabled:         'Google sign-in is not configured on this deployment.',
     unauthorized:            'Session expired — please sign in again.',
     internal:                'Something went wrong on our end. Please try again.',
+    unavailable:             'The authentication server did not respond. Check the server configuration and try again.',
 };
 
+const AUTH_TIMEOUT_MS = 15_000;
+
 export class AuthScreen extends Screen {
-    constructor(ctx) {
+    constructor(ctx, initialMode = 'login') {
         super(ctx);
-        // Marked preview so the badge shows until the FIRST live auth_ok
-        // arrives; capability.request flips this internally on a live reply.
-        this.preview = true;
-        this._mode = 'login';
+        // Authentication is implemented by the backend. Connection state is
+        // shown by the global connection indicator; preview fallback is
+        // reported by a toast only when it is actually used.
+        this._mode = initialMode === 'register' ? 'register' : 'login';
         this._busy = false;
     }
 
     render() {
         const googleUrl = googleAuthorizeUrl();
         return h('div', { class: 'screen' },
-            this.header('Sign in', this._mode === 'login'
+            this.header(this._mode === 'login' ? 'Sign in' : 'Create account', this._mode === 'login'
                 ? 'Sign in to save your rating and game history.'
                 : 'Create an account — takes ten seconds.'),
             h('div', { class: 'screen__body' },
                 h('div', { class: 'auth-wrap' },
                     h('div', { class: 'card' },
-                        h('div', { class: 'tabs' },
+                        h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Authentication mode' },
                             h('button', {
+                                type: 'button',
+                                role: 'tab',
                                 class: 'tabs__tab' + (this._mode === 'login' ? ' is-active' : ''),
+                                'aria-selected': this._mode === 'login' ? 'true' : 'false',
+                                ref: el => this._loginTab = el,
                                 onclick: () => this._switch('login'),
                             }, 'Sign in'),
                             h('button', {
+                                type: 'button',
+                                role: 'tab',
                                 class: 'tabs__tab' + (this._mode === 'register' ? ' is-active' : ''),
+                                'aria-selected': this._mode === 'register' ? 'true' : 'false',
+                                ref: el => this._registerTab = el,
                                 onclick: () => this._switch('register'),
                             }, 'Register'),
                         ),
@@ -78,13 +89,25 @@ export class AuthScreen extends Screen {
     }
 
     _switch(mode) {
+        if (this._busy || (mode !== 'login' && mode !== 'register')) return;
         this._mode = mode;
+
+        const registering = mode === 'register';
+        this._loginTab.classList.toggle('is-active', !registering);
+        this._registerTab.classList.toggle('is-active', registering);
+        this._loginTab.setAttribute('aria-selected', String(!registering));
+        this._registerTab.setAttribute('aria-selected', String(registering));
+
         clear(this._form);
         this._form.appendChild(this._formBody(googleAuthorizeUrl()));
+
+        const title = this.root && this.root.querySelector('.screen__title');
+        if (title) title.textContent = registering ? 'Create account' : 'Sign in';
         const sub = this.root && this.root.querySelector('.screen__subtitle');
-        if (sub) sub.textContent = mode === 'login'
-            ? 'Sign in to save your rating and game history.'
-            : 'Create an account — takes ten seconds.';
+        if (sub) sub.textContent = registering
+            ? 'Create an account — takes ten seconds.'
+            : 'Sign in to save your rating and game history.';
+        if (this._userInput) this._userInput.focus({ preventScroll: true });
     }
 
     _formBody(googleUrl) {
@@ -116,17 +139,26 @@ export class AuthScreen extends Screen {
                     : null
             ),
             h('button', {
+                type: 'button',
                 class: 'btn btn--primary btn--block',
                 onclick: () => this._submit(),
                 ref: el => this._submitBtn = el,
             }, this._mode === 'login' ? 'Sign in' : 'Create account'),
 
-            // Google button — hidden if Supabase isn't configured.
-            googleUrl ? h('div', { class: 'field-stack__divider' }, 'or') : null,
-            googleUrl ? h('button', {
+            this._mode === 'login'
+                ? h('div', { class: 'field__hint' },
+                    'Password verification is deliberately constant-time, so failed attempts may take a moment.')
+                : null,
+
+            h('div', { class: 'field-stack__divider' }, 'or'),
+            h('button', {
+                type: 'button',
                 class: 'btn btn--ghost btn--block',
                 onclick: () => this._continueWithGoogle(googleUrl),
-            }, 'Continue with Google') : null,
+            }, 'Continue with Google'),
+            !googleUrl
+                ? h('div', { class: 'field__hint' }, 'Google sign-in will be enabled after cloud deployment.')
+                : null,
         );
     }
 
@@ -135,6 +167,10 @@ export class AuthScreen extends Screen {
     }
 
     _continueWithGoogle(url) {
+        if (!url) {
+            this.ctx.toast.info('Google sign-in will be available after cloud deployment.', { duration: 2800 });
+            return;
+        }
         // Full-page redirect. Supabase performs the OAuth handshake and
         // redirects back to CONFIG.supabaseRedirect with the tokens in
         // `location.hash`. main.js picks it up on load.
@@ -155,60 +191,74 @@ export class AuthScreen extends Screen {
         }
         this._busy = true;
         this._submitBtn.disabled = true;
-        this._submitBtn.textContent = 'Working…';
+        this._submitBtn.textContent = this._mode === 'login' ? 'Verifying…' : 'Creating…';
 
-        const msg = this._mode === 'login'
+        const mode = this._mode;
+        const msg = mode === 'login'
             ? this.ctx.Outbound.login(username, password)
             : this.ctx.Outbound.register(username, password);
 
-        // Listen for auth_error alongside auth_ok — capability.js does not
-        // treat auth_error as a "preview" signal (it's a live-server reply),
-        // so we wire our own one-shot to surface it in the toast.
-        const errorPromise = new Promise((resolve) => {
-            const off = this.ctx.socket.once('auth_error', (m) => resolve(m));
-            setTimeout(() => { off(); resolve(null); }, 1500);
-        });
+        try {
+            const result = await this._requestAuth(msg);
+            if (!result.ok) {
+                const copy = ERROR_COPY[result.code] || 'Sign in failed.';
+                this.ctx.toast.error(copy, { duration: 3600 });
+                return;
+            }
 
-        const { data, live } = await this.ctx.capability.request(msg, {
-            expect: 'auth_ok',
-            timeout: 1500,
-            demo: () => ({
-                username,
-                elo: this._mode === 'register' ? 1200 : (600 + (username.length * 47) % 1200),
-                access_token: 'demo-' + Date.now(),
-                refresh_token: 'demo-refresh-' + Date.now(),
-                access_expires_in: 900,
-            }),
-        });
-
-        // Race: if the server sent auth_error before we resolved, prefer
-        // that over the demo fallback so the user sees the real reason.
-        const err = await errorPromise;
-        if (!live && err) {
-            const copy = ERROR_COPY[err.code] || 'Sign in failed.';
-            this.ctx.toast.error(copy, { duration: 3600 });
+            this.ctx.session.adopt(result.data);
+            this.ctx.toast.success(
+                mode === 'login'
+                    ? `Welcome back, ${result.data.username}!`
+                    : 'Account created. Welcome!',
+                { duration: 2600 }
+            );
+            const nextPath = this.ctx.postAuthPath || '/';
+            this.ctx.postAuthPath = null;
+            this.ctx.router.go(nextPath);
+        } catch (err) {
+            console.error('[auth] request failed:', err);
+            this.ctx.toast.error(ERROR_COPY.unavailable, { duration: 3600 });
+        } finally {
             this._resetSubmitButton();
-            return;
+        }
+    }
+
+    /** Authentication is security-critical and must never degrade into a
+     *  convincing local demo session. Wait for a definitive live reply or
+     *  fail visibly, leaving Session untouched. */
+    _requestAuth(message) {
+        if (!this.ctx.socket.isConnected()) {
+            return Promise.resolve({ ok: false, code: 'unavailable' });
         }
 
-        if (live) {
-            this.ctx.session.adopt(data);
-            this.preview = false;   // flip the badge off on the LIVE path
-        } else {
-            // Preview fallback — keep the existing local-demo behaviour.
-            this.ctx.store.setSession({
-                username: data.username || username,
-                elo:      data.elo || 1200,
-            });
-        }
+        return new Promise((resolve) => {
+            let settled = false;
+            const cleanup = [];
+            const finish = (result) => {
+                if (settled) return;
+                settled = true;
+                for (const off of cleanup) { try { off(); } catch (_) {} }
+                resolve(result);
+            };
 
-        this.ctx.toast.success(
-            live
-                ? (this._mode === 'login' ? `Welcome back, ${data.username}!` : `Account created. Welcome!`)
-                : `Signed in as ${username} (preview).`,
-            { duration: 2600 }
-        );
-        this.ctx.router.go('/');
+            cleanup.push(this.ctx.socket.on('auth_ok', (data) => {
+                finish({ ok: true, data: this.ctx.Inbound.normalize(data) });
+            }));
+            cleanup.push(this.ctx.socket.on('auth_error', (err) => {
+                finish({ ok: false, code: err.code || 'internal' });
+            }));
+            cleanup.push(this.ctx.socket.onState((state) => {
+                if (state === 'offline') finish({ ok: false, code: 'unavailable' });
+            }));
+
+            const timer = setTimeout(
+                () => finish({ ok: false, code: 'unavailable' }),
+                AUTH_TIMEOUT_MS,
+            );
+            cleanup.push(() => clearTimeout(timer));
+            this.ctx.socket.send(message);
+        });
     }
 
     _resetSubmitButton() {

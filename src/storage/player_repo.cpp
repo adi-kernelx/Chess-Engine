@@ -89,6 +89,33 @@ std::vector<LeaderboardEntry> get_leaderboard(Database& db, int limit, int offse
     return entries;
 }
 
+std::vector<RatingHistoryPoint> get_rating_history(Database& db,
+                                                   int64_t player_id,
+                                                   int current_elo) {
+    auto result = db.exec(
+        "SELECT (EXTRACT(EPOCH FROM g.started_at) * 1000)::bigint AS started_ms,"
+        " (EXTRACT(EPOCH FROM g.ended_at) * 1000)::bigint AS ended_ms,"
+        " CASE WHEN g.white_id = $1 THEN g.white_elo ELSE g.black_elo END"
+        " FROM games g"
+        " WHERE g.rated = TRUE AND (g.white_id = $1 OR g.black_id = $1)"
+        " ORDER BY g.ended_at ASC, g.id ASC",
+        {Param::int64(player_id)});
+
+    std::vector<RatingHistoryPoint> points;
+    if (!result.ok || result.empty()) return points;
+
+    points.reserve(result.rows.size() + 1);
+    points.push_back({std::stoll(result.rows.front().at(0)),
+                      std::stoi(result.rows.front().at(2))});
+    for (size_t i = 0; i < result.rows.size(); ++i) {
+        const int post_rating = (i + 1 < result.rows.size())
+            ? std::stoi(result.rows[i + 1].at(2))
+            : current_elo;
+        points.push_back({std::stoll(result.rows[i].at(1)), post_rating});
+    }
+    return points;
+}
+
 bool update_elo(Database& db, int64_t player_id, int new_elo) {
     auto result = db.exec(
         "UPDATE players SET elo_rating = $1 WHERE id = $2",

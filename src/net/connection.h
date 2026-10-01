@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstdint>
 #include <string>
+#include <chrono>
 #include <unistd.h>
 
 #include "net/connection_handle.h"
@@ -12,6 +13,9 @@ namespace net {
 
 class Connection {
 public:
+    using HeartbeatClock = std::chrono::steady_clock;
+    using HeartbeatTimePoint = HeartbeatClock::time_point;
+
     explicit Connection(int fd, const std::string& ip);
     ~Connection();
 
@@ -70,7 +74,21 @@ public:
 
     // WebSocket state
     bool is_upgraded() const { return upgraded_; }
-    void set_upgraded(bool val) { upgraded_ = val; }
+    void set_upgraded(bool val);
+
+    // Server-driven WebSocket heartbeat. TcpServer serialises these methods
+    // through connections_mutex_, so the timestamps do not need their own
+    // atomic/mutex overhead.
+    bool heartbeat_due(HeartbeatTimePoint now,
+                       HeartbeatClock::duration interval) const;
+    bool heartbeat_expired(HeartbeatTimePoint now,
+                           HeartbeatClock::duration timeout) const;
+    void mark_ping_sent(HeartbeatTimePoint now);
+    /// Any complete inbound WebSocket traffic proves the peer is alive, even
+    /// if a browser/proxy coalesces or delays the explicit pong frame.
+    void mark_activity_received(HeartbeatTimePoint now);
+    void mark_pong_received(HeartbeatTimePoint now);
+    bool awaiting_pong() const { return awaiting_pong_; }
 
 private:
     int fd_;
@@ -78,6 +96,9 @@ private:
     uint64_t generation_ = 0;  // LLD-1: bumped by TcpServer on accept()
     bool upgraded_ = false;  // false = raw HTTP, true = WebSocket framing
     bool write_buffer_overflowed_ = false;  // LLD-6.4
+    bool awaiting_pong_ = false;
+    HeartbeatTimePoint last_heartbeat_at_ = HeartbeatClock::now();
+    HeartbeatTimePoint ping_sent_at_ = last_heartbeat_at_;
 
     std::vector<uint8_t> read_buffer_;
     std::vector<uint8_t> write_buffer_;

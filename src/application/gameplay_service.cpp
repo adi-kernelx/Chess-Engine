@@ -70,6 +70,7 @@ std::string status_to_reason(chess::GameStatus status) {
         case GameStatus::DRAW_AGREEMENT:             return "draw_agreement";
         case GameStatus::RESIGNATION:                return "resignation";
         case GameStatus::TIMEOUT:                    return "timeout";
+        case GameStatus::ABANDONMENT:                return "abandonment";
         default:                                     return "unknown";
     }
 }
@@ -164,9 +165,10 @@ void GameplayService::make_move(const RequestContext&                    ctx,
     mm.from          = req.from;
     mm.to            = req.to;
     mm.san           = result.san;
-    mm.fen           = room->get_board().to_fen();
+    mm.fen           = result.fen;
     mm.white_time_ms = result.white_time_ms;
     mm.black_time_ms = result.black_time_ms;
+    mm.legal_moves   = result.legal_moves;
     if (promo != PieceType::NONE) mm.promotion = promo_wire;
     const std::string move_msg = chess::protocol::codec::encode_move_made(mm);
 
@@ -175,6 +177,13 @@ void GameplayService::make_move(const RequestContext&                    ctx,
     int opp_fd = room->get_opponent_fd(ctx.caller.fd);
     if (opp_fd >= 0) foreign_sender_(opp_fd, move_msg);
     spectator_broadcaster_(*room, move_msg);
+
+    if (result.draw_offer_declined && opp_fd >= 0) {
+        json declined;
+        declined["type"] = "draw_declined";
+        declined["reason"] = "move_made";
+        foreign_sender_(opp_fd, declined.dump());
+    }
 
     if (result.game_status != GameStatus::ONGOING) {
         const std::string game_over = chess::protocol::codec::encode_game_over(
@@ -206,24 +215,327 @@ void GameplayService::resign(const RequestContext&                 ctx,
             {"", "You are not in a game"}));
         return;
     }
-    if (!room->resign(ctx.caller.fd)) {
+    const int opponent_fd = room->get_opponent_fd(ctx.caller.fd);
+    const bool resigned = room->resign(ctx.caller.fd,
+        [&, room, opponent_fd]() {
+            const std::string game_over = chess::protocol::codec::encode_game_over(
+                {room->get_result_string(), "resignation"});
+            caller_sink.send(game_over);
+            if (opponent_fd >= 0) foreign_sender_(opponent_fd, game_over);
+            spectator_broadcaster_(*room, game_over);
+        });
+    if (!resigned) {
         caller_sink.send(chess::protocol::codec::encode_error(
             {"", "Cannot resign — game is not in progress"}));
         return;
     }
 
-    const std::string game_over = chess::protocol::codec::encode_game_over(
-        {room->get_result_string(), "resignation"});
-
-    caller_sink.send(game_over);
-    int opp_fd = room->get_opponent_fd(ctx.caller.fd);
-    if (opp_fd >= 0) foreign_sender_(opp_fd, game_over);
-    spectator_broadcaster_(*room, game_over);
-
     chess::core::Logger::info("game", "GameplayService",
         "Game " + std::to_string(room->get_id()) + ": player resigned → " +
         room->get_result_string());
     // LLD-4.2: persistence via GameCompletionService listener.
+}
+
+void GameplayService::offer_draw(const RequestContext& ctx,
+                                 MessageSink& caller_sink) {
+    auto room = rooms_.find_room_by_fd(ctx.caller.fd);
+    if (!room) {
+        caller_sink.send(make_error_frame("You are not in a game"));
+        return;
+    }
+
+    std::string error;
+    if (!room->offer_draw(ctx.caller.fd, error)) {
+        caller_sink.send(make_error_frame(error));
+        return;
+    }
+
+    json sent;
+    sent["type"] = "draw_offer_sent";
+    caller_sink.send(sent.dump());
+
+    const int opponent_fd = room->get_opponent_fd(ctx.caller.fd);
+    if (opponent_fd >= 0) {
+        json offered;
+        offered["type"] = "draw_offered";
+        const auto offerer_color = room->draw_offer_from();
+        offered["from"] = room->get_username(offerer_color);
+        foreign_sender_(opponent_fd, offered.dump());
+    }
+}
+
+void GameplayService::respond_to_draw(const RequestContext& ctx, bool accept,
+                                      MessageSink& caller_sink) {
+    auto room = rooms_.find_room_by_fd(ctx.caller.fd);
+    if (!room) {
+        caller_sink.send(make_error_frame("You are not in a game"));
+        return;
+    }
+    const auto expired_offer = room->expire_draw_offer(
+        std::chrono::milliseconds(DRAW_OFFER_TTL_MS));
+    if (expired_offer != chess::Color::NONE) {
+        json resolved;
+        resolved["type"] = "draw_offer_resolved";
+        resolved["accepted"] = false;
+        resolved["reason"] = "expired";
+        caller_sink.send(resolved.dump());
+
+        const int offerer_fd = room->get_player_fd(expired_offer);
+        if (offerer_fd >= 0 && offerer_fd != ctx.caller.fd) {
+            json expired;
+            expired["type"] = "draw_declined";
+            expired["reason"] = "expired";
+            foreign_sender_(offerer_fd, expired.dump());
+        }
+        return;
+    }
+    const int opponent_fd = room->get_opponent_fd(ctx.caller.fd);
+    std::string error;
+    if (!room->respond_to_draw(ctx.caller.fd, accept, error)) {
+        caller_sink.send(make_error_frame(error));
+        return;
+    }
+
+    if (!accept) {
+        json resolved;
+        resolved["type"] = "draw_offer_resolved";
+        resolved["accepted"] = false;
+        caller_sink.send(resolved.dump());
+        if (opponent_fd >= 0) {
+            json declined;
+            declined["type"] = "draw_declined";
+            declined["reason"] = "declined";
+            foreign_sender_(opponent_fd, declined.dump());
+        }
+        return;
+    }
+
+    const std::string game_over = chess::protocol::codec::encode_game_over(
+        {"1/2-1/2", "draw_agreement"});
+    caller_sink.send(game_over);
+    if (opponent_fd >= 0) foreign_sender_(opponent_fd, game_over);
+    spectator_broadcaster_(*room, game_over);
+}
+
+void GameplayService::offer_rematch(const RequestContext& ctx,
+                                    const AuthenticatedIdentity& actor,
+                                    int64_t game_id,
+                                    MessageSink& caller_sink) {
+    if (game_id <= 0) {
+        caller_sink.send(make_error_frame("Missing or invalid game_id"));
+        return;
+    }
+    auto room = rooms_.find_room(static_cast<chess::GameId>(game_id));
+    if (!room || !room->has_player(ctx.caller.fd)
+        || (room->get_db_player_id(chess::Color::WHITE) != actor.player_id
+            && room->get_db_player_id(chess::Color::BLACK) != actor.player_id)) {
+        caller_sink.send(make_error_frame("Finished game not found for this player"));
+        return;
+    }
+
+    const int64_t white_id = room->get_db_player_id(chess::Color::WHITE);
+    const int64_t black_id = room->get_db_player_id(chess::Color::BLACK);
+    if (rooms_.find_room_by_db_player(white_id)
+        || rooms_.find_room_by_db_player(black_id)) {
+        caller_sink.send(make_error_frame("A player is already in another game"));
+        return;
+    }
+
+    std::string error;
+    if (!room->offer_rematch(ctx.caller.fd, error)) {
+        caller_sink.send(make_error_frame(error));
+        return;
+    }
+
+    json sent;
+    sent["type"] = "rematch_offer_sent";
+    sent["game_id"] = game_id;
+    sent["expires_in_ms"] = REMATCH_OFFER_TTL_MS;
+    caller_sink.send(sent.dump());
+
+    const int opponent_fd = room->get_opponent_fd(ctx.caller.fd);
+    if (opponent_fd >= 0) {
+        json offered;
+        offered["type"] = "rematch_offered";
+        offered["game_id"] = game_id;
+        offered["from"] = actor.username;
+        offered["expires_in_ms"] = REMATCH_OFFER_TTL_MS;
+        foreign_sender_(opponent_fd, offered.dump());
+    }
+}
+
+void GameplayService::respond_to_rematch(const RequestContext& ctx,
+                                         const AuthenticatedIdentity& actor,
+                                         int64_t game_id, bool accept,
+                                         MessageSink& caller_sink) {
+    if (game_id <= 0) {
+        caller_sink.send(make_error_frame("Missing or invalid game_id"));
+        return;
+    }
+    auto old_room = rooms_.find_room(static_cast<chess::GameId>(game_id));
+    if (!old_room || !old_room->has_player(ctx.caller.fd)
+        || (old_room->get_db_player_id(chess::Color::WHITE) != actor.player_id
+            && old_room->get_db_player_id(chess::Color::BLACK) != actor.player_id)) {
+        caller_sink.send(make_error_frame("Finished game not found for this player"));
+        return;
+    }
+
+    const auto pending_from = old_room->rematch_offer_from();
+    const int offerer_fd = old_room->get_player_fd(pending_from);
+
+    if (accept) {
+        const int64_t white_id = old_room->get_db_player_id(chess::Color::WHITE);
+        const int64_t black_id = old_room->get_db_player_id(chess::Color::BLACK);
+        if (rooms_.find_room_by_db_player(white_id)
+            || rooms_.find_room_by_db_player(black_id)) {
+            chess::Color discarded = chess::Color::NONE;
+            std::string discard_error;
+            (void)old_room->respond_to_rematch(
+                ctx.caller.fd, false, discarded, discard_error);
+            caller_sink.send(make_error_frame(
+                "Rematch unavailable because a player joined another game"));
+            if (offerer_fd >= 0) {
+                json declined;
+                declined["type"] = "rematch_declined";
+                declined["reason"] = "unavailable";
+                foreign_sender_(offerer_fd, declined.dump());
+            }
+            return;
+        }
+    }
+
+    chess::Color offerer = chess::Color::NONE;
+    std::string error;
+    if (!old_room->respond_to_rematch(
+            ctx.caller.fd, accept, offerer, error)) {
+        caller_sink.send(make_error_frame(error));
+        return;
+    }
+
+    if (!accept) {
+        json resolved;
+        resolved["type"] = "rematch_offer_resolved";
+        resolved["accepted"] = false;
+        resolved["reason"] = "declined";
+        caller_sink.send(resolved.dump());
+        if (offerer_fd >= 0) {
+            json declined;
+            declined["type"] = "rematch_declined";
+            declined["reason"] = "declined";
+            foreign_sender_(offerer_fd, declined.dump());
+        }
+        return;
+    }
+
+    // A rematch alternates colors while preserving the prior time control.
+    // The new room receives fresh local IDs but retains durable player IDs,
+    // usernames, and ELO snapshots for auth/reconnect/persistence.
+    const int old_white_fd = old_room->get_player_fd(chess::Color::WHITE);
+    const int old_black_fd = old_room->get_player_fd(chess::Color::BLACK);
+    if (old_white_fd < 0 || old_black_fd < 0
+        || !old_room->is_connected(chess::Color::WHITE)
+        || !old_room->is_connected(chess::Color::BLACK)) {
+        caller_sink.send(make_error_frame("Both players must remain connected for a rematch"));
+        return;
+    }
+
+    const auto tc = old_room->get_time_control();
+    auto new_room = rooms_.create_room(
+        next_player_id_.fetch_add(1),
+        old_room->get_username(chess::Color::BLACK), old_black_fd, tc,
+        old_room->get_db_player_id(chess::Color::BLACK),
+        old_room->get_elo(chess::Color::BLACK));
+    if (!new_room->join(
+            next_player_id_.fetch_add(1),
+            old_room->get_username(chess::Color::WHITE), old_white_fd,
+            old_room->get_db_player_id(chess::Color::WHITE),
+            old_room->get_elo(chess::Color::WHITE))) {
+        rooms_.remove_room(new_room->get_id());
+        caller_sink.send(make_error_frame("Could not start the rematch"));
+        return;
+    }
+
+    int white_ms = 0, black_ms = 0;
+    new_room->get_remaining_times(white_ms, black_ms);
+    auto started = [&](const char* color, const std::string& opponent) {
+        json frame;
+        frame["type"] = "rematch_started";
+        frame["game_id"] = new_room->get_id();
+        frame["color"] = color;
+        frame["opponent"] = opponent;
+        frame["white_time"] = white_ms;
+        frame["black_time"] = black_ms;
+        frame["time_base"] = tc.base_time_ms / 1000;
+        frame["time_inc"] = tc.increment_ms / 1000;
+        frame["ai_game"] = false;
+        return frame.dump();
+    };
+
+    const std::string white_start = started(
+        "white", old_room->get_username(chess::Color::WHITE));
+    const std::string black_start = started(
+        "black", old_room->get_username(chess::Color::BLACK));
+    if (ctx.caller.fd == old_black_fd) {
+        caller_sink.send(white_start);
+        foreign_sender_(old_white_fd, black_start);
+    } else {
+        caller_sink.send(black_start);
+        foreign_sender_(old_black_fd, white_start);
+    }
+
+    chess::core::Logger::info("game", "GameplayService",
+        "Rematch of game " + std::to_string(game_id) + " started as game "
+        + std::to_string(new_room->get_id()));
+}
+
+void GameplayService::get_pending_rematch(const RequestContext& ctx,
+                                          const AuthenticatedIdentity& actor,
+                                          MessageSink& caller_sink) {
+    std::shared_ptr<chess::game::GameRoom> selected;
+    chess::Color selected_actor_color = chess::Color::NONE;
+
+    for (const auto& room : rooms_.rooms_snapshot()) {
+        if (!room || room->get_state() != chess::game::RoomState::FINISHED
+            || room->rematch_offer_from() == chess::Color::NONE) continue;
+
+        chess::Color actor_color = chess::Color::NONE;
+        if (room->get_db_player_id(chess::Color::WHITE) == actor.player_id) {
+            actor_color = chess::Color::WHITE;
+        } else if (room->get_db_player_id(chess::Color::BLACK) == actor.player_id) {
+            actor_color = chess::Color::BLACK;
+        }
+        if (actor_color == chess::Color::NONE) continue;
+        if (!selected || room->get_id() > selected->get_id()) {
+            selected = room;
+            selected_actor_color = actor_color;
+        }
+    }
+
+    json response;
+    response["type"] = "pending_rematch";
+    if (!selected) {
+        response["offer"] = nullptr;
+        caller_sink.send(response.dump());
+        return;
+    }
+
+    // Navigation can replace the game screen without closing the WebSocket;
+    // a refresh can also replace the descriptor. Authenticated durable
+    // identity safely restores the finished-room seat for this response.
+    if (!selected->on_reconnect_db_player(actor.player_id, ctx.caller.fd)) {
+        response["offer"] = nullptr;
+        caller_sink.send(response.dump());
+        return;
+    }
+
+    const auto offerer = selected->rematch_offer_from();
+    response["offer"] = {
+        {"game_id", selected->get_id()},
+        {"from", selected->get_username(offerer)},
+        {"role", offerer == selected_actor_color ? "sender" : "recipient"},
+        {"expires_in_ms", REMATCH_OFFER_TTL_MS}
+    };
+    caller_sink.send(response.dump());
 }
 
 // ── game_state ────────────────────────────────────────────────────────
@@ -233,7 +545,24 @@ void GameplayService::game_state(const RequestContext&                    ctx,
                                  MessageSink&                             caller_sink) {
     using chess::game::RoomState;
 
-    auto room = rooms_.find_room_by_fd(ctx.caller.fd);
+    std::shared_ptr<chess::game::GameRoom> room;
+    bool reconnected = false;
+    if (ctx.identity.has_value()) {
+        room = rooms_.find_room_by_db_player(ctx.identity->player_id);
+        if (room) {
+            const int prior_fd = room->get_player_fd(
+                room->get_db_player_id(chess::Color::WHITE) == ctx.identity->player_id
+                    ? chess::Color::WHITE : chess::Color::BLACK);
+            const bool bound = room->on_reconnect_db_player(
+                ctx.identity->player_id, ctx.caller.fd);
+            // An idempotent request on the current socket is not a reconnect
+            // event and must not repeatedly notify the opponent.
+            reconnected = bound && prior_fd != ctx.caller.fd;
+            if (!bound) room.reset();
+        }
+    } else {
+        room = rooms_.find_room_by_fd(ctx.caller.fd);
+    }
     if (!room) {
         caller_sink.send(chess::protocol::codec::encode_error(
             {"", "You are not in a game"}));
@@ -261,6 +590,12 @@ void GameplayService::game_state(const RequestContext&                    ctx,
     for (const auto& record : history) {
         resp.moves.push_back({record.san, record.think_time_ms});
     }
+    if (state == RoomState::IN_PROGRESS) {
+        resp.legal_moves = room->get_legal_moves_uci();
+        const auto offerer = room->draw_offer_from();
+        if (offerer == chess::Color::WHITE) resp.draw_offer_from = "white";
+        else if (offerer == chess::Color::BLACK) resp.draw_offer_from = "black";
+    }
 
     if (state == RoomState::FINISHED) {
         resp.result = room->get_result_string();
@@ -268,6 +603,74 @@ void GameplayService::game_state(const RequestContext&                    ctx,
     }
 
     caller_sink.send(chess::protocol::codec::encode_game_state(resp));
+
+    if (reconnected) {
+        const int opponent_fd = room->get_opponent_fd(ctx.caller.fd);
+        if (opponent_fd >= 0) {
+            json notice;
+            notice["type"] = "opponent_reconnected";
+            foreign_sender_(opponent_fd, notice.dump());
+        }
+    }
+}
+
+void GameplayService::get_active_game(const RequestContext& ctx,
+                                      const AuthenticatedIdentity& actor,
+                                      MessageSink& caller_sink) {
+    json response;
+    response["type"] = "active_game";
+
+    auto room = rooms_.find_room_by_db_player(actor.player_id);
+    if (!room || room->get_state() == chess::game::RoomState::FINISHED) {
+        response["game"] = nullptr;
+        caller_sink.send(response.dump());
+        return;
+    }
+
+    const bool is_white = room->get_db_player_id(chess::Color::WHITE) == actor.player_id;
+    const chess::Color actor_color = is_white ? chess::Color::WHITE : chess::Color::BLACK;
+    const int prior_fd = room->get_player_fd(actor_color);
+
+    // Discovery and recovery are intentionally one atomic user-level action:
+    // if the browser reached Replays/Game through a replaced WebSocket, merely
+    // reporting the room would leave its seat bound to the dead descriptor.
+    if (!room->on_reconnect_db_player(actor.player_id, ctx.caller.fd)) {
+        response["game"] = nullptr;
+        caller_sink.send(response.dump());
+        return;
+    }
+
+    const chess::Color opponent_color = is_white ? chess::Color::BLACK : chess::Color::WHITE;
+    int white_ms = 0;
+    int black_ms = 0;
+    room->get_remaining_times(white_ms, black_ms);
+    const auto& tc = room->get_time_control();
+    const char* state = room->get_state() == chess::game::RoomState::WAITING
+        ? "waiting" : "in_progress";
+
+    response["game"] = {
+        {"game_id", room->get_id()},
+        {"color", is_white ? "white" : "black"},
+        {"opponent", room->get_username(opponent_color)},
+        {"white_time", white_ms},
+        {"black_time", black_ms},
+        {"time_base", tc.base_time_ms / 1000},
+        {"time_inc", tc.increment_ms / 1000},
+        {"ai_game", room->is_ai_game()},
+        {"tournament_id", room->tournament_id()},
+        {"pairing_id", room->pairing_id()},
+        {"state", state}
+    };
+    caller_sink.send(response.dump());
+
+    if (prior_fd != ctx.caller.fd) {
+        const int opponent_fd = room->get_player_fd(opponent_color);
+        if (opponent_fd >= 0) {
+            json notice;
+            notice["type"] = "opponent_reconnected";
+            foreign_sender_(opponent_fd, notice.dump());
+        }
+    }
 }
 
 // ── create_game ───────────────────────────────────────────────────────
@@ -277,6 +680,10 @@ void GameplayService::create_game(const RequestContext&        ctx,
                                   int                          time_base_sec,
                                   int                          time_inc_sec,
                                   MessageSink&                 caller_sink) {
+    if (rooms_.is_tournament_player_reserved(actor.player_id)) {
+        caller_sink.send(make_error_frame("You are checked in for a tournament round"));
+        return;
+    }
     auto existing = rooms_.find_room_by_fd(ctx.caller.fd);
     if (existing && existing->get_state() != chess::game::RoomState::FINISHED) {
         caller_sink.send(make_error_frame("You are already in a game (ID: " +
@@ -308,6 +715,10 @@ void GameplayService::join_game(const RequestContext&        ctx,
                                 const AuthenticatedIdentity& actor,
                                 int64_t                      game_id,
                                 MessageSink&                 caller_sink) {
+    if (rooms_.is_tournament_player_reserved(actor.player_id)) {
+        caller_sink.send(make_error_frame("You are checked in for a tournament round"));
+        return;
+    }
     if (game_id <= 0) {
         caller_sink.send(make_error_frame("Missing or invalid game_id"));
         return;
@@ -371,6 +782,10 @@ void GameplayService::quick_play(const RequestContext&        ctx,
                                  int                          time_base_sec,
                                  int                          time_inc_sec,
                                  MessageSink&                 caller_sink) {
+    if (rooms_.is_tournament_player_reserved(actor.player_id)) {
+        caller_sink.send(make_error_frame("You are checked in for a tournament round"));
+        return;
+    }
     auto existing = rooms_.find_room_by_fd(ctx.caller.fd);
     if (existing && existing->get_state() != chess::game::RoomState::FINISHED) {
         caller_sink.send(make_error_frame("You are already in a game (ID: " +
@@ -443,6 +858,10 @@ void GameplayService::play_ai(const RequestContext&        ctx,
                               int                          time_base_sec,
                               int                          time_inc_sec,
                               MessageSink&                 caller_sink) {
+    if (rooms_.is_tournament_player_reserved(actor.player_id)) {
+        caller_sink.send(make_error_frame("You are checked in for a tournament round"));
+        return;
+    }
     auto existing = rooms_.find_room_by_fd(ctx.caller.fd);
     if (existing && existing->get_state() != chess::game::RoomState::FINISHED) {
         caller_sink.send(make_error_frame("You are already in a game (ID: " +
@@ -455,7 +874,8 @@ void GameplayService::play_ai(const RequestContext&        ctx,
     chess::game::AIDifficulty difficulty = chess::game::parse_difficulty(difficulty_str);
 
     auto room = rooms_.create_ai_room(pid, actor.username, ctx.caller.fd,
-                                      tc, difficulty);
+                                      tc, difficulty, actor.player_id,
+                                      actor.elo_rating);
 
     int white_ms = 0, black_ms = 0;
     room->get_remaining_times(white_ms, black_ms);
@@ -483,13 +903,112 @@ void GameplayService::on_player_disconnect(int fd) {
 
     auto room = rooms_.find_room_by_fd(fd);
     if (room) {
+        // Capture before GameRoom clears the transient fd to prevent OS fd
+        // reuse from binding an unrelated socket to the disconnected seat.
+        const int opponent_fd = room->get_opponent_fd(fd);
         room->on_disconnect(fd);
+        if (room->get_state() == chess::game::RoomState::IN_PROGRESS) {
+            if (opponent_fd >= 0) {
+                json notice;
+                notice["type"] = "opponent_disconnected";
+                notice["grace_ms"] = DISCONNECT_GRACE_MS;
+                foreign_sender_(opponent_fd, notice.dump());
+            }
+        }
     }
 
     // Phase 9.1 sweep: a disconnected fd cannot receive broadcasts, and if
     // the OS recycles the fd the next owner would silently start receiving
     // move_made frames for a room they never asked to watch.
     rooms_.remove_spectator_everywhere(fd);
+}
+
+void GameplayService::expire_disconnected_games() {
+    const auto grace = std::chrono::milliseconds(DISCONNECT_GRACE_MS);
+    const auto draw_ttl = std::chrono::milliseconds(DRAW_OFFER_TTL_MS);
+    for (const auto& room : rooms_.rooms_snapshot()) {
+        if (!room) continue;
+
+        if (room->expire_on_time()) {
+            const std::string game_over = chess::protocol::codec::encode_game_over(
+                {room->get_result_string(), "timeout"});
+            const int white_fd = room->get_player_fd(chess::Color::WHITE);
+            const int black_fd = room->get_player_fd(chess::Color::BLACK);
+            if (room->is_connected(chess::Color::WHITE) && white_fd >= 0) {
+                foreign_sender_(white_fd, game_over);
+            }
+            if (room->is_connected(chess::Color::BLACK) && black_fd >= 0) {
+                foreign_sender_(black_fd, game_over);
+            }
+            spectator_broadcaster_(*room, game_over);
+
+            chess::core::Logger::info("game", "GameplayService",
+                "Game " + std::to_string(room->get_id())
+                + ": clock expired -> " + room->get_result_string());
+            continue;
+        }
+
+        const auto expired_offer = room->expire_draw_offer(draw_ttl);
+        if (expired_offer != chess::Color::NONE) {
+            const auto offeree = expired_offer == chess::Color::WHITE
+                ? chess::Color::BLACK : chess::Color::WHITE;
+            const int offerer_fd = room->get_player_fd(expired_offer);
+            const int offeree_fd = room->get_player_fd(offeree);
+            if (offerer_fd >= 0 && room->is_connected(expired_offer)) {
+                json expired;
+                expired["type"] = "draw_declined";
+                expired["reason"] = "expired";
+                foreign_sender_(offerer_fd, expired.dump());
+            }
+            if (offeree_fd >= 0 && room->is_connected(offeree)) {
+                json resolved;
+                resolved["type"] = "draw_offer_resolved";
+                resolved["accepted"] = false;
+                resolved["reason"] = "expired";
+                foreign_sender_(offeree_fd, resolved.dump());
+            }
+        }
+
+        const auto expired_rematch = room->expire_rematch_offer(
+            std::chrono::milliseconds(REMATCH_OFFER_TTL_MS));
+        if (expired_rematch != chess::Color::NONE) {
+            const auto offeree = expired_rematch == chess::Color::WHITE
+                ? chess::Color::BLACK : chess::Color::WHITE;
+            const int offerer_fd = room->get_player_fd(expired_rematch);
+            const int offeree_fd = room->get_player_fd(offeree);
+            if (offerer_fd >= 0 && room->is_connected(expired_rematch)) {
+                json expired;
+                expired["type"] = "rematch_declined";
+                expired["reason"] = "expired";
+                foreign_sender_(offerer_fd, expired.dump());
+            }
+            if (offeree_fd >= 0 && room->is_connected(offeree)) {
+                json resolved;
+                resolved["type"] = "rematch_offer_resolved";
+                resolved["accepted"] = false;
+                resolved["reason"] = "expired";
+                foreign_sender_(offeree_fd, resolved.dump());
+            }
+        }
+
+        if (!room->expire_disconnected(grace)) continue;
+
+        const std::string game_over = chess::protocol::codec::encode_game_over(
+            {room->get_result_string(), "abandonment"});
+        const int white_fd = room->get_player_fd(chess::Color::WHITE);
+        const int black_fd = room->get_player_fd(chess::Color::BLACK);
+        if (room->is_connected(chess::Color::WHITE) && white_fd >= 0) {
+            foreign_sender_(white_fd, game_over);
+        }
+        if (room->is_connected(chess::Color::BLACK) && black_fd >= 0) {
+            foreign_sender_(black_fd, game_over);
+        }
+        spectator_broadcaster_(*room, game_over);
+
+        chess::core::Logger::info("game", "GameplayService",
+            "Game " + std::to_string(room->get_id())
+            + ": disconnect grace expired → " + room->get_result_string());
+    }
 }
 
 // ── trigger_ai_move (private) ─────────────────────────────────────────
@@ -502,10 +1021,21 @@ void GameplayService::trigger_ai_move(std::shared_ptr<chess::game::GameRoom> roo
     const chess::Board& board = room->get_board();
     chess::game::AIDifficulty diff = room->ai_difficulty();
 
-    chess::game::AIMove ai_move = ai_.compute_move(board, diff);
+    int white_ms = 0, black_ms = 0;
+    room->get_remaining_times(white_ms, black_ms);
+    chess::game::AIMove ai_move = ai_.compute_move(board, diff,
+        board.side_to_move() == chess::Color::WHITE ? white_ms : black_ms,
+        room->get_time_control().increment_ms);
 
     auto result = room->submit_move_ai(ai_move.from, ai_move.to, ai_move.promotion);
     if (!result.success) {
+        if (result.game_status == chess::GameStatus::TIMEOUT) {
+            const std::string frame = json{{"type", "game_over"},
+                {"result", room->get_result_string()}, {"reason", "timeout"}}.dump();
+            foreign_sender_(human_fd, frame);
+            spectator_broadcaster_(*room, frame);
+            return;
+        }
         chess::core::Logger::error("game", "GameplayService",
             "AI move failed in game " + std::to_string(room->get_id()) +
             ": " + result.error);
@@ -522,7 +1052,8 @@ void GameplayService::trigger_ai_move(std::shared_ptr<chess::game::GameRoom> roo
     move_msg["san"]        = result.san;
     move_msg["white_time"] = result.white_time_ms;
     move_msg["black_time"] = result.black_time_ms;
-    move_msg["fen"]        = room->get_board().to_fen();
+    move_msg["fen"]        = result.fen;
+    move_msg["legal_moves"] = result.legal_moves;
 
     if (ai_move.promotion != chess::PieceType::NONE) {
         char promo_char = 'q';
@@ -552,9 +1083,8 @@ void GameplayService::trigger_ai_move(std::shared_ptr<chess::game::GameRoom> roo
         chess::core::Logger::info("game", "GameplayService",
             "AI Game " + std::to_string(room->get_id()) + " ended: " +
             room->get_result_string() + " (" + status_to_reason(result.game_status) + ")");
-        // LLD-4.2: persistence via GameCompletionService listener.
-        // (No-op for AI games — the listener's own is_ai_game guard
-        //  short-circuits before hitting the store.)
+        // LLD-4.2: persistence via GameCompletionService listener. AI games
+        // are stored as unrated replay records and never update player stats.
     }
 }
 

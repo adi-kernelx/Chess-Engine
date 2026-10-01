@@ -59,6 +59,19 @@ export class GameScreen extends Screen {
         };
         this._lowTicked = null;         // last second we played the low-time tick for
         this._resizeObs = null;
+        this._opponentOffline = false;
+        this._legalTargets = new Map();
+        this._drawOfferPending = false;
+        this._drawOfferSending = false;
+        this._incomingDrawOffer = false;
+        this._rematchOfferPending = false;
+        this._rematchOfferSending = false;
+        this._incomingRematchOffer = false;
+        this._rematchResponding = false;
+        this._aiRematchRequested = false;
+        this._resultDialog = null;
+        this._activeRecoveryPending = false;
+        this._activeRecoveryTimer = null;
     }
 
     render() {
@@ -70,16 +83,31 @@ export class GameScreen extends Screen {
                 this.header('Game', 'No active game — returning to the play menu.'));
         }
 
+        // Keep the completed-game context after Store clears activeGame. The
+        // room ID and time control are required for rematch negotiation and
+        // PGN export while this finished screen remains mounted.
+        this._game = game;
+
         this._myColor = game.color;             // 'w' | 'b'
         this._opponent = game.opponent || 'Opponent';
         this._isAI = !!game.isAI;
         this._gameId = game.gameId;
+        this._tournamentId = Number(game.tournamentId || 0) || null;
+        this._pairingId = Number(game.pairingId || 0) || null;
+        this._tournamentName = game.tournamentName || '';
+        this._tournamentRound = Number(game.tournamentRound || 0) || null;
         this._clock.whiteMs = game.whiteMs;
         this._clock.blackMs = game.blackMs;
         this._clock.anchoredAt = performance.now();
         this._clock.active = 'w'; // Always starts as white
 
         return h('div', {},
+            this._tournamentId ? h('div', { class: 'game-tournament-context', role: 'status' },
+                h('div', {},
+                    h('strong', {}, this._tournamentName || 'Tournament game'),
+                    this._tournamentRound ? ` · Round ${this._tournamentRound}` : ''),
+                h('a', { class: 'btn btn--sm btn--ghost', href: `#/tournaments/${this._tournamentId}` },
+                    'Tournament')) : null,
             h('div', { class: 'game-screen' },
                 // ── Board column ──
                 h('div', { class: 'game-board-col' },
@@ -152,6 +180,10 @@ export class GameScreen extends Screen {
 
         // Renderer, interaction, promotion, sound.
         this.renderer = new BoardRenderer(this._canvas, this._selectedTheme());
+        this.renderer.onRastersReady = () => {
+            const parsed = parseFen(this._fen);
+            if (parsed) this._renderCaptured(parsed);
+        };
         this.interaction = new BoardInteraction(this._canvas, this.renderer);
         this.promotion = new PromotionPicker(this._container, this.renderer);
 
@@ -162,6 +194,7 @@ export class GameScreen extends Screen {
         // Orient so that my color is at the bottom.
         this.renderer.setOrientation(this._myColor === 'w');
         this.interaction.setPlayerColor(this._myColor);
+        this.interaction.legalTargetsProvider = from => this._legalTargets.get(from) || [];
 
         // Move intent → server round-trip (with promotion picker).
         this.interaction.onMoveIntent = async (from, to) => {
@@ -192,13 +225,31 @@ export class GameScreen extends Screen {
         this.sub(socket.on('move_made',   raw => this._onMoveMade(Inbound.normalize(raw))));
         this.sub(socket.on('move_rejected', raw => this._onMoveRejected(Inbound.normalize(raw))));
         this.sub(socket.on('game_state', raw => this._onGameState(Inbound.normalize(raw))));
+        this.sub(socket.on('active_game', raw => this._onActiveGame(Inbound.normalize(raw))));
         this.sub(socket.on('game_over',  raw => this._onGameOver(Inbound.normalize(raw))));
+        this.sub(socket.on('opponent_disconnected', raw => this._onOpponentDisconnected(raw)));
+        this.sub(socket.on('opponent_reconnected', () => this._onOpponentReconnected()));
+        this.sub(socket.on('draw_offer_sent', () => this._onDrawOfferSent()));
+        this.sub(socket.on('draw_offered', raw => this._onDrawOffered(raw)));
+        this.sub(socket.on('draw_declined', raw => this._onDrawDeclined(raw)));
+        this.sub(socket.on('draw_offer_resolved', raw => this._onDrawOfferResolved(raw)));
+        this.sub(socket.on('rematch_offer_sent', () => this._onRematchOfferSent()));
+        this.sub(socket.on('rematch_offered', raw => this._onRematchOffered(raw)));
+        this.sub(socket.on('rematch_declined', raw => this._onRematchDeclined(raw)));
+        this.sub(socket.on('rematch_offer_resolved', raw => this._onRematchOfferResolved(raw)));
+        this.sub(socket.on('rematch_started', raw => this._onRematchStarted(Inbound.normalize(raw))));
+        this.sub(socket.on('game_start', raw => {
+            if (this._aiRematchRequested) this._onAiRematchStarted(Inbound.normalize(raw));
+        }));
         this.sub(socket.on('error',      raw => this._onError(Inbound.normalize(raw))));
 
         // Reconnect-into-game: any new 'connected' → re-request state.
         this.sub(socket.onState(s => {
-            if (s === 'connected') socket.send(Outbound.gameState());
+            if (s === 'connected') this._requestState();
         }));
+        if (this.ctx.session) {
+            this.sub(this.ctx.session.on('change', () => this._requestState()));
+        }
 
         // Clock ticker.
         this._tickHandle = this.interval(() => this._tickClocks(), 100);
@@ -218,6 +269,7 @@ export class GameScreen extends Screen {
     }
 
     onUnmount() {
+        if (this._activeRecoveryTimer) clearTimeout(this._activeRecoveryTimer);
         if (this._resizeObs) this._resizeObs.disconnect();
         if (this.interaction) this.interaction.destroy();
         if (this.promotion) this.promotion.close();
@@ -235,7 +287,7 @@ export class GameScreen extends Screen {
             booted = true;
             this.renderer.resize(size).then(() => {
                 this.renderer.setPosition(this._fen);
-                if (socket.isConnected()) socket.send(Outbound.gameState());
+                if (socket.isConnected()) this._requestState();
             });
         };
         doIt();                              // synchronous
@@ -257,6 +309,9 @@ export class GameScreen extends Screen {
         // castling, en passant, promotion).
         const wasCapture = !!(this.renderer.squares[algIdx(msg.to)]);
         const prevSide = this._sideToMove;
+        if (this._incomingDrawOffer && prevSide === this._myColor) {
+            this._incomingDrawOffer = false;
+        }
         this._moves.push({ san: msg.san, thinkMs: null });
         this._renderMoveList();
 
@@ -271,13 +326,28 @@ export class GameScreen extends Screen {
         this.renderer.clearCheck();
         this.renderer.clearSelected();
 
-        // Animate — we don't yet know the follow-up FEN, but we can move
-        // the piece visually. When game_state lands (below), we snap to
-        // the authoritative position.
+        // The accepted move already carries the authoritative post-move FEN
+        // and the next side's legal moves. Cache the targets before showing
+        // the turn, then finish the animation against the old pixels and snap
+        // to that FEN. Move submission never waits on this cache.
+        if (msg.fen) this._fen = msg.fen;
+        this._cacheLegalMoves(msg.legalMoves);
         this.renderer.animateMove(msg.from, msg.to, () => {
-            this.ctx.socket.send(this.ctx.Outbound.gameState());
+            if (msg.fen) {
+                this.renderer.setPosition(msg.fen);
+                const parsed = parseFen(msg.fen);
+                this._sideToMove = parsed.sideToMove;
+                this._maybeHighlightCheck(parsed);
+                this._renderCaptured(parsed);
+                this.interaction.setEnabled(
+                    this._state === 'in_progress' && this._sideToMove === this._myColor);
+                this._updateStatus();
+            }
+            // Background reconciliation retains move timings and protects
+            // against a dropped/out-of-order frame without blocking input.
+            this._requestState();
         });
-        this._sideToMove = prevSide === 'w' ? 'b' : 'w';
+        this._sideToMove = msg.fen ? parseFen(msg.fen).sideToMove : (prevSide === 'w' ? 'b' : 'w');
         this._updateStatus();
 
         // Sound + haptics driven by SAN.
@@ -289,16 +359,19 @@ export class GameScreen extends Screen {
         this.ctx.sound.illegal();
         this.ctx.toast.danger(msg.reason || 'Illegal move.', { duration: 2400 });
         // Refresh in case the client's view diverged.
-        this.ctx.socket.send(this.ctx.Outbound.gameState());
+        this._requestState();
     }
 
     _onGameState(msg) {
+        if (this._state === 'finished' && msg.state !== 'finished') return;
         // The authoritative snapshot. Rebuilds everything.
         this._fen = msg.fen;
         this._state = msg.state;
         this._result = msg.result || null;
         this._reason = msg.reason || null;
         this._moves = msg.moves.slice();
+        this._cacheLegalMoves(msg.legalMoves);
+        this._syncDrawOffer(msg.drawOfferFrom);
         this.renderer.setPosition(msg.fen);
         const parsed = parseFen(msg.fen);
         this._sideToMove = parsed.sideToMove;
@@ -321,15 +394,28 @@ export class GameScreen extends Screen {
         this._updateStatus();
 
         if (this._state === 'finished' && this._result) {
+            this.ctx.store.setGame(null);
             this._presentResult();
         }
 
         this._renderActions();
     }
 
+    _cacheLegalMoves(uciMoves) {
+        const grouped = new Map();
+        for (const uci of (uciMoves || [])) {
+            if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)) continue;
+            const from = uci.slice(0, 2);
+            const to = uci.slice(2, 4);
+            const targets = grouped.get(from) || [];
+            if (!targets.includes(to)) targets.push(to);
+            grouped.set(from, targets);
+        }
+        this._legalTargets = grouped;
+    }
+
     _maybeHighlightCheck(parsed) {
-        // We don't have a legal-move generator client-side; use SAN suffix
-        // as a heuristic instead.
+        // Check highlighting follows the authoritative SAN suffix.
         const last = this._moves[this._moves.length - 1];
         this.renderer.clearCheck();
         if (!last || !last.san) return;
@@ -344,14 +430,126 @@ export class GameScreen extends Screen {
         this._reason = msg.reason;
         this.ctx.sound.gameEnd();
         this.interaction.setEnabled(false);
+        this.ctx.store.setGame(null);
         this._presentResult();
         this._updateStatus();
         this._renderActions();
     }
 
     _onError(msg) {
+        if (this._drawOfferSending) {
+            this._drawOfferSending = false;
+            this._renderActions();
+        }
+        if (this._rematchOfferSending || this._rematchResponding) {
+            this._rematchOfferSending = false;
+            this._rematchResponding = false;
+            this._incomingRematchOffer = false;
+            this._renderActions();
+        }
         if (msg.isUnknownType) return;
+        if (/not in a game/i.test(msg.message || '')) {
+            // A queued state request can arrive after the terminal event.
+            // Keep the final position until the player chooses to leave.
+            if (this._state === 'finished') return;
+            // During matchmaking/reconnect, one fd-scoped state request may
+            // race the durable seat binding. Verify by authenticated identity
+            // before clearing the board or navigating away.
+            this._recoverActiveGame();
+            return;
+        }
         this.ctx.toast.danger(msg.message);
+    }
+
+    _recoverActiveGame() {
+        if (this._activeRecoveryPending || this._state === 'finished') return;
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token || !this.ctx.socket.isConnected()) {
+            if (this._statusEl) this._statusEl.textContent = 'Reconnecting to your game…';
+            return;
+        }
+        this._activeRecoveryPending = true;
+        if (this._statusEl) {
+            this._statusEl.textContent = 'Confirming your active game…';
+            this._statusEl.setAttribute('aria-busy', 'true');
+        }
+        this.ctx.socket.send(this.ctx.Outbound.activeGame(token));
+        this._activeRecoveryTimer = setTimeout(() => {
+            this._activeRecoveryTimer = null;
+            this._activeRecoveryPending = false;
+            if (!this.root || this._state === 'finished') return;
+            if (this._statusEl) {
+                this._statusEl.removeAttribute('aria-busy');
+                this._statusEl.textContent = 'Still reconnecting — your game has not been abandoned.';
+            }
+        }, 3000);
+    }
+
+    _onActiveGame(msg) {
+        if (!this._activeRecoveryPending) return;
+        this._activeRecoveryPending = false;
+        if (this._activeRecoveryTimer) {
+            clearTimeout(this._activeRecoveryTimer);
+            this._activeRecoveryTimer = null;
+        }
+        if (this._statusEl) this._statusEl.removeAttribute('aria-busy');
+
+        const game = msg && msg.game;
+        if (!game || !game.gameId) {
+            this.ctx.store.setGame(null);
+            this.ctx.toast.warning(
+                'This game is no longer active. Its result is available in Replays.',
+                { duration: 4200 });
+            this.ctx.router.go('/replay');
+            return;
+        }
+
+        this.ctx.store.setGame({
+            gameId: game.gameId,
+            color: game.color === 'b' ? 'b' : 'w',
+            opponent: game.opponent || 'Opponent',
+            isAI: !!game.isAI,
+            whiteMs: game.whiteMs,
+            blackMs: game.blackMs,
+            timeBaseSec: game.timeBaseSec,
+            timeIncSec: game.timeIncSec,
+            difficulty: this._game && this._game.difficulty || null,
+            tournamentId: game.tournamentId || this._game && this._game.tournamentId || null,
+            pairingId: game.pairingId || this._game && this._game.pairingId || null,
+            tournamentName: this._game && this._game.tournamentName || '',
+            tournamentRound: this._game && this._game.tournamentRound || null,
+        });
+
+        if (Number(game.gameId) !== Number(this._gameId)) {
+            this.ctx.router.go('/game/' + game.gameId);
+            return;
+        }
+
+        // get_active_game has rebound this socket to the durable seat. Fetch
+        // the full authoritative board/moves/clocks now that the binding is
+        // guaranteed to exist.
+        this._requestState();
+    }
+
+    _requestState() {
+        if (this._state === 'finished') return;
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token || !this.ctx.socket.isConnected()) return;
+        this.ctx.socket.send(this.ctx.Outbound.gameState(token));
+    }
+
+    _onOpponentDisconnected(raw) {
+        this._opponentOffline = true;
+        const seconds = Math.max(1, Math.ceil(Number(raw.grace_ms || 120_000) / 1000));
+        this.ctx.toast.warning(`${this._opponent} disconnected. They have ${seconds} seconds to return.`,
+            { duration: 5000 });
+        this._updateStatus();
+    }
+
+    _onOpponentReconnected() {
+        this._opponentOffline = false;
+        this.ctx.toast.success(`${this._opponent} reconnected.`, { duration: 2400 });
+        this._updateStatus();
     }
 
     /* ── Clocks — anchored ───────────────────────────────── */
@@ -413,6 +611,7 @@ export class GameScreen extends Screen {
     _statusText() {
         if (this._state === 'finished') return this._resultLine();
         if (this._state === 'waiting') return 'Waiting for opponent…';
+        if (this._opponentOffline) return `${this._opponent} disconnected · waiting up to 120 seconds…`;
         if (this._sideToMove === this._myColor) return 'Your move';
         return `${this._opponent}${this._isAI ? '' : ''} is thinking…`;
     }
@@ -476,11 +675,8 @@ export class GameScreen extends Screen {
         clear(root);
         for (const t of list) {
             const key = `${capturedColor}_${t}`;
-            const img = this.renderer.rasters[key];
-            if (!img) continue;
-            const clone = new Image();
-            clone.src = img.src;
-            root.appendChild(clone);
+            const thumbnail = this.renderer.createPieceThumbnail(key);
+            if (thumbnail) root.appendChild(thumbnail);
         }
         if (advantage > 0) {
             root.appendChild(h('span', { class: 'player-bar__adv' }, `+${advantage}`));
@@ -497,11 +693,28 @@ export class GameScreen extends Screen {
                 class: 'btn btn--danger',
                 onclick: () => this._onResign(),
             }, 'Resign'));
-            this._actionsEl.appendChild(h('button', {
-                class: 'btn',
-                onclick: () => this._onDrawOffer(),
-                title: 'Offer a draw (backend pending — see log)',
-            }, 'Offer draw'));
+            if (this._incomingDrawOffer) {
+                this._actionsEl.appendChild(h('div', {
+                    class: 'game-draw-offer',
+                    role: 'status',
+                    'aria-live': 'polite',
+                }, `${this._opponent} offered a draw. It expires after 45 seconds; respond or keep playing.`));
+                this._actionsEl.appendChild(h('button', {
+                    class: 'btn btn--primary',
+                    onclick: () => this._respondToDraw(true),
+                }, 'Accept draw'));
+                this._actionsEl.appendChild(h('button', {
+                    class: 'btn',
+                    onclick: () => this._respondToDraw(false),
+                }, 'Decline draw'));
+            } else {
+                this._actionsEl.appendChild(h('button', {
+                    class: 'btn',
+                    onclick: () => this._onDrawOffer(),
+                    disabled: this._isAI || this._drawOfferPending || this._drawOfferSending,
+                    title: this._isAI ? 'Draw offers are available only in human games' : 'Offer your opponent a draw',
+                }, this._drawOfferPending ? 'Draw offered' : this._drawOfferSending ? 'Sending…' : 'Offer draw'));
+            }
             // G2: share button on human games only (nothing to share with the AI).
             if (!this._isAI && this._gameId) {
                 this._actionsEl.appendChild(h('button', {
@@ -514,11 +727,40 @@ export class GameScreen extends Screen {
                 class: 'btn btn--ghost',
                 onclick: () => this.renderer.flip(),
             }, 'Flip board'));
-        } else {
+        } else if (this._tournamentId) {
             this._actionsEl.appendChild(h('button', {
                 class: 'btn btn--primary',
-                onclick: () => this._onRematch(),
-            }, 'Rematch'));
+                onclick: () => this.ctx.router.go(`/tournaments/${this._tournamentId}`),
+            }, 'Back to tournament'));
+            this._actionsEl.appendChild(h('button', {
+                class: 'btn',
+                onclick: () => this.ctx.router.go(`/replay/${this._gameId}`),
+            }, 'Open replay'));
+        } else {
+            if (this._incomingRematchOffer) {
+                this._actionsEl.appendChild(h('div', {
+                    class: 'game-draw-offer',
+                    role: 'status',
+                    'aria-live': 'polite',
+                }, `${this._opponent} offered a rematch. It expires after 45 seconds.`));
+                this._actionsEl.appendChild(h('button', {
+                    class: 'btn btn--primary',
+                    onclick: () => this._respondToRematch(true),
+                    disabled: this._rematchResponding,
+                }, this._rematchResponding ? 'Starting…' : 'Accept rematch'));
+                this._actionsEl.appendChild(h('button', {
+                    class: 'btn',
+                    onclick: () => this._respondToRematch(false),
+                    disabled: this._rematchResponding,
+                }, 'Decline'));
+            } else {
+                this._actionsEl.appendChild(h('button', {
+                    class: 'btn btn--primary',
+                    onclick: () => this._onRematch(),
+                    disabled: this._rematchOfferPending || this._rematchOfferSending,
+                }, this._rematchOfferPending ? 'Rematch offered'
+                    : this._rematchOfferSending ? 'Sending…' : 'Rematch'));
+            }
             this._actionsEl.appendChild(h('button', {
                 class: 'btn',
                 onclick: () => this.ctx.router.go('/play'),
@@ -537,40 +779,180 @@ export class GameScreen extends Screen {
     }
 
     _onDrawOffer() {
-        // Backend does not yet have a draw_offer message. capability.js
-        // would probe; here we just fire-and-forget with a friendly toast.
-        this.ctx.toast.info('Draw offers arrive when Phase 7 authentication ships — logged as backend work.',
-            { duration: 3600 });
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token || this._isAI || this._drawOfferPending || this._drawOfferSending) return;
+        this._drawOfferSending = true;
+        this._renderActions();
+        this.ctx.socket.send(this.ctx.Outbound.offerDraw(token));
+    }
+
+    _onDrawOfferSent() {
+        this._drawOfferSending = false;
+        this._drawOfferPending = true;
+        this._renderActions();
+        this.ctx.toast.info('Draw offer sent. It expires in 45 seconds, or when your opponent moves.',
+            { duration: 3200 });
+    }
+
+    _onDrawOffered(raw) {
+        if (this._state !== 'in_progress') return;
+        const firstNotice = !this._incomingDrawOffer;
+        this._incomingDrawOffer = true;
+        this._renderActions();
+        const from = raw && raw.from ? raw.from : this._opponent;
+        if (firstNotice) {
+            this.ctx.toast.info(`${from} offered a draw. Respond beside the board or keep playing.`,
+                { duration: 4200 });
+        }
+    }
+
+    _respondToDraw(accept) {
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token) return;
+        this._incomingDrawOffer = false;
+        this._renderActions();
+        this.ctx.socket.send(this.ctx.Outbound.drawResponse(token, accept));
+        if (!accept) this.ctx.toast.info('Draw offer declined.', { duration: 2200 });
+    }
+
+    _onDrawDeclined(raw) {
+        this._drawOfferPending = false;
+        this._drawOfferSending = false;
+        this._renderActions();
+        const byMove = raw && raw.reason === 'move_made';
+        const expired = raw && raw.reason === 'expired';
+        this.ctx.toast.info(expired ? 'Your draw offer expired.'
+            : byMove ? 'Draw offer declined by your opponent’s move.' : 'Draw offer declined.',
+            { duration: 2800 });
+    }
+
+    _syncDrawOffer(fromColor) {
+        this._drawOfferPending = fromColor === this._myColor;
+        if (fromColor && fromColor !== this._myColor) {
+            this._onDrawOffered({ from: this._opponent });
+        } else if (!fromColor) {
+            this._incomingDrawOffer = false;
+            this._renderActions();
+        }
+    }
+
+    _onDrawOfferResolved(raw) {
+        this._incomingDrawOffer = false;
+        this._renderActions();
+        if (raw && raw.reason === 'expired') {
+            this.ctx.toast.info('The draw offer expired.', { duration: 2400 });
+        }
     }
 
     _onRematch() {
-        const game = this.ctx.store.game;
-        if (!game) { this.ctx.router.go('/'); return; }
-        // Rematch is not a native server message. Best-effort: create a fresh
-        // game with the same time control, or if it was AI, restart against
-        // the same difficulty and time control.
+        const game = this._game;
+        if (!game) { this.ctx.router.go('/play'); return; }
+        if (this._tournamentId) {
+            this.ctx.toast.info('Tournament games do not offer rematches.', { duration: 2600 });
+            this.ctx.router.go(`/tournaments/${this._tournamentId}`);
+            return;
+        }
         const token = this.ctx.session && this.ctx.session.accessToken;
         if (!token) {
             this.ctx.toast.warning('Sign in to play.', { duration: 2800 });
             this.ctx.router.go('/login');
             return;
         }
-        this.ctx.store.setGame(null);
         if (game.isAI) {
+            this._aiRematchRequested = true;
+            this._rematchOfferSending = true;
+            this._renderActions();
             this.ctx.socket.send(this.ctx.Outbound.playAI(
                 token,
                 game.difficulty || 'medium',
                 game.timeBaseSec, game.timeIncSec,
             ));
         } else {
-            this.ctx.socket.send(this.ctx.Outbound.createGame(
-                token,
-                game.timeBaseSec, game.timeIncSec,
-            ));
-            this.ctx.toast.info('Rematch is not a native server action yet — a new open game was created.',
-                { title: 'Rematch', duration: 3600 });
-            this.ctx.router.go('/');
+            if (this._rematchOfferPending || this._rematchOfferSending) return;
+            this._rematchOfferSending = true;
+            this._renderActions();
+            this.ctx.socket.send(this.ctx.Outbound.offerRematch(token, game.gameId));
         }
+    }
+
+    _onRematchOfferSent() {
+        this._rematchOfferSending = false;
+        this._rematchOfferPending = true;
+        this._renderActions();
+        this.ctx.toast.info('Rematch offer sent. It expires in 45 seconds.', { duration: 3000 });
+    }
+
+    _onRematchOffered(raw) {
+        if (this._state !== 'finished' || Number(raw.game_id) !== Number(this._gameId)) return;
+        this._incomingRematchOffer = true;
+        this._rematchResponding = false;
+        if (this._resultDialog) this._resultDialog.close();
+        this._renderActions();
+        const from = raw && raw.from ? raw.from : this._opponent;
+        this.ctx.toast.info(`${from} offered a rematch. Accept or decline beside the board.`,
+            { duration: 4200 });
+    }
+
+    _respondToRematch(accept) {
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (!token || !this._game || this._rematchResponding) return;
+        this._rematchResponding = true;
+        this._renderActions();
+        this.ctx.socket.send(this.ctx.Outbound.rematchResponse(
+            token, this._game.gameId, accept));
+        if (!accept) this.ctx.toast.info('Rematch declined.', { duration: 2200 });
+    }
+
+    _onRematchDeclined(raw) {
+        this._rematchOfferPending = false;
+        this._rematchOfferSending = false;
+        this._renderActions();
+        this.ctx.toast.info(raw && raw.reason === 'expired'
+            ? 'Your rematch offer expired.' : 'Rematch offer declined.', { duration: 2800 });
+    }
+
+    _onRematchOfferResolved(raw) {
+        this._incomingRematchOffer = false;
+        this._rematchResponding = false;
+        this._renderActions();
+        if (raw && raw.reason === 'expired') {
+            this.ctx.toast.info('The rematch offer expired.', { duration: 2400 });
+        }
+    }
+
+    _onRematchStarted(msg) {
+        if (!msg || !msg.gameId) return;
+        if (this._resultDialog) this._resultDialog.close();
+        this.ctx.store.setGame({
+            gameId: msg.gameId,
+            color: msg.color === 'black' ? 'b' : 'w',
+            opponent: msg.opponent,
+            isAI: false,
+            whiteMs: msg.whiteMs,
+            blackMs: msg.blackMs,
+            timeBaseSec: msg.timeBaseSec,
+            timeIncSec: msg.timeIncSec,
+            difficulty: null,
+        });
+        this.ctx.router.go('/game/' + msg.gameId);
+    }
+
+    _onAiRematchStarted(msg) {
+        if (!this._aiRematchRequested || !msg || !msg.gameId) return;
+        this._aiRematchRequested = false;
+        const previous = this._game;
+        this.ctx.store.setGame({
+            gameId: msg.gameId,
+            color: msg.color === 'black' ? 'b' : 'w',
+            opponent: msg.opponent,
+            isAI: true,
+            whiteMs: msg.whiteMs,
+            blackMs: msg.blackMs,
+            timeBaseSec: previous.timeBaseSec,
+            timeIncSec: previous.timeIncSec,
+            difficulty: previous.difficulty || 'medium',
+        });
+        this.ctx.router.go('/game/' + msg.gameId);
     }
 
     /* ── Game over modal ─────────────────────────────────── */
@@ -578,6 +960,10 @@ export class GameScreen extends Screen {
     _presentResult() {
         if (this._resultShown) return;
         this._resultShown = true;
+        if (this._isAI) {
+            this.ctx.toast.info(`${resultLabel(this._result, this._myColor)} · ${reasonLabel(this._reason)}`);
+            return;
+        }
 
         const won  = (this._result === '1-0' && this._myColor === 'w') || (this._result === '0-1' && this._myColor === 'b');
         const lost = (this._result === '1-0' && this._myColor === 'b') || (this._result === '0-1' && this._myColor === 'w');
@@ -589,38 +975,45 @@ export class GameScreen extends Screen {
         const white = this._myColor === 'w' ? me : this._opponent;
         const black = this._myColor === 'w' ? this._opponent : me;
 
+        const shareActions = [
+            h('button', {
+                class: 'btn btn--sm',
+                onclick: () => this._copyPgn(white, black),
+            }, 'Copy PGN'),
+            h('button', {
+                class: 'btn btn--sm',
+                onclick: () => this._copyBoardImage(),
+                title: 'Copy the final board as an image',
+            }, 'Copy image'),
+        ];
+        if (!this._tournamentId) {
+            shareActions.push(h('button', {
+                class: 'btn btn--sm',
+                onclick: () => this._inviteFriend(),
+                title: 'Post a fresh game and share the link',
+            }, 'Invite a friend'));
+        }
         const body = h('div', { class: 'result-card' },
             h('span', { class: 'result-card__badge ' + badgeClass }, badgeText),
             h('div', { class: 'result-card__title' }, resultLabel(this._result, this._myColor)),
             h('div', { class: 'result-card__reason' }, reasonLabel(this._reason)),
             h('div', { class: 'result-card__meta mono' }, `${white} vs ${black} · ${this._moves.length} plies`),
             // G2: share row — copy PGN, copy image, invite a friend.
-            h('div', { class: 'result-card__share' },
-                h('button', {
-                    class: 'btn btn--sm',
-                    onclick: () => this._copyPgn(white, black),
-                }, 'Copy PGN'),
-                h('button', {
-                    class: 'btn btn--sm',
-                    onclick: () => this._copyBoardImage(),
-                    title: 'Copy the final board as an image',
-                }, 'Copy image'),
-                h('button', {
-                    class: 'btn btn--sm',
-                    onclick: () => this._inviteFriend(),
-                    title: 'Post a fresh game and share the link',
-                }, 'Invite a friend'),
-            ),
+            h('div', { class: 'result-card__share' }, ...shareActions),
         );
-        const footer = h('div', { style: { display: 'flex', gap: '8px' } },
-            h('button', { class: 'btn', onclick: () => { dlg.close(); this.ctx.router.go('/play'); } }, 'Back to lobby'),
-            h('button', { class: 'btn btn--primary', onclick: () => { dlg.close(); this._onRematch(); } }, 'Rematch'),
-        );
+        const footer = this._tournamentId
+            ? h('div', { style: { display: 'flex', gap: '8px' } },
+                h('button', { class: 'btn', onclick: () => { dlg.close(); this.ctx.router.go(`/replay/${this._gameId}`); } }, 'Open replay'),
+                h('button', { class: 'btn btn--primary', onclick: () => { dlg.close(); this.ctx.router.go(`/tournaments/${this._tournamentId}`); } }, 'Back to tournament'))
+            : h('div', { style: { display: 'flex', gap: '8px' } },
+                h('button', { class: 'btn', onclick: () => { dlg.close(); this.ctx.router.go('/play'); } }, 'Back to lobby'),
+                h('button', { class: 'btn btn--primary', onclick: () => { dlg.close(); this._onRematch(); } }, 'Rematch'));
         const dlg = this.ctx.modal.open({
             title: 'Game over',
             body, footer,
             dismissible: true,
         });
+        this._resultDialog = dlg;
     }
 
     /* ── G2 share helpers ─────────────────────────────────── */
@@ -643,7 +1036,7 @@ export class GameScreen extends Screen {
         const pgn = buildPGN({
             white, black,
             result: this._result || '*',
-            timeControl: `${(this.ctx.store.game.timeBaseSec || 0)}+${(this.ctx.store.game.timeIncSec || 0)}`,
+            timeControl: `${(this._game.timeBaseSec || 0)}+${(this._game.timeIncSec || 0)}`,
             moves: this._moves,
         });
         const res = await copyText(pgn);

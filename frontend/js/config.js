@@ -51,8 +51,8 @@ export const CONFIG = {
     // <script> tag, and therefore no CSP relaxation beyond the connect-src
     // entry in vercel.json.
     //
-    // If supabaseUrl is empty, the Google button is hidden and Continue
-    // with Google is disabled at compile-in.
+    // If supabaseUrl is empty, the Google option remains visible but explains
+    // that it becomes active after cloud deployment.
     supabaseUrl:      IS_LOCAL ? '' : 'https://<supabase-project>.supabase.co',
     supabaseAnonKey:  IS_LOCAL ? '' : '<supabase-anon-key>',
 

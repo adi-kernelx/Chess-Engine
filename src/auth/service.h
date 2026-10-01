@@ -65,6 +65,7 @@ struct LoginResult {
 constexpr size_t PASSWORD_MIN_LEN = 8;
 constexpr size_t PASSWORD_MAX_LEN = 256;   // Argon2 handles more, but this is
                                            // a size bound on request payload.
+constexpr int INITIAL_ELO = 800;
 
 /**
  * Create a password account.

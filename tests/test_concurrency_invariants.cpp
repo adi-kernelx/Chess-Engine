@@ -1,8 +1,8 @@
 /**
  * test_concurrency_invariants.cpp — LLD-6.4.
  *
- * Two invariants a future async slice will need in place before
- * touching the current serialized event loop:
+ * Transport and room invariants a future async slice will need in place
+ * before touching the current serialized event loop:
  *
  *   1. `Connection::MAX_WRITE_BUFFER_BYTES` cap. A slow client
  *      accumulating unread frames used to grow the write buffer
@@ -10,7 +10,11 @@
  *      sets a sticky `write_buffer_overflowed()` flag; the transport
  *      closes the connection on the next drain check.
  *
- *   2. `GameRoom::revision()`. Monotonically increases on every
+ *   2. WebSocket heartbeat state. It is inactive before upgrade, permits
+ *      one outstanding ping, expires at the timeout boundary, and a pong
+ *      resets the next-ping interval.
+ *
+ *   3. `GameRoom::revision()`. Monotonically increases on every
  *      mutating public method (join / submit_move / submit_move_ai
  *      / resign / on_disconnect / on_reconnect / add_spectator /
  *      remove_spectator). Read-only accessors do not bump it. A
@@ -23,6 +27,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <chrono>
 
 #include "game/game_events.h"
 #include "game/game_room.h"
@@ -108,6 +113,61 @@ int main() {
         c.append_to_write_buffer(small, 1);
         return c.write_buffer_bytes() == before
             && c.write_buffer_overflowed();
+    });
+
+    // ── WebSocket heartbeat state ─────────────────────────────────────
+
+    run_test("Heartbeat starts only after WebSocket upgrade", []() {
+        Connection c(-1, "test");
+        const auto now = Connection::HeartbeatClock::now();
+        return !c.heartbeat_due(now + std::chrono::hours(1),
+                                std::chrono::seconds(10));
+    });
+
+    run_test("Heartbeat becomes due, waits for pong, then expires", []() {
+        Connection c(-1, "test");
+        c.set_upgraded(true);
+        const auto base = Connection::HeartbeatClock::now();
+        if (!c.heartbeat_due(base + std::chrono::seconds(11),
+                             std::chrono::seconds(10))) return false;
+
+        const auto sent = base + std::chrono::seconds(11);
+        c.mark_ping_sent(sent);
+        return c.awaiting_pong()
+            && !c.heartbeat_due(sent + std::chrono::seconds(30),
+                                std::chrono::seconds(10))
+            && !c.heartbeat_expired(sent + std::chrono::seconds(9),
+                                    std::chrono::seconds(10))
+            && c.heartbeat_expired(sent + std::chrono::seconds(10),
+                                   std::chrono::seconds(10));
+    });
+
+    run_test("Pong acknowledges heartbeat and schedules the next one", []() {
+        Connection c(-1, "test");
+        c.set_upgraded(true);
+        const auto sent = Connection::HeartbeatClock::now();
+        c.mark_ping_sent(sent);
+        const auto pong = sent + std::chrono::seconds(2);
+        c.mark_pong_received(pong);
+        return !c.awaiting_pong()
+            && !c.heartbeat_due(pong + std::chrono::seconds(9),
+                                std::chrono::seconds(10))
+            && c.heartbeat_due(pong + std::chrono::seconds(10),
+                               std::chrono::seconds(10));
+    });
+
+    run_test("Any valid inbound frame acknowledges peer liveness", []() {
+        Connection c(-1, "test");
+        c.set_upgraded(true);
+        const auto sent = Connection::HeartbeatClock::now();
+        c.mark_ping_sent(sent);
+        const auto activity = sent + std::chrono::seconds(12);
+        c.mark_activity_received(activity);
+        return !c.awaiting_pong()
+            && !c.heartbeat_due(activity + std::chrono::seconds(9),
+                                std::chrono::seconds(10))
+            && c.heartbeat_due(activity + std::chrono::seconds(10),
+                               std::chrono::seconds(10));
     });
 
     // ── GameRoom revision counter ──────────────────────────────────────

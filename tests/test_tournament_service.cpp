@@ -82,7 +82,8 @@ int main() {
     run_test("create_tournament with null db → no-database error", [&] {
         TournamentService svc(nullptr);
         FakeSink sink;
-        svc.create_tournament(make_ctx(1), 42, "My Cup", 4, 300, 3, sink);
+        svc.create_tournament(make_ctx(1), 42, "My Cup", 4, 300, 3,
+                              2000000000, 2000000060, 3600, sink);
         return expect_error(sink, DB_ERR);
     });
 
@@ -90,6 +91,13 @@ int main() {
         TournamentService svc(nullptr);
         FakeSink sink;
         svc.join_tournament(make_ctx(1), 42, 1500, true, 7, sink);
+        return expect_error(sink, DB_ERR);
+    });
+
+    run_test("leave_tournament with null db → no-database error", [&] {
+        TournamentService svc(nullptr);
+        FakeSink sink;
+        svc.leave_tournament(make_ctx(1), 42, true, 7, sink);
         return expect_error(sink, DB_ERR);
     });
 
@@ -117,7 +125,7 @@ int main() {
     run_test("report_tournament_result with null db → no-database error", [&] {
         TournamentService svc(nullptr);
         FakeSink sink;
-        svc.report_tournament_result(make_ctx(1), 42, true, 100, "w", sink);
+        svc.report_tournament_result(make_ctx(1), 42, true, 100, "w", "test", sink);
         return expect_error(sink, DB_ERR);
     });
 

@@ -61,6 +61,9 @@ Database open_db() {
 bool reset_to_phase7(Database& db) {
     std::string error;
     if (!db.run_script(
+            "DROP TABLE IF EXISTS tournament_result_overrides;"
+            "DROP TABLE IF EXISTS tournament_round_checkins;"
+            "DROP TABLE IF EXISTS tournament_rounds;"
             "DROP TABLE IF EXISTS tournament_pairings;"
             "DROP TABLE IF EXISTS tournament_players;"
             "DROP TABLE IF EXISTS tournaments;"

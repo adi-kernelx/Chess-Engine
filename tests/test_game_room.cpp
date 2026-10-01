@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 using namespace chess;
 using namespace chess::game;
@@ -39,7 +40,6 @@ void run_test(const std::string& name, std::function<bool()> test_fn) {
         g_failed++;
     }
 }
-
 // ============================================================
 // GameRoom Tests
 // ============================================================
@@ -268,6 +268,27 @@ void test_clock() {
         auto history = room.get_move_history();
         return !history.empty() && history[0].think_time_ms >= 0;
     });
+
+    run_test("Server maintenance can finish a clock exactly at zero", []() {
+        application::ports::FakeClock clock;
+        GameRoom room(1, 100, "Alice", 10, TimeControl(60000, 0));
+        room.set_clock(&clock);
+        room.join(200, "Bob", 20);
+
+        clock.advance(std::chrono::milliseconds(59999));
+        if (room.expire_on_time()) return false;
+        clock.advance(std::chrono::milliseconds(1));
+
+        int white_ms = -1, black_ms = -1;
+        if (!room.expire_on_time()) return false;
+        room.get_remaining_times(white_ms, black_ms);
+        return room.get_state() == RoomState::FINISHED
+            && room.get_game_status() == GameStatus::TIMEOUT
+            && room.get_result_string() == "0-1"
+            && white_ms == 0
+            && black_ms == 60000
+            && !room.expire_on_time();
+    });
 }
 
 // ============================================================
@@ -362,7 +383,8 @@ void test_disconnect() {
         room.join(200, "Bob", 20);
         room.on_disconnect(20);  // Bob disconnects
         // Game should still be IN_PROGRESS
-        return room.get_state() == RoomState::IN_PROGRESS;
+        return room.get_state() == RoomState::IN_PROGRESS
+            && !room.has_player(20);
     });
 
     run_test("Reconnect restores player to the game", []() {
@@ -372,6 +394,174 @@ void test_disconnect() {
 
         bool reconnected = room.on_reconnect(200, 25);  // Bob reconnects with new fd
         return reconnected && room.has_player(25);
+    });
+
+    run_test("Reconnect may reuse the same numeric socket fd safely", []() {
+        GameRoom room(1, 100, "Alice", 10, TimeControl(), 1001, 800);
+        room.join(200, "Bob", 20, 1002, 800);
+        room.on_disconnect(20);
+        return !room.has_player(20)
+            && room.on_reconnect_db_player(1002, 20)
+            && room.has_player(20)
+            && room.is_connected(Color::BLACK);
+    });
+
+    run_test("Reconnect within 120 seconds prevents abandonment", []() {
+        application::ports::FakeClock clock;
+        GameRoom room(1, 100, "Alice", 10, TimeControl(), 1001, 800);
+        room.set_clock(&clock);
+        room.join(200, "Bob", 20, 1002, 800);
+        room.on_disconnect(20);
+
+        clock.advance(std::chrono::seconds(119));
+        if (room.expire_disconnected(std::chrono::seconds(120))) return false;
+        if (!room.on_reconnect_db_player(1002, 25)) return false;
+        clock.advance(std::chrono::seconds(2));
+        return !room.expire_disconnected(std::chrono::seconds(120))
+            && room.get_state() == RoomState::IN_PROGRESS
+            && room.has_player(25);
+    });
+
+    run_test("Disconnected player forfeits after 120 seconds", []() {
+        application::ports::FakeClock clock;
+        GameRoom room(1, 100, "Alice", 10, TimeControl(), 1001, 800);
+        room.set_clock(&clock);
+        room.join(200, "Bob", 20, 1002, 800);
+        room.on_disconnect(20);
+
+        clock.advance(std::chrono::seconds(120));
+        return room.expire_disconnected(std::chrono::seconds(120))
+            && room.get_state() == RoomState::FINISHED
+            && room.get_game_status() == GameStatus::ABANDONMENT
+            && room.get_result_string() == "1-0";
+    });
+}
+
+void test_draw_offers() {
+    std::cout << "\n=== Draw Offer Tests ===" << std::endl;
+
+    run_test("Opponent can decline a pending draw offer", []() {
+        GameRoom room(1, 100, "Alice", 10);
+        room.join(200, "Bob", 20);
+        std::string error;
+        if (!room.offer_draw(10, error)) return false;
+        if (room.draw_offer_from() != Color::WHITE) return false;
+        if (!room.respond_to_draw(20, false, error)) return false;
+        return room.draw_offer_from() == Color::NONE
+            && room.get_state() == RoomState::IN_PROGRESS;
+    });
+
+    run_test("Accepting a draw finishes once by agreement", []() {
+        GameRoom room(1, 100, "Alice", 10);
+        room.join(200, "Bob", 20);
+        std::string error;
+        return room.offer_draw(10, error)
+            && room.respond_to_draw(20, true, error)
+            && room.get_state() == RoomState::FINISHED
+            && room.get_game_status() == GameStatus::DRAW_AGREEMENT
+            && room.get_result_string() == "1/2-1/2";
+    });
+
+    run_test("Offeree making a legal move implicitly declines", []() {
+        GameRoom room(1, 100, "Alice", 10);
+        room.join(200, "Bob", 20);
+        std::string error;
+        if (!room.offer_draw(20, error)) return false;
+        auto result = room.submit_move(10, Board::algebraic_to_square("e2"), Board::algebraic_to_square("e4"));
+        return result.success && result.draw_offer_declined
+            && room.draw_offer_from() == Color::NONE;
+    });
+
+    run_test("Offeree cannot accept an old offer after making a move", []() {
+        GameRoom room(1, 100, "Alice", 10);
+        room.join(200, "Bob", 20);
+        std::string error;
+
+        // White offers before moving. The offer remains available to Black
+        // only until Black chooses a legal move instead of accepting it.
+        if (!room.offer_draw(10, error)) return false;
+        auto white_move = room.submit_move(
+            10, Board::algebraic_to_square("e2"), Board::algebraic_to_square("e4"));
+        if (!white_move.success || room.draw_offer_from() != Color::WHITE) return false;
+
+        auto black_move = room.submit_move(
+            20, Board::algebraic_to_square("e7"), Board::algebraic_to_square("e5"));
+        if (!black_move.success || !black_move.draw_offer_declined
+            || room.draw_offer_from() != Color::NONE) return false;
+
+        error.clear();
+        return !room.respond_to_draw(20, true, error)
+            && error == "There is no pending draw offer"
+            && room.get_state() == RoomState::IN_PROGRESS;
+    });
+
+    run_test("Draw offer expires at 45 seconds", []() {
+        application::ports::FakeClock clock;
+        GameRoom room(1, 100, "Alice", 10);
+        room.set_clock(&clock);
+        room.join(200, "Bob", 20);
+        std::string error;
+        if (!room.offer_draw(10, error)) return false;
+
+        clock.advance(std::chrono::seconds(44));
+        if (room.expire_draw_offer(std::chrono::seconds(45)) != Color::NONE
+            || room.draw_offer_from() != Color::WHITE) return false;
+
+        clock.advance(std::chrono::seconds(1));
+        if (room.expire_draw_offer(std::chrono::seconds(45)) != Color::WHITE
+            || room.draw_offer_from() != Color::NONE) return false;
+
+        return !room.respond_to_draw(20, true, error)
+            && error == "There is no pending draw offer"
+            && room.get_state() == RoomState::IN_PROGRESS;
+    });
+
+    run_test("Accepted move carries next side legal UCI moves", []() {
+        GameRoom room(1, 100, "Alice", 10);
+        room.join(200, "Bob", 20);
+        auto result = room.submit_move(10, Board::algebraic_to_square("e2"), Board::algebraic_to_square("e4"));
+        return result.success
+            && result.fen.find(" b ") != std::string::npos
+            && std::find(result.legal_moves.begin(), result.legal_moves.end(), "e7e5")
+                != result.legal_moves.end();
+    });
+}
+
+void test_rematch_offers() {
+    std::cout << "\n=== Rematch Offer Tests ===" << std::endl;
+
+    run_test("Completed human game supports one rematch response", []() {
+        GameRoom room(1, 100, "Alice", 10);
+        room.join(200, "Bob", 20);
+        if (!room.resign(10)) return false;
+
+        std::string error;
+        if (!room.offer_rematch(10, error)
+            || room.rematch_offer_from() != Color::WHITE) return false;
+        Color offerer = Color::NONE;
+        return room.respond_to_rematch(20, true, offerer, error)
+            && offerer == Color::WHITE
+            && room.rematch_offer_from() == Color::NONE
+            && !room.respond_to_rematch(20, true, offerer, error)
+            && error == "There is no pending rematch offer";
+    });
+
+    run_test("Rematch offer expires at 45 seconds", []() {
+        application::ports::FakeClock clock;
+        GameRoom room(1, 100, "Alice", 10);
+        room.set_clock(&clock);
+        room.join(200, "Bob", 20);
+        if (!room.resign(10)) return false;
+
+        std::string error;
+        if (!room.offer_rematch(20, error)) return false;
+        clock.advance(std::chrono::milliseconds(44999));
+        if (room.expire_rematch_offer(std::chrono::seconds(45)) != Color::NONE) {
+            return false;
+        }
+        clock.advance(std::chrono::milliseconds(1));
+        return room.expire_rematch_offer(std::chrono::seconds(45)) == Color::BLACK
+            && room.rematch_offer_from() == Color::NONE;
     });
 }
 
@@ -392,6 +582,8 @@ int main() {
     test_clock();
     test_room_manager();
     test_disconnect();
+    test_draw_offers();
+    test_rematch_offers();
 
     std::cout << "\n========================================" << std::endl;
     std::cout << " Results: " << g_passed << " passed, " << g_failed << " failed" << std::endl;

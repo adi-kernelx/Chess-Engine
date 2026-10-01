@@ -80,6 +80,9 @@ Database open_db() {
 bool prepare(Database& db) {
     std::string error;
     if (!db.run_script(
+            "DROP TABLE IF EXISTS tournament_result_overrides;"
+            "DROP TABLE IF EXISTS tournament_round_checkins;"
+            "DROP TABLE IF EXISTS tournament_rounds;"
             "DROP TABLE IF EXISTS tournament_pairings;"
             "DROP TABLE IF EXISTS tournament_players;"
             "DROP TABLE IF EXISTS tournaments;"
@@ -118,6 +121,14 @@ bool prepare(Database& db) {
         !db.apply_migration("0004_lld4_completion_uuid", mig4,
                             applied, error)) {
         std::cerr << "\nmigration 0004 failed: " << error << '\n';
+        return false;
+    }
+    const std::string mig9 = read_file(source_path(
+        "src/storage/migrations/0009_persist_unrated_ai_games.sql"));
+    if (mig9.empty() ||
+        !db.apply_migration("0009_persist_unrated_ai_games", mig9,
+                            applied, error)) {
+        std::cerr << "\nmigration 0009 failed: " << error << '\n';
         return false;
     }
     return true;
@@ -335,6 +346,17 @@ int main() {
                 return profile->username == "Alice" &&
                        profile->games_played == 1 &&
                        profile->wins == 1;
+            });
+
+            run_test("Rating history includes baseline and post-game rating", [&] {
+                auto profile = find_player_by_username(db, "alice");
+                if (!profile) return false;
+                const auto history = get_rating_history(
+                    db, profile->player_id, profile->elo_rating);
+                return history.size() == 2
+                    && history.front().rating == 1500
+                    && history.back().rating == profile->elo_rating
+                    && history.front().ts <= history.back().ts;
             });
 
             run_test("Leaderboard returns ranked players", [&] {

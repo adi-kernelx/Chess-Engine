@@ -92,13 +92,20 @@
 
     .nav__links {
         display: none;
-        flex-basis: 100%;
-        order: 10;
+        position: absolute;
+        top: calc(100% + var(--sp-2));
+        left: var(--sp-3);
+        right: var(--sp-3);
         flex-direction: column;
-        gap: 0;
-        padding-bottom: var(--sp-2);
-        border-top: 1px solid var(--border-subtle);
-        padding-top: var(--sp-2);
+        gap: var(--sp-1);
+        padding: var(--sp-2);
+        background: var(--nav-glass);
+        border: 1px solid var(--nav-glass-border);
+        border-radius: var(--r-3);
+        box-shadow: var(--shadow-3), var(--shadow-inset);
+        -webkit-backdrop-filter: blur(16px) saturate(135%);
+        backdrop-filter: blur(16px) saturate(135%);
+        overflow: hidden;
     }
     .nav__links.is-open { display: flex; }
     .nav__link {
@@ -172,6 +179,16 @@
     .table { min-width: 520px; }
     .table th, .table td { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-xs); }
 
+    .tournament-list { padding: var(--sp-3); }
+    .tournament-form-grid,
+    .tournament-summary-grid { grid-template-columns: 1fr; }
+    .tournament-form-grid__wide { grid-column: auto; }
+    .tournament-hero { padding: var(--sp-4); }
+    .tournament-hero__top { flex-direction: column; }
+    .tournament-hero__membership { white-space: normal; }
+    .tournament-card__actions .btn { flex: 1; }
+    .game-tournament-context { align-items: flex-start; flex-direction: column; }
+
     /* Settings & profile grids already stack via screens.css @media (max-width: 1000px) */
 
     /* Replay */
@@ -183,6 +200,10 @@
 
     /* Pill group on mobile: allow wrap */
     .pill-group { flex-wrap: wrap; }
+}
+
+@media (max-width: 768px) and (prefers-reduced-transparency: reduce) {
+    .nav__links { background: var(--surface-1); }
 }
 
 /* ── Small phone (≤480) ── */
@@ -215,6 +236,10 @@
     .lobby-stat { padding: var(--sp-3); }
 
     .btn--lg { min-height: 40px; padding: var(--sp-2) var(--sp-4); }
+
+    .tournament-list { padding: var(--sp-2); }
+    .tournament-card { padding: var(--sp-3); }
+    .modal--wide .modal__body { padding: var(--sp-3); }
 
     .result-card { padding: var(--sp-4) var(--sp-3); }
     .result-card__title { font-size: var(--fs-xl); }

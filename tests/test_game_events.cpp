@@ -167,6 +167,22 @@ int main() {
             && s.move_count == 4;
     });
 
+    run_test("GameCompleted records disconnect abandonment", [] {
+        application::ports::FakeClock clock;
+        auto room = make_room(15);
+        room->set_clock(&clock);
+        auto L = std::make_shared<RecordingListener>();
+        room->add_listener(L);
+        room->on_disconnect(11);
+        clock.advance(std::chrono::seconds(60));
+        if (!room->expire_disconnected(std::chrono::seconds(60))) return false;
+        if (L->completed.size() != 1) return false;
+        const auto& s = L->completed[0].snapshot;
+        return s.status == GameStatus::ABANDONMENT
+            && s.result == "1-0"
+            && s.termination_reason == "abandonment";
+    });
+
     run_test("Listener callback runs outside room mutex (no deadlock)", [] {
         auto room = make_room(17);
         auto R = std::make_shared<ReentrantListener>();

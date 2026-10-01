@@ -6,6 +6,7 @@
 #include "chess/move_gen.h"
 #include "chess/engine.h"
 #include "game/ai_player.h"
+#include "game/game_events.h"
 #include "game/game_room.h"
 #include "game/room_manager.h"
 #include <iostream>
@@ -37,7 +38,8 @@ void test_ai_room_creation() {
 
     RoomManager mgr;
     TimeControl tc(600000, 5000);
-    auto room = mgr.create_ai_room(1, "Alice", 42, tc, AIDifficulty::MEDIUM);
+    auto room = mgr.create_ai_room(1, "Alice", 42, tc, AIDifficulty::MEDIUM,
+                                   /*db_player_id=*/901, /*elo=*/800);
 
     if (room->get_state() != RoomState::IN_PROGRESS) {
         FAIL("AI room should start IN_PROGRESS");
@@ -61,6 +63,17 @@ void test_ai_room_creation() {
 
     if (room->get_player_fd(Color::BLACK) != -2) {
         FAIL("AI should have sentinel fd -2");
+        return;
+    }
+
+    if (room->get_db_player_id(Color::WHITE) != 901
+        || room->get_elo(Color::WHITE) != 800) {
+        FAIL("AI room should preserve the human's durable identity and rating");
+        return;
+    }
+
+    if (mgr.find_room_by_db_player(901) != room) {
+        FAIL("AI room should be recoverable by authenticated player identity");
         return;
     }
 
@@ -382,7 +395,43 @@ void test_ai_benchmark() {
     }
 }
 
+void test_ai_clock_budget_and_flag() {
+    TEST("AI budgets remaining clock and cannot move after flag fall");
+    AIPlayer ai;
+    auto move = ai.compute_move(Board::starting_position(), AIDifficulty::MAX, 250, 0);
+    if (move.elapsed_ms > 200 || move.from == move.to) {
+        FAIL("Low-clock search exceeded its budget or returned no move"); return;
+    }
+    RoomManager mgr;
+    auto room = mgr.create_ai_room(1, "Alice", 42, TimeControl(1000, 5000), AIDifficulty::MAX);
+    chess::application::ports::FakeClock clock;
+    room->set_clock(&clock);
+    if (!room->submit_move(42, Board::algebraic_to_square("e2"), Board::algebraic_to_square("e4")).success) {
+        FAIL("Human setup move failed"); return;
+    }
+    const auto fen = room->get_board().to_fen();
+    struct CompletionCapture final : chess::game::GameEventListener {
+        int calls = 0;
+        std::string termination;
+        void on_game_completed(const chess::game::GameCompleted& ev) override {
+            ++calls;
+            termination = ev.snapshot.termination_reason;
+        }
+    };
+    auto completion = std::make_shared<CompletionCapture>();
+    room->add_listener(completion);
+    clock.advance(std::chrono::milliseconds(1000));
+    auto expired = room->submit_move_ai(Board::algebraic_to_square("e7"), Board::algebraic_to_square("e5"));
+    if (expired.success || expired.game_status != GameStatus::TIMEOUT ||
+        room->get_result_string() != "1-0" || room->get_board().to_fen() != fen ||
+        completion->calls != 1 || completion->termination != "timeout") {
+        FAIL("Expired AI moved or received increment instead of losing"); return;
+    }
+    PASS();
+}
+
 int main() {
+    test_ai_clock_budget_and_flag();
     std::cout << "=================================================\n";
     std::cout << "   Phase 6.4: AI Player Integration Tests\n";
     std::cout << "=================================================\n";

@@ -57,9 +57,27 @@ private:
     void handle_resign      (chess::application::RequestContext& ctx,
                              const nlohmann::json&               msg,
                              chess::application::MessageSink&    sink);
+    void handle_offer_draw  (chess::application::RequestContext& ctx,
+                             const nlohmann::json&               msg,
+                             chess::application::MessageSink&    sink);
+    void handle_draw_response(chess::application::RequestContext& ctx,
+                              const nlohmann::json&               msg,
+                              chess::application::MessageSink&    sink);
+    void handle_offer_rematch(chess::application::RequestContext& ctx,
+                              const nlohmann::json&               msg,
+                              chess::application::MessageSink&    sink);
+    void handle_rematch_response(chess::application::RequestContext& ctx,
+                                 const nlohmann::json&               msg,
+                                 chess::application::MessageSink&    sink);
+    void handle_get_pending_rematch(chess::application::RequestContext& ctx,
+                                    const nlohmann::json&               msg,
+                                    chess::application::MessageSink&    sink);
     void handle_game_state  (chess::application::RequestContext& ctx,
                              const nlohmann::json&               msg,
                              chess::application::MessageSink&    sink);
+    void handle_get_active_game(chess::application::RequestContext& ctx,
+                                const nlohmann::json&               msg,
+                                chess::application::MessageSink&    sink);
     void handle_quick_play  (chess::application::RequestContext& ctx,
                              const nlohmann::json&               msg,
                              chess::application::MessageSink&    sink);

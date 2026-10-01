@@ -1,5 +1,6 @@
 #include "auth/oauth_verify.h"
 
+#include "auth/service.h"
 #include "auth/username.h"
 #include "crypto/base64.h"
 #include "crypto/constant_time.h"
@@ -300,10 +301,10 @@ GoogleSignInResult google_sign_in(Database& db, const SupabaseVerifier& verifier
     if (username.empty()) { r.status = GoogleSignInStatus::InternalError; return r; }
 
     auto ins = db.exec(
-        "INSERT INTO players(username, username_ci, email, google_sub)"
-        " VALUES($1,$2,$3,$4) RETURNING id, elo_rating, token_epoch",
+        "INSERT INTO players(username, username_ci, email, google_sub, elo_rating)"
+        " VALUES($1,$2,$3,$4,$5) RETURNING id, elo_rating, token_epoch",
         {Param::text(username), Param::text(to_lower_ascii(username)),
-         Param::text(id.email), Param::text(id.sub)});
+         Param::text(id.email), Param::text(id.sub), Param::int64(INITIAL_ELO)});
     if (!ins.ok) {
         // A race with a concurrent sign-in for the same sub/email would land
         // here as 23505. Convert unique_violation to EmailCollision so the

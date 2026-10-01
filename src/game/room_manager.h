@@ -24,6 +24,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <atomic>
 
@@ -70,7 +71,24 @@ public:
                                               const std::string& creator_name,
                                               int creator_fd,
                                               const TimeControl& tc,
-                                              AIDifficulty difficulty);
+                                              AIDifficulty difficulty,
+                                              int64_t db_player_id = 0,
+                                              int elo = 1200);
+
+    std::shared_ptr<GameRoom> create_reserved_tournament_room(
+        int64_t tournament_id, int64_t pairing_id,
+        int64_t white_db_id, const std::string& white_name, int white_elo,
+        int64_t black_db_id, const std::string& black_name, int black_elo,
+        const TimeControl& tc);
+
+    std::shared_ptr<GameRoom> find_room_by_pairing(int64_t pairing_id) const;
+
+    /// Ensure newly allocated runtime ids cannot collide with mappings loaded
+    /// from an earlier process. `next_id` itself is never allocated here.
+    void ensure_next_id_above(GameId existing_id);
+    void reserve_tournament_player(int64_t db_player_id);
+    void release_tournament_player(int64_t db_player_id);
+    bool is_tournament_player_reserved(int64_t db_player_id) const;
 
     /// Find a room by its ID. Returns nullptr if not found.
     std::shared_ptr<GameRoom> find_room(GameId id) const;
@@ -81,6 +99,13 @@ public:
 
     /// Find the room that a given player ID belongs to.
     std::shared_ptr<GameRoom> find_room_by_player(PlayerId player_id) const;
+
+    /// Find a non-finished room by durable database player identity.
+    std::shared_ptr<GameRoom> find_room_by_db_player(int64_t db_player_id) const;
+
+    /// Snapshot room ownership for maintenance passes. Returned shared_ptrs
+    /// keep rooms alive after the manager lock is released.
+    std::vector<std::shared_ptr<GameRoom>> rooms_snapshot() const;
 
     /// Remove a room from the manager (e.g., after game is finished and saved).
     void remove_room(GameId id);
@@ -131,6 +156,8 @@ public:
 private:
     mutable std::mutex mutex_;
     std::unordered_map<GameId, std::shared_ptr<GameRoom>> rooms_;
+    std::unordered_map<int64_t, GameId> tournament_pairing_rooms_;
+    std::unordered_set<int64_t> reserved_tournament_players_;
     std::atomic<GameId> next_id_{1};  // Monotonically increasing room ID counter
 
     /// LLD-4.2 default listener — attached to every future room.

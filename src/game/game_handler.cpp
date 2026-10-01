@@ -59,15 +59,22 @@ void GameHandler::register_handlers(protocol::RequestPipeline& pipeline) {
 
     gameplay_handler_->register_handlers(pipeline);
 
+    // Phase 2 tournament mediator exists before the completion observer so
+    // persisted tournament games can resolve their durable pairing.
+    tournament_runtime_service_ =
+        std::make_unique<application::TournamentRuntimeService>(
+            db_, room_mgr_, [this](int fd, const std::string& frame) {
+                this->send_json_to_fd(fd, frame);
+            });
+
     // ── LLD-4.2: register the completion service as RoomManager's ──
     //   default listener. Every room `create_room` / `create_ai_room`
     //   builds from this point on will automatically fire its
     //   `GameCompleted` event into `GameCompletionService`, which owns
-    //   the (idempotent) persist path. AI games and unauthenticated
-    //   seats short-circuit inside the service — attaching to every
-    //   room is a no-op for those cases.
+    //   the (idempotent) persist path. Unauthenticated human seats
+    //   short-circuit; AI completions are stored as unrated replays.
     completion_service_ = std::make_shared<application::GameCompletionService>(
-        *game_store_);
+        *game_store_, tournament_runtime_service_.get());
     room_mgr_.set_default_listener(completion_service_);
 
     // ── LLD-2.2 · 5.2: query / spectator / replay family on pipeline ──
@@ -88,7 +95,8 @@ void GameHandler::register_handlers(protocol::RequestPipeline& pipeline) {
 
     // ── LLD-2.4: tournaments family on pipeline ──
 
-    tournament_service_ = std::make_unique<application::TournamentService>(db_);
+    tournament_service_ = std::make_unique<application::TournamentService>(
+        db_, application::ports::default_clock(), tournament_runtime_service_.get());
     tournament_handler_ = std::make_unique<handlers::TournamentHandler>(
         *tournament_service_, connection_lookup_);
     tournament_handler_->register_handlers(pipeline);
@@ -104,6 +112,14 @@ void GameHandler::on_player_disconnect(int connection_fd) {
     if (gameplay_handler_) {
         gameplay_handler_->on_player_disconnect(connection_fd);
     }
+    if (tournament_runtime_service_) {
+        tournament_runtime_service_->on_disconnect(connection_fd);
+    }
+}
+
+void GameHandler::expire_disconnected_games() {
+    if (gameplay_service_) gameplay_service_->expire_disconnected_games();
+    if (tournament_runtime_service_) tournament_runtime_service_->maintenance_tick();
 }
 
 // ============================================================

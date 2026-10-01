@@ -54,14 +54,12 @@ export class PromotionPicker {
                     'aria-label': `Promote to ${type}`,
                     onclick: (e) => { e.stopPropagation(); done(code); },
                 });
-                const img = this.renderer.rasters[`${color}_${type}`];
-                if (img) {
-                    // Clone the image so we don't disturb the raster cache.
-                    const clone = new Image();
-                    clone.src = img.src;
-                    clone.className = 'promo-picker__img';
-                    btn.appendChild(clone);
-                }
+                // Raster images come from short-lived Blob URLs which are
+                // revoked after decoding. Cloning img.src therefore creates
+                // a blank option. Copy the decoded pixels to a canvas.
+                const thumbnail = this.renderer.createPieceThumbnail(
+                    `${color}_${type}`, 'promo-picker__img');
+                if (thumbnail) btn.appendChild(thumbnail);
                 return btn;
             });
 

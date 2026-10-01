@@ -15,21 +15,26 @@
  */
 
 import { Screen } from '../ui/screen.js';
-import { h, icon } from '../core/dom.js';
+import { h } from '../core/dom.js';
 import { absoluteUrl, copyText } from '../core/share.js';
 
-const GUEST_ADJECTIVES = ['Knight', 'Bishop', 'Rook', 'Pawn', 'Castle', 'Gambit', 'Zugzwang', 'Fianchetto'];
+const JOIN_TIMEOUT_MS = 6000;
 
 export class JoinScreen extends Screen {
     constructor(ctx, params) {
         super(ctx);
-        this._gameId = String(params.gameId || '').slice(0, 64);
+        const rawId = String(params.gameId || '');
+        const parsedId = /^\d+$/.test(rawId) ? Number(rawId) : NaN;
+        this._gameId = Number.isSafeInteger(parsedId) && parsedId > 0 ? parsedId : null;
         this._sent = false;
+        this._joinTimer = null;
         this._pending = { kind: 'join' };
     }
 
     render() {
-        const link = absoluteUrl('#/join/' + this._gameId);
+        const displayId = this._gameId === null ? 'Invalid' : String(this._gameId);
+        const link = absoluteUrl('#/join/' + displayId);
+        const localInvite = /^(localhost|127(?:\.\d+){3}|\[::1\])$/.test(location.hostname);
         return h('div', { class: 'screen' },
             h('div', { class: 'screen__body' },
                 h('div', { class: 'card join-card' },
@@ -38,7 +43,7 @@ export class JoinScreen extends Screen {
                             h('span', { class: 'queue-status__spinner', 'aria-hidden': 'true' }),
                             h('div', {},
                                 h('div', { class: 'join-card__title' }, 'Joining game'),
-                                h('div', { class: 'join-card__id mono' }, '#' + this._gameId),
+                                h('div', { class: 'join-card__id mono' }, '#' + displayId),
                             ),
                         ),
                         h('div', { class: 'join-card__hint', ref: el => this._hintEl = el },
@@ -59,8 +64,16 @@ export class JoinScreen extends Screen {
                             ),
                         ),
                         h('div', { class: 'field-hint' },
-                            'Share this link with a friend so a second player can join from anywhere.'),
+                            localInvite
+                                ? 'For local testing, open this link in another browser session on this computer.'
+                                : 'Share this link with a friend so a second player can join.'),
                         h('div', { style: { display: 'flex', gap: '8px' } },
+                            h('button', {
+                                class: 'btn btn--primary',
+                                hidden: true,
+                                ref: el => this._retryBtn = el,
+                                onclick: () => this._retry(),
+                            }, 'Try again'),
                             h('button', {
                                 class: 'btn',
                                 onclick: () => this.ctx.router.go('/play'),
@@ -74,37 +87,82 @@ export class JoinScreen extends Screen {
 
     onMount() {
         const { socket } = this.ctx;
-        this._ensureGuestHandle();
+        if (this._gameId === null) {
+            this._say('This invite link has an invalid game ID.');
+            if (this._retryBtn) this._retryBtn.hidden = true;
+            return;
+        }
         this.sub(socket.on('game_joined',  raw => this._onJoined(raw)));
         this.sub(socket.on('game_start',   raw => this._onJoined(raw)));
+        this.sub(socket.on('active_game',  raw => this._onActiveGame(raw)));
         this.sub(socket.on('error',        raw => this._onError(raw)));
+        this.sub(socket.on('auth_error',   () => this._onAuthError()));
+        this.sub(this.ctx.session.on('change', () => this._trySend()));
         this.sub(socket.onState(state => {
             if (state === 'connected') this._trySend();
             else if (state === 'connecting') this._say('Connecting to the server…');
-            else this._say('Offline — reconnecting…');
+            else {
+                this._sent = false;
+                this._clearJoinTimer();
+                this._say('Offline — reconnecting…');
+            }
         }));
         if (socket.isConnected()) this._trySend();
     }
+
+    onUnmount() { this._clearJoinTimer(); }
 
     _trySend() {
         if (this._sent) return;
         const token = this.ctx.session && this.ctx.session.accessToken;
         if (!token) {
+            if (this.ctx.session && this.ctx.session.hasRefreshToken) {
+                this._say('Restoring your session…');
+                return;
+            }
             this._say('Sign in to join this game.');
             this.ctx.toast.warning('Sign in to play.', { duration: 2800 });
+            this.ctx.postAuthPath = '/join/' + this._gameId;
             this.ctx.router.go('/login');
             return;
         }
         this._sent = true;
+        if (this._retryBtn) this._retryBtn.hidden = true;
         this._say('Asking to join…');
         this.ctx.socket.send(this.ctx.Outbound.joinGame(token, this._gameId));
+        this._joinTimer = setTimeout(() => {
+            this._joinTimer = null;
+            this._sent = false;
+            this._say('The server did not answer the join request. Try again.');
+            if (this._retryBtn) this._retryBtn.hidden = false;
+            // If the reply alone was lost, authoritative active-game recovery
+            // avoids turning a successful seat into an erroneous second join.
+            this.ctx.socket.send(this.ctx.Outbound.activeGame(token));
+        }, JOIN_TIMEOUT_MS);
     }
 
     _onJoined(raw) {
         const norm = this.ctx.Inbound.normalize(raw);
         // A pending create_game elsewhere could echo game_start too; only act
         // if this message is about the game we asked for.
-        if (norm.gameId && String(norm.gameId) !== this._gameId) return;
+        if (norm.gameId && Number(norm.gameId) !== this._gameId) return;
+
+        this._clearJoinTimer();
+        this._enterGame(norm);
+    }
+
+    _onActiveGame(raw) {
+        const norm = this.ctx.Inbound.normalize(raw);
+        const game = norm && norm.game;
+        if (!game || Number(game.gameId) !== this._gameId) return;
+        this._clearJoinTimer();
+        this._enterGame({
+            ...game,
+            color: game.color === 'b' ? 'black' : 'white',
+        });
+    }
+
+    _enterGame(norm) {
 
         const preset = {
             base: Math.round((norm.whiteMs || 300_000) / 1000),
@@ -127,21 +185,36 @@ export class JoinScreen extends Screen {
     _onError(raw) {
         const norm = this.ctx.Inbound.normalize(raw);
         if (norm.isUnknownType) return;
+        this._clearJoinTimer();
+        this._sent = false;
         this.ctx.toast.danger(norm.message || 'That game could not be joined.', { title: 'Join failed' });
         this._say(norm.message || 'This game is no longer available. Try creating a new one.');
+        if (this._retryBtn) this._retryBtn.hidden = false;
+    }
+
+    _onAuthError() {
+        this._clearJoinTimer();
+        this._sent = false;
+        this.ctx.postAuthPath = '/join/' + this._gameId;
+        this.ctx.toast.warning('Your session expired. Sign in again to join this game.',
+            { duration: 3400 });
+        this.ctx.router.go('/login');
+    }
+
+    _retry() {
+        this._clearJoinTimer();
+        this._sent = false;
+        this._trySend();
+    }
+
+    _clearJoinTimer() {
+        if (this._joinTimer !== null) {
+            clearTimeout(this._joinTimer);
+            this._joinTimer = null;
+        }
     }
 
     _say(text) { if (this._hintEl) this._hintEl.textContent = text; }
-
-    _username() { return (this.ctx.store.session.username || 'Player').slice(0, 24); }
-
-    _ensureGuestHandle() {
-        const name = this._username();
-        if (name && name !== 'Player') return;
-        const pick = GUEST_ADJECTIVES[Math.floor(Math.random() * GUEST_ADJECTIVES.length)];
-        const num  = 1000 + Math.floor(Math.random() * 9000);
-        this.ctx.store.setSession({ username: `${pick}${num}` });
-    }
 
     async _copyLink(link) {
         const res = await copyText(link);

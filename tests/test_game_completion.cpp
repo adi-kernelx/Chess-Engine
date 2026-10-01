@@ -8,9 +8,10 @@
  *      no-op — same game_id returned, no ELO/stats mutated a second
  *      time.
  *   3. The completion service short-circuits (no store call) when:
- *        - store.capable() is false (NullGameStore),
- *        - the snapshot marks is_ai_game,
- *        - either seat's db_player_id is 0 (unauthenticated).
+ *        - store.capable() is false (NullGameStore), or
+ *        - a required human seat's db_player_id is 0 (unauthenticated).
+ *      AI snapshots instead produce an unrated replay record with a nullable
+ *      computer seat.
  *   4. GameRoom stamps every terminal snapshot with a non-empty UUID
  *      that is unique per completion (a 32-room stress sample yields
  *      32 distinct uuids).
@@ -83,6 +84,8 @@ struct RecordingStore final : public ports::GameStore {
         int64_t     white_id      = 0;
         int64_t     black_id      = 0;
         std::string result;
+        bool        rated = true;
+        std::string black_display_name;
     };
     std::vector<Call>              calls;
     ports::SaveGameOutcome         next_outcome{};
@@ -93,7 +96,7 @@ struct RecordingStore final : public ports::GameStore {
     ports::SaveGameOutcome save_completed_game(
             const chess::storage::CompletedGame& game) override {
         calls.push_back({game.completion_uuid, game.white_id, game.black_id,
-                         game.result});
+                         game.result, game.rated, game.black_display_name});
         auto out = next_outcome;
         if (out.code == chess::storage::StorageError::Ok && out.game_id == 0) {
             out.game_id = static_cast<int64_t>(calls.size());
@@ -144,6 +147,9 @@ std::optional<chess::storage::Database> open_db() {
 bool prepare_db(chess::storage::Database& db) {
     std::string err;
     if (!db.run_script(
+            "DROP TABLE IF EXISTS tournament_result_overrides;"
+            "DROP TABLE IF EXISTS tournament_round_checkins;"
+            "DROP TABLE IF EXISTS tournament_rounds;"
             "DROP TABLE IF EXISTS tournament_pairings;"
             "DROP TABLE IF EXISTS tournament_players;"
             "DROP TABLE IF EXISTS tournaments;"
@@ -163,6 +169,12 @@ bool prepare_db(chess::storage::Database& db) {
             applied, err)) return false;
     if (!db.apply_migration("0004_lld4_completion_uuid",
             read_file(source_path("src/storage/migrations/0004_lld4_completion_uuid.sql")),
+            applied, err)) return false;
+    if (!db.apply_migration("0008_allow_abandonment_termination",
+            read_file(source_path("src/storage/migrations/0008_allow_abandonment_termination.sql")),
+            applied, err)) return false;
+    if (!db.apply_migration("0009_persist_unrated_ai_games",
+            read_file(source_path("src/storage/migrations/0009_persist_unrated_ai_games.sql")),
             applied, err)) return false;
     return true;
 }
@@ -207,13 +219,18 @@ int main() {
         return store.calls.empty();
     });
 
-    run_test("is_ai_game short-circuits", [] {
+    run_test("AI completion persists an unrated replay without a DB opponent", [] {
         RecordingStore store;
         GameCompletionService svc(store);
         chess::game::GameCompleted ev;
-        ev.snapshot = make_snapshot(1, 2, /*is_ai=*/true);
+        ev.snapshot = make_snapshot(1, 0, /*is_ai=*/true);
+        ev.snapshot.black.username = "AI (Hard)";
         svc.on_game_completed(ev);
-        return store.calls.empty();
+        return store.calls.size() == 1
+            && store.calls[0].white_id == 1
+            && store.calls[0].black_id == 0
+            && !store.calls[0].rated
+            && store.calls[0].black_display_name == "AI (Hard)";
     });
 
     run_test("db_player_id=0 on either seat short-circuits", [] {
@@ -223,7 +240,7 @@ int main() {
         ev.snapshot = make_snapshot(0, 2);
         svc.on_game_completed(ev);
         if (!store.calls.empty()) return false;
-        ev.snapshot = make_snapshot(1, 0);
+        ev.snapshot = make_snapshot(1, 0, /*is_ai=*/false);
         svc.on_game_completed(ev);
         return store.calls.empty();
     });
@@ -334,6 +351,22 @@ int main() {
                     return probe2.ok
                         && probe2.first().at(0) == "1"
                         && !id1.empty();
+                });
+
+                run_test("abandonment termination is accepted after migration 0008", [&] {
+                    chess::storage::PostgresGameStore store(db);
+                    GameCompletionService svc(store);
+                    chess::game::GameCompleted ev;
+                    ev.snapshot = make_snapshot(alice, bob);
+                    ev.snapshot.result = "1-0";
+                    ev.snapshot.termination_reason = "abandonment";
+                    svc.on_game_completed(ev);
+
+                    auto probe = db.exec(
+                        "SELECT termination FROM games WHERE completion_uuid = $1",
+                        {chess::storage::Param::text(ev.snapshot.completion_uuid)});
+                    return probe.ok && !probe.empty()
+                        && probe.first().at(0) == "abandonment";
                 });
             }
         }

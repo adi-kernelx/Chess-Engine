@@ -15,6 +15,7 @@ import { BoardRenderer } from '../board/renderer.js';
 import { BoardTheme, THEMES } from '../board/theme.js';
 import { START_FEN } from '../board/chess.js';
 import { CONFIG, googleAuthorizeUrl } from '../config.js';
+import { INITIAL_RATING } from '../core/rating.js';
 
 const PIECE_SETS = [
     { key: 'classic', label: 'Classic' },
@@ -24,7 +25,6 @@ const PIECE_SETS = [
 export class SettingsScreen extends Screen {
     constructor(ctx) {
         super(ctx);
-        this.preview = false;   // this screen IS live
     }
 
     render() {
@@ -76,19 +76,14 @@ export class SettingsScreen extends Screen {
                                 h('div', { class: 'card__title' }, 'You')),
                             h('div', { class: 'card__body' },
                                 h('div', { class: 'field' },
-                                    h('label', { class: 'field__label', for: 'settings-name' }, 'Display name'),
-                                    h('input', {
-                                        id: 'settings-name',
-                                        class: 'input',
-                                        value: s.username || '',
-                                        maxlength: 24,
-                                        oninput: (e) => this.ctx.store.setSession({ username: e.target.value.trim() || 'Player' }),
-                                    })
+                                    h('label', { class: 'field__label' }, 'Display name'),
+                                    h('div', { class: 'settings-static-value' },
+                                        this.ctx.session.isAuthenticated ? (s.username || '—') : 'Not signed in')
                                 ),
                                 h('div', { class: 'field' },
                                     h('label', { class: 'field__label' }, 'Rating'),
-                                    h('div', { class: 'settings-static-value' }, String(s.elo || 1200)),
-                                    h('div', { class: 'field__hint' }, 'Ratings become editable once accounts are enabled (Phase 7).')
+                                    h('div', { class: 'settings-static-value' }, String(s.elo ?? INITIAL_RATING)),
+                                    h('div', { class: 'field__hint' }, 'Ratings change only after completed rated games.')
                                 ),
                                 h('button', {
                                     class: 'btn btn--danger',
@@ -203,7 +198,15 @@ export class SettingsScreen extends Screen {
     // unlinked, or a "Disconnect Google" + "Sign out" pair if linked.
     _accountCard() {
         const session = this.ctx.session;
-        if (!session || !session.isAuthenticated) return null;
+        if (!session || !session.isAuthenticated) {
+            return h('div', { class: 'card' },
+                h('div', { class: 'card__header' },
+                    h('div', { class: 'card__title' }, 'Account')),
+                h('div', { class: 'card__body' },
+                    h('div', { class: 'field__hint' }, 'Sign in to save your rating and game history.'),
+                    h('a', { class: 'btn btn--primary', href: '#/login', style: { alignSelf: 'flex-start' } }, 'Sign in'),
+                    h('a', { class: 'btn btn--ghost', href: '#/register', style: { alignSelf: 'flex-start' } }, 'Create account')));
+        }
         const googleUrl = googleAuthorizeUrl();
 
         return h('div', { class: 'card' },
@@ -215,11 +218,16 @@ export class SettingsScreen extends Screen {
                     h('div', { class: 'settings-static-value' }, session.username || '—'),
                 ),
 
-                googleUrl ? h('button', {
+                h('button', {
                     class: 'btn btn--ghost',
                     style: { alignSelf: 'flex-start' },
-                    onclick: () => this._linkGoogle(googleUrl),
-                }, 'Link Google account') : null,
+                    onclick: () => googleUrl
+                        ? this._linkGoogle(googleUrl)
+                        : this.ctx.toast.info('Google account linking will be available after cloud deployment.', { duration: 2800 }),
+                }, 'Link Google account'),
+
+                !googleUrl ? h('div', { class: 'field__hint' },
+                    'Google authentication will be enabled after cloud deployment.') : null,
 
                 googleUrl ? h('button', {
                     class: 'btn btn--ghost',

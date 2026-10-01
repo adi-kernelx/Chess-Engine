@@ -67,6 +67,16 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
                                    int k_factor) {
     SaveGameResult out;
 
+    if (game.result != "1-0" && game.result != "0-1"
+        && game.result != "1/2-1/2") {
+        out.error = "Unknown result: " + game.result;
+        return out;
+    }
+    if (!game.rated && (game.black_id != 0 || game.black_display_name.empty())) {
+        out.error = "Unrated AI game requires a computer display name and no black player id";
+        return out;
+    }
+
     // ── LLD-4.2 idempotency check ────────────────────────────────────
     // A retry of the same terminal transition — same completion_uuid —
     // must NOT insert a second games row, must NOT update ELO/stats a
@@ -89,8 +99,10 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
     }
 
     // ── Pre-calculate ELO before touching the database ──────────────
-    out.elo = calculate_elo(game.white_elo, game.black_elo,
-                            game.result, k_factor);
+    if (game.rated) {
+        out.elo = calculate_elo(game.white_elo, game.black_elo,
+                                game.result, k_factor);
+    }
 
     // ── BEGIN transaction ────────────────────────────────────────────
     auto begin_result = db.exec("BEGIN");
@@ -106,15 +118,21 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
     Param completion_param = game.completion_uuid.empty()
         ? Param::null()
         : Param::text(game.completion_uuid);
+    const Param black_id_param = game.rated
+        ? Param::int64(game.black_id) : Param::null();
+    const Param black_name_param = game.rated
+        ? Param::null() : Param::text(game.black_display_name);
     auto game_insert = db.exec(
         "INSERT INTO games(white_id, black_id, moves, result, termination,"
         " opening_eco, white_elo, black_elo, time_control,"
-        " started_at, ended_at, move_count, completion_uuid)"
+        " started_at, ended_at, move_count, completion_uuid, rated,"
+        " black_display_name)"
         " VALUES($1::bigint, $2::bigint, $3, $4, $5, $6,"
         " $7::integer, $8::integer, $9,"
-        " $10::timestamptz, $11::timestamptz, $12::integer, $13)"
+        " $10::timestamptz, $11::timestamptz, $12::integer, $13,"
+        " $14::boolean, $15)"
         " RETURNING id",
-        {Param::int64(game.white_id), Param::int64(game.black_id),
+        {Param::int64(game.white_id), black_id_param,
          Param::text(game.moves), Param::text(game.result),
          Param::text(game.termination),
          Param::null(),  // opening_eco — Phase 9 populates this
@@ -122,7 +140,7 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
          Param::text(game.time_control),
          Param::text(game.started_at), Param::text(game.ended_at),
          Param::int64(game.move_count),
-         completion_param});
+         completion_param, Param::boolean(game.rated), black_name_param});
 
     if (!game_insert.ok || game_insert.empty()) {
         out.error = "Failed to insert game: " + game_insert.error;
@@ -134,11 +152,13 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
 
     // ── 2. INSERT per-ply think times ───────────────────────────────
     for (const auto& ply : game.think_times) {
+        const Param player_id_param = ply.player_id > 0
+            ? Param::int64(ply.player_id) : Param::null();
         auto mt = db.exec(
             "INSERT INTO move_times(game_id, ply_number, player_id, think_time_ms)"
             " VALUES($1::bigint, $2::integer, $3::bigint, $4::integer)",
             {Param::int64(out.game_id), Param::int64(ply.ply_number),
-             Param::int64(ply.player_id), Param::int64(ply.think_time_ms)});
+             player_id_param, Param::int64(ply.think_time_ms)});
 
         if (!mt.ok) {
             out.error = "Failed to insert move time (ply "
@@ -146,6 +166,19 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
             db.exec("ROLLBACK");
             return out;
         }
+    }
+
+    // Unrated AI history ends after the replay + timing rows. In particular,
+    // the human player's rating and aggregate record remain unchanged.
+    if (!game.rated) {
+        auto commit_result = db.exec("COMMIT");
+        if (!commit_result.ok) {
+            out.error = "Failed to commit: " + commit_result.error;
+            db.exec("ROLLBACK");
+            return out;
+        }
+        out.ok = true;
+        return out;
     }
 
     // ── 3. Select the correct UPDATE queries per result ──────────────
@@ -161,10 +194,6 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
     } else if (game.result == "1/2-1/2") {
         white_sql = SQL_UPDATE_DRAWER;
         black_sql = SQL_UPDATE_DRAWER;
-    } else {
-        out.error = "Unknown result: " + game.result;
-        db.exec("ROLLBACK");
-        return out;
     }
 
     // ── 4. UPDATE white player ──────────────────────────────────────
@@ -206,14 +235,15 @@ SaveGameResult save_completed_game(Database& db, const CompletedGame& game,
 
 std::optional<StoredGame> find_game_by_id(Database& db, int64_t game_id) {
     auto result = db.exec(
-        "SELECT g.id, g.white_id, g.black_id,"
-        " pw.username AS white_name, pb.username AS black_name,"
+        "SELECT g.id, g.white_id, COALESCE(g.black_id, 0),"
+        " pw.username AS white_name,"
+        " COALESCE(pb.username, g.black_display_name, 'AI') AS black_name,"
         " g.moves, g.result, g.termination,"
         " g.white_elo, g.black_elo, g.time_control,"
-        " g.started_at::text, g.ended_at::text, g.move_count"
+        " g.started_at::text, g.ended_at::text, g.move_count, g.rated"
         " FROM games g"
         " JOIN players pw ON pw.id = g.white_id"
-        " JOIN players pb ON pb.id = g.black_id"
+        " LEFT JOIN players pb ON pb.id = g.black_id"
         " WHERE g.id = $1",
         {Param::int64(game_id)});
 
@@ -234,7 +264,8 @@ std::optional<StoredGame> find_game_by_id(Database& db, int64_t game_id) {
         row.at(10),               // time_control
         row.at(11),               // started_at
         row.at(12),               // ended_at
-        std::stoi(row.at(13))     // move_count
+        std::stoi(row.at(13)),    // move_count
+        row.at(14) == "t"         // rated
     };
 }
 
@@ -246,18 +277,18 @@ std::vector<GameSummary> get_player_games(Database& db, int64_t player_id,
     //   - Second branch: idx_games_black (black_id, started_at DESC)
     // An OR condition would risk a sequential scan or bitmap merge.
     auto result = db.exec(
-        "(SELECT g.id, p.username AS opponent_name,"
+        "(SELECT g.id, COALESCE(p.username, g.black_display_name, 'AI') AS opponent_name,"
         "  g.black_elo AS opponent_elo,"
         "  g.result, g.termination, g.started_at::text,"
-        "  g.move_count, g.time_control, 'w' AS color"
+        "  g.move_count, g.time_control, 'w' AS color, g.rated"
         " FROM games g"
-        " JOIN players p ON p.id = g.black_id"
+        " LEFT JOIN players p ON p.id = g.black_id"
         " WHERE g.white_id = $1)"
         " UNION ALL"
         " (SELECT g.id, p.username AS opponent_name,"
         "  g.white_elo AS opponent_elo,"
         "  g.result, g.termination, g.started_at::text,"
-        "  g.move_count, g.time_control, 'b' AS color"
+        "  g.move_count, g.time_control, 'b' AS color, g.rated"
         " FROM games g"
         " JOIN players p ON p.id = g.white_id"
         " WHERE g.black_id = $1)"
@@ -280,6 +311,7 @@ std::vector<GameSummary> get_player_games(Database& db, int64_t player_id,
         g.started_at    = row.at(5);
         g.move_count    = std::stoi(row.at(6));
         g.time_control  = row.at(7);
+        g.rated         = row.at(9) == "t";
         games.push_back(std::move(g));
     }
 

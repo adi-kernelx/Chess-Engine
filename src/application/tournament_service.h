@@ -47,6 +47,8 @@
 #include "application/request_context.h"
 #include "application/result.h"
 #include "storage/database.h"
+#include "application/ports/clock.h"
+#include "application/ports/tournament_runtime.h"
 
 namespace chess::application {
 
@@ -55,7 +57,9 @@ public:
     /// `db` may be null when the server was launched without
     /// persistence. Every route then replies with the pre-refactor
     /// "Tournaments require a database" error string.
-    explicit TournamentService(chess::storage::Database* db);
+    explicit TournamentService(chess::storage::Database* db,
+        ports::Clock& clock = ports::default_clock(),
+        ports::TournamentRuntime* runtime = nullptr);
 
     // ── Mutating routes (handler runs auth first) ─────────────────
 
@@ -68,6 +72,9 @@ public:
                                   int                   rounds,
                                   int                   time_base_sec,
                                   int                   time_inc_sec,
+                                  int64_t               registration_deadline_unix,
+                                  int64_t               first_round_starts_at_unix,
+                                  int                   round_duration_seconds,
                                   MessageSink&          caller_sink);
 
     void join_tournament         (const RequestContext& ctx,
@@ -76,6 +83,19 @@ public:
                                   bool                  has_tournament_id,
                                   int64_t               tournament_id,
                                   MessageSink&          caller_sink);
+
+    void leave_tournament        (const RequestContext& ctx,
+                                  int64_t               actor_db_player_id,
+                                  bool                  has_tournament_id,
+                                  int64_t               tournament_id,
+                                  MessageSink&          caller_sink);
+
+    void set_registration(const RequestContext& ctx, int64_t actor_db_player_id,
+                          bool has_tournament_id, int64_t tournament_id,
+                          bool open, MessageSink& caller_sink);
+    void check_in_round(const RequestContext& ctx, int64_t actor_db_player_id,
+                        bool has_tournament_id, int64_t tournament_id,
+                        int round, MessageSink& caller_sink);
 
     void start_tournament        (const RequestContext& ctx,
                                   int64_t               actor_db_player_id,
@@ -88,7 +108,10 @@ public:
                                   bool                  has_pairing_id,
                                   int64_t               pairing_id,
                                   const std::string&    result,
+                                  const std::string&    reason,
                                   MessageSink&          caller_sink);
+
+    void maintenance_tick();
 
     // ── Public routes (no auth) ───────────────────────────────────
 
@@ -104,6 +127,8 @@ public:
 
 private:
     chess::storage::Database*  db_ = nullptr;
+    ports::Clock&              clock_;
+    ports::TournamentRuntime* runtime_ = nullptr;
 };
 
 } // namespace chess::application

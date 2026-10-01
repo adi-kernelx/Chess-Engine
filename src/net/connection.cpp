@@ -74,5 +74,36 @@ void Connection::consume_read_buffer(size_t bytes) {
     }
 }
 
+void Connection::set_upgraded(bool val) {
+    upgraded_ = val;
+    awaiting_pong_ = false;
+    last_heartbeat_at_ = HeartbeatClock::now();
+    ping_sent_at_ = last_heartbeat_at_;
+}
+
+bool Connection::heartbeat_due(HeartbeatTimePoint now,
+                               HeartbeatClock::duration interval) const {
+    return upgraded_ && !awaiting_pong_ && now - last_heartbeat_at_ >= interval;
+}
+
+bool Connection::heartbeat_expired(HeartbeatTimePoint now,
+                                   HeartbeatClock::duration timeout) const {
+    return upgraded_ && awaiting_pong_ && now - ping_sent_at_ >= timeout;
+}
+
+void Connection::mark_ping_sent(HeartbeatTimePoint now) {
+    awaiting_pong_ = true;
+    ping_sent_at_ = now;
+}
+
+void Connection::mark_pong_received(HeartbeatTimePoint now) {
+    mark_activity_received(now);
+}
+
+void Connection::mark_activity_received(HeartbeatTimePoint now) {
+    awaiting_pong_ = false;
+    last_heartbeat_at_ = now;
+}
+
 } // namespace net
 } // namespace chess

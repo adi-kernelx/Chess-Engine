@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS players (
     password_hash TEXT,
     google_sub    TEXT UNIQUE,
 
-    elo_rating    INTEGER NOT NULL DEFAULT 1200,
+    elo_rating    INTEGER NOT NULL DEFAULT 800,
 
     -- Bump this to kill every outstanding session for this user in one write
     -- (`logout_all`). Access tokens carry `epoch`; a mismatch is treated as

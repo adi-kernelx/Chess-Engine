@@ -32,6 +32,8 @@
 #include <chrono>
 #include <cstdint>
 #include <ctime>
+#include <optional>
+#include <functional>
 
 namespace chess {
 namespace game {
@@ -87,6 +89,12 @@ struct PlayerSlot {
     int         elo            = 1200;     // ELO rating snapshot at game start
     int         remaining_ms   = 0;        // Time remaining in milliseconds
     bool        connected      = false;    // Currently connected?
+    bool        tournament_checked_in = false;
+
+    /// Set when a live seat loses its transport connection. A reconnect
+    /// clears it; the server's maintenance tick uses it to enforce the
+    /// bounded disconnect grace period independently of the chess clock.
+    std::chrono::steady_clock::time_point disconnected_at{};
 
     /// Clock timestamp: when this player's clock started ticking
     std::chrono::steady_clock::time_point clock_start;
@@ -119,7 +127,16 @@ public:
     /// Create an AI game room. Human plays White, AI plays Black.
     /// The game starts immediately (no WAITING state).
     GameRoom(GameId id, PlayerId creator_id, const std::string& creator_name,
-             int creator_fd, const TimeControl& tc, AIDifficulty difficulty);
+             int creator_fd, const TimeControl& tc, AIDifficulty difficulty,
+             int64_t db_player_id = 0, int elo = 1200);
+
+    /// Create a tournament room with two durable reserved seats. Neither seat
+    /// is connected initially and the clock cannot start until
+    /// `open_reserved()` has been called and both identities have bound.
+    GameRoom(GameId id, int64_t tournament_id, int64_t pairing_id,
+             int64_t white_db_id, const std::string& white_name, int white_elo,
+             int64_t black_db_id, const std::string& black_name, int black_elo,
+             const TimeControl& tc);
 
     /// Out-of-line so `unique_ptr<GameCompleted>` (forward-declared in
     /// this header) sees the full type at destruction, which is defined
@@ -135,6 +152,20 @@ public:
     bool join(PlayerId player_id, const std::string& player_name, int connection_fd,
               int64_t db_player_id = 0, int elo = 1200);
 
+    struct ReservedBindResult {
+        bool ok = false;
+        Color color = Color::NONE;
+        bool started = false;
+        std::string error;
+    };
+    ReservedBindResult bind_reserved_player(int64_t db_player_id,
+                                            PlayerId local_player_id,
+                                            int connection_fd);
+    bool allow_reserved_player(int64_t db_player_id);
+    /// Mark the scheduled start as reached. Idempotent; starts exactly once
+    /// when both reserved seats are connected.
+    bool open_reserved();
+
     /// A player submits a move (from their connection fd).
     /// Validates legality, updates the board, toggles clocks.
     /// Returns a result describing success/failure.
@@ -145,6 +176,9 @@ public:
         GameStatus  game_status; // Status after the move
         int         white_time_ms;
         int         black_time_ms;
+        std::string fen;          // authoritative post-move position
+        std::vector<std::string> legal_moves; // UCI moves for new side to move
+        bool draw_offer_declined = false; // offeree made a move
     };
     MoveResult submit_move(int connection_fd, Square from, Square to,
                            PieceType promo_type = PieceType::NONE);
@@ -155,13 +189,52 @@ public:
                               PieceType promo_type = PieceType::NONE);
 
     /// Player resigns (identified by their connection fd).
-    bool resign(int connection_fd);
+    /// The optional callback runs after the terminal state is committed and
+    /// the room lock is released, but before completion listeners (including
+    /// database persistence). This keeps result delivery off the DB latency
+    /// path without exposing an uncommitted result.
+    bool resign(int connection_fd, std::function<void()> on_committed = {});
+
+    /// Offer a draw to the other human seat. `error` is populated on false.
+    bool offer_draw(int connection_fd, std::string& error);
+
+    /// Accept or decline the opponent's pending draw offer. Accepting performs
+    /// the terminal DRAW_AGREEMENT transition and fires completion listeners.
+    bool respond_to_draw(int connection_fd, bool accept, std::string& error);
+
+    /// Remove and return the offerer when a pending draw offer reaches its
+    /// server-authoritative lifetime. Returns Color::NONE while still valid or
+    /// when no offer exists.
+    Color expire_draw_offer(std::chrono::milliseconds ttl);
+
+    /// Rematch negotiation is valid only after a completed human game. The
+    /// service creates the replacement room after an accepted response.
+    bool offer_rematch(int connection_fd, std::string& error);
+    bool respond_to_rematch(int connection_fd, bool accept,
+                            Color& offerer, std::string& error);
+    Color expire_rematch_offer(std::chrono::milliseconds ttl);
+
+    /// Finish an in-progress game when the active player's authoritative
+    /// server clock reaches zero. Returns true exactly once, on the terminal
+    /// transition. Periodic maintenance calls this so timeout does not depend
+    /// on the flagged player attempting another move.
+    bool expire_on_time();
 
     /// Handle a player disconnecting mid-game.
     void on_disconnect(int connection_fd);
 
     /// Handle a player reconnecting (with a new fd).
     bool on_reconnect(PlayerId player_id, int new_fd);
+
+    /// Rebind an authenticated database player to a replacement socket.
+    /// Active rooms use this for game recovery; finished rooms use it only so
+    /// a still-pending rematch can be answered after navigation/reconnection.
+    /// Local PlayerId values are process-only and never known by the browser.
+    bool on_reconnect_db_player(int64_t db_player_id, int new_fd);
+
+    /// Finish the game when the oldest disconnected seat has exceeded the
+    /// grace period. Returns true exactly once, on the terminal transition.
+    bool expire_disconnected(std::chrono::milliseconds grace);
 
     // --------------------------------------------------------
     // Accessors (all thread-safe via internal mutex)
@@ -175,6 +248,9 @@ public:
     std::string         get_result_string() const; // "1-0", "0-1", "1/2-1/2", "*"
     GameStatus          get_game_status()  const;
     bool                is_ai_game()       const;
+    bool                is_tournament_game() const;
+    int64_t             tournament_id() const;
+    int64_t             pairing_id() const;
     AIDifficulty        ai_difficulty()    const;
     Color               ai_color()         const;
 
@@ -187,6 +263,11 @@ public:
     bool has_player(int connection_fd) const;
     /// Check if a given player id belongs to this room.
     bool has_player_id(PlayerId pid) const;
+    /// Check whether a durable authenticated player belongs to this room.
+    bool has_db_player_id(int64_t db_player_id) const;
+
+    /// Whether the seat is currently connected. Color::NONE is false.
+    bool is_connected(Color color) const;
 
     /// Get whose turn it is (connection fd). Returns -1 if game not in progress.
     int  current_turn_fd() const;
@@ -196,6 +277,16 @@ public:
 
     /// Get the move history as a vector of MoveRecords.
     std::vector<MoveRecord> get_move_history() const;
+
+    /// Legal moves for the current side, encoded as UCI strings. Empty when
+    /// the room is not in progress. Used only for instant client highlights;
+    /// submit_move remains the authority that accepts or rejects a move.
+    std::vector<std::string> get_legal_moves_uci() const;
+
+    /// Color that currently has an outstanding offer, or Color::NONE.
+    Color draw_offer_from() const;
+    /// Color that currently has an outstanding rematch offer, or Color::NONE.
+    Color rematch_offer_from() const;
 
     /// Get the player ID (local) for a specific color.
     PlayerId get_player_id(Color color) const;
@@ -305,6 +396,10 @@ private:
 
     // AI game fields
     bool                is_ai_        = false;
+    bool                is_tournament_reserved_ = false;
+    bool                reserved_open_ = false;
+    int64_t             tournament_id_ = 0;
+    int64_t             pairing_id_ = 0;
     AIDifficulty        ai_difficulty_ = AIDifficulty::MEDIUM;
     Color               ai_color_     = Color::BLACK;
 
@@ -312,6 +407,10 @@ private:
     PlayerSlot          black_;
 
     std::vector<MoveRecord> move_history_;
+    std::optional<Color> draw_offer_from_;
+    std::chrono::steady_clock::time_point draw_offer_created_at_{};
+    std::optional<Color> rematch_offer_from_;
+    std::chrono::steady_clock::time_point rematch_offer_created_at_{};
 
     /// Connection fds currently watching this room. Guarded by mutex_. Kept
     /// as std::vector because spectator counts stay small; a set-based lookup
@@ -367,6 +466,7 @@ private:
     /// empty in that case and do nothing.
     mutable std::unique_ptr<GameCompleted>    pending_completed_;
     mutable std::vector<GameEventListenerPtr> pending_listeners_snapshot_;
+    mutable std::function<void()>             pending_before_completion_;
 
     /// RAII helper: every public GameRoom method uses this instead of a
     /// plain `std::lock_guard`. On destruction it (1) captures any

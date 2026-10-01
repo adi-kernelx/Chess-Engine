@@ -8,6 +8,7 @@
 #include <mutex>
 #include <functional>
 #include <unordered_map>
+#include <chrono>
 #include <sys/epoll.h>
 
 namespace chess {
@@ -40,12 +41,17 @@ public:
     using DisconnectCallback = std::function<void(int fd)>;
     void set_disconnect_callback(DisconnectCallback cb) { disconnect_cb_ = std::move(cb); }
 
+    /// Lightweight periodic callback executed by the event-loop thread.
+    using MaintenanceCallback = std::function<void()>;
+    void set_maintenance_callback(MaintenanceCallback cb) { maintenance_cb_ = std::move(cb); }
+
 private:
     bool setup_socket();
     bool set_non_blocking(int fd);
     void handle_new_connection();
     void handle_client_data(int client_fd);
     void close_connection(int client_fd);
+    void run_connection_maintenance();
 
     uint16_t port_;
     int server_fd_;
@@ -62,7 +68,13 @@ private:
     /// process lifetime that fd reuse cannot forge.
     uint64_t next_generation_ = 1;
     DisconnectCallback disconnect_cb_;
+    MaintenanceCallback maintenance_cb_;
     static const int MAX_EVENTS = 64;
+    // Browser control-frame replies should be immediate, but background tabs,
+    // proxies, and a busy worker pool can delay delivery. A 30+30 window avoids
+    // false disconnects while still bounding silent network failure to 60 s.
+    static constexpr std::chrono::seconds HEARTBEAT_INTERVAL{30};
+    static constexpr std::chrono::seconds HEARTBEAT_TIMEOUT{30};
 };
 
 } // namespace net

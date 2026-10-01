@@ -25,6 +25,7 @@
 import { EventBus } from '../core/events.js';
 import { storage }  from '../core/storage.js';
 import { Inbound }  from './protocol.js';
+import { INITIAL_RATING } from '../core/rating.js';
 
 const REFRESH_KEY   = 'refreshToken';
 const IDENTITY_KEY  = 'sessionIdentity'; // { username, elo }
@@ -52,12 +53,25 @@ export class Session {
         this._refresh  = storage.get(REFRESH_KEY)  || null;   // opaque string
 
         this._refreshTimer = null;
+        this._refreshInFlight = null;
+
+        // A persisted refresh token means authentication is not yet known on
+        // a hard reload. The router waits on this one-shot promise before it
+        // mounts any screen, so no route can mistake "not restored yet" for
+        // "signed out". Fresh/signed-out browsers are ready immediately.
+        this._restoring = !!this._refresh;
+        this._resolveReady = null;
+        this._readyPromise = this._restoring
+            ? new Promise(resolve => { this._resolveReady = resolve; })
+            : Promise.resolve();
 
         // If we already have a refresh token from a previous session, try to
         // upgrade it into a fresh access token on the next connect.
         socket.onState((state) => {
             if (state === 'connected' && this._refresh && !this._access) {
-                this._refreshNow().catch(() => {});
+                this._refreshNow().catch(() => {}).finally(() => this._markReady());
+            } else if (state === 'connected') {
+                this._markReady();
             }
         });
     }
@@ -70,8 +84,12 @@ export class Session {
     get elo()               { return this._identity ? this._identity.elo : null; }
     get accessToken()       { return this._access; }
     get refreshToken()      { return this._refresh; }
+    get isRestoring()       { return this._restoring; }
 
     on(event, fn) { return this.bus.on(event, fn); }
+
+    /** Resolves once initial persisted-session restoration succeeds or fails. */
+    whenReady() { return this._readyPromise; }
 
     /**
      * Accept a fresh auth_ok payload from register / login / refresh /
@@ -85,11 +103,12 @@ export class Session {
             : 0;
         this._identity = {
             username: authOk.username,
-            elo:      Number(authOk.elo || 1200),
+            elo:      Number(authOk.elo ?? INITIAL_RATING),
         };
         storage.set(REFRESH_KEY,  this._refresh);
         storage.set(IDENTITY_KEY, this._identity);
         this._scheduleRefresh();
+        this._markReady();
         this.bus.emit('change', this._snapshot());
     }
 
@@ -159,7 +178,29 @@ export class Session {
         );
     }
 
+    _markReady() {
+        if (!this._restoring) return;
+        this._restoring = false;
+        if (this._resolveReady) {
+            this._resolveReady();
+            this._resolveReady = null;
+        }
+    }
+
     async _refreshNow() {
+        // Socket reconnect events can cluster. Refresh tokens rotate, so two
+        // concurrent refreshes with the same token could look like replay and
+        // revoke the whole family. Share the one in-flight operation.
+        if (this._refreshInFlight) return this._refreshInFlight;
+        const task = this._performRefreshNow();
+        this._refreshInFlight = task;
+        try { return await task; }
+        finally {
+            if (this._refreshInFlight === task) this._refreshInFlight = null;
+        }
+    }
+
+    async _performRefreshNow() {
         if (!this._refresh) throw new Error('no refresh token');
         const data = await this._requestOnce(
             { type: 'refresh', refresh_token: this._refresh },

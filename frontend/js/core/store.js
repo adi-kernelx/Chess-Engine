@@ -11,9 +11,11 @@
 
 import { EventBus } from './events.js';
 import { storage } from './storage.js';
+import { INITIAL_RATING } from './rating.js';
 
 const PREFS_KEY = 'prefs';
 const SESSION_KEY = 'session';
+const ACTIVE_GAME_KEY = 'activeGame';
 
 const DEFAULT_PREFS = {
     boardTheme: 'classic',
@@ -25,7 +27,7 @@ const DEFAULT_PREFS = {
 
 const DEFAULT_SESSION = {
     username: 'Player',
-    elo:      1200,
+    elo:      INITIAL_RATING,
     token:    null,
 };
 
@@ -36,7 +38,7 @@ export class Store {
         this._state = {
             session: { ...DEFAULT_SESSION, ...(storage.get(SESSION_KEY) || {}) },
             prefs:   { ...DEFAULT_PREFS,   ...(storage.get(PREFS_KEY)   || {}) },
-            game:    null,
+            game:    storage.get(ACTIVE_GAME_KEY) || null,
             conn:    { state: 'offline' },
         };
     }
@@ -60,6 +62,8 @@ export class Store {
 
     setGame(game) {
         this._state.game = game;
+        if (game) storage.set(ACTIVE_GAME_KEY, game);
+        else storage.remove(ACTIVE_GAME_KEY);
         this._notify('game');
     }
 

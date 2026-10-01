@@ -25,6 +25,7 @@ import { parseFen, START_FEN } from '../board/chess.js';
 import { readStreak, recordGoal, todayKey, reconcileStreak } from '../core/streak.js';
 import { copyText, shareUrl, absoluteUrl } from '../core/share.js';
 import { storage } from '../core/storage.js';
+import { applyUciToFen, groupLegalTargets } from '../board/puzzle-position.js';
 
 const SOLVED_KEY = 'puzzle:solved';   // { 'p001': 'YYYY-MM-DD', ... }
 
@@ -34,7 +35,10 @@ export class PuzzleScreen extends Screen {
         this._puzzle = null;
         this._userSideToMove = 'w';
         this._solutionIdx = 0;
-        this._status = 'loading';       // loading | playing | solved | failed
+        this._status = 'loading';       // loading | playing | solved | wrong | error
+        this._positionFen = START_FEN;
+        this._legalMoves = [];
+        this._legalTargets = new Map();
         this._resizeObs = null;
     }
 
@@ -89,6 +93,7 @@ export class PuzzleScreen extends Screen {
         this.interaction = new BoardInteraction(this._canvas, this.renderer);
         this.renderer.pieceSetUrl = `assets/pieces/${this.ctx.store.prefs.pieceSet || 'classic'}.svg`;
         this.interaction.onMoveIntent = (from, to) => this._onMove(from, to);
+        this.interaction.legalTargetsProvider = from => this._legalTargets.get(from) || [];
 
         this._resizeObs = new ResizeObserver(entries => {
             for (const e of entries) {
@@ -97,7 +102,7 @@ export class PuzzleScreen extends Screen {
                     // Chain the current position so it re-rasterizes into the
                     // new size — mirrors game.js's resize flow.
                     this.renderer.resize(size).then(() => {
-                        if (this._puzzle) this.renderer.setPosition(this._puzzle.fen);
+                        if (this._puzzle) this.renderer.setPosition(this._positionFen);
                     });
                 }
             }
@@ -115,7 +120,7 @@ export class PuzzleScreen extends Screen {
             this._loadPuzzle();
         } catch (e) {
             this._promptEl.textContent = 'Could not load the puzzle set.';
-            this._status = 'failed';
+            this._status = 'error';
             this._renderActions();
             console.warn('[puzzle] load failed:', e);
         }
@@ -129,6 +134,8 @@ export class PuzzleScreen extends Screen {
         const p = this._puzzle;
         this._solutionIdx = 0;
         this._status = 'playing';
+        this._positionFen = p.fen;
+        this._setLegalMoves(p.legal_moves || []);
         const parsed = parseFen(p.fen);
         this._userSideToMove = parsed ? parsed.sideToMove : 'w';
 
@@ -141,7 +148,7 @@ export class PuzzleScreen extends Screen {
         const rect = this._container.getBoundingClientRect();
         const size = Math.min(rect.width, rect.height);
         if (size > 0) {
-            this.renderer.resize(size).then(() => this.renderer.setPosition(p.fen));
+            this.renderer.resize(size).then(() => this.renderer.setPosition(this._positionFen));
         }
 
         this._promptEl.textContent = p.prompt || 'Your move.';
@@ -191,28 +198,49 @@ export class PuzzleScreen extends Screen {
                 onclick: () => this._share(),
             }, 'Share result'));
         }
-        if (this._status === 'failed' || this._status === 'solved') {
+        if (this._status === 'wrong' || this._status === 'solved') {
             this._actionsEl.appendChild(h('button', {
                 class: 'btn btn--sm btn--ghost',
                 onclick: () => this._loadPuzzle(),
             }, 'Retry'));
+        }
+        if (this._status === 'error') {
+            this._actionsEl.appendChild(h('button', {
+                class: 'btn btn--sm btn--ghost',
+                onclick: () => window.location.reload(),
+            }, 'Reload puzzle'));
         }
     }
 
     _onMove(from, to) {
         if (this._status !== 'playing') return;
         const expected = this._puzzle.solution[this._solutionIdx];
-        // Accept the move if from+to matches (ignore promotion piece for now).
         const uci = (from + to).toLowerCase();
-        if (uci !== expected.slice(0, 4)) {
+        const legal = this._legalMoves.find(move => move.slice(0, 4) === uci);
+        if (!legal) {
+            this._promptEl.textContent = 'That move is not legal in this position. Try another move.';
+            this.ctx.sound.illegal && this.ctx.sound.illegal();
+            return;
+        }
+
+        const nextFen = applyUciToFen(this._positionFen, legal);
+        if (!nextFen) {
+            this._promptEl.textContent = 'Could not apply that move. Retry the puzzle.';
             this._onWrong();
             return;
         }
-        // Apply the move visually — the renderer keeps the illusion of a
-        // real game since we have no chess engine on the frontend. Because
-        // it's the same piece the user just dropped, animateMove is enough.
+        this._positionFen = nextFen;
+        this._setLegalMoves([]);
         this.renderer.setLastMove(from, to);
-        this.renderer.animateMove(from, to, () => this._afterUserMove());
+        // animateMove expects the destination position to be applied first.
+        // This keeps both correct and legal-but-wrong moves visible.
+        this.renderer.setPosition(nextFen);
+        this.interaction.setEnabled(false);
+        const isSolution = legal.slice(0, 4) === expected.slice(0, 4);
+        this.renderer.animateMove(from, to, () => {
+            if (isSolution) this._afterUserMove();
+            else this._onWrong();
+        });
     }
 
     _afterUserMove() {
@@ -224,9 +252,20 @@ export class PuzzleScreen extends Screen {
             const to   = reply.slice(2, 4);
             this._solutionIdx++;
             setTimeout(() => {
+                const nextFen = applyUciToFen(this._positionFen, reply);
+                if (!nextFen) {
+                    this._promptEl.textContent = 'Puzzle data is invalid. Please reload.';
+                    this._status = 'error';
+                    this._renderActions();
+                    return;
+                }
+                this._positionFen = nextFen;
                 this.renderer.setLastMove(from, to);
+                this.renderer.setPosition(nextFen);
                 this.renderer.animateMove(from, to, () => {
-                    // Ready for the next user move.
+                    this._setLegalMoves(this._legalMovesForStep());
+                    this.interaction.setEnabled(true);
+                    this._promptEl.textContent = this._puzzle.prompt || 'Find the next move.';
                 });
             }, 320);
             return;
@@ -256,9 +295,9 @@ export class PuzzleScreen extends Screen {
     }
 
     _onWrong() {
-        this._status = 'failed';
+        this._status = 'wrong';
         this.interaction.setEnabled(false);
-        this._promptEl.textContent = 'Not it. Try again?';
+        this._promptEl.textContent = 'That move is legal, but it is not the puzzle solution. Retry when ready.';
         this.ctx.sound.check && this.ctx.sound.check();   // fall back gracefully
         this._renderActions();
         // Shake the board a touch.
@@ -266,6 +305,20 @@ export class PuzzleScreen extends Screen {
             this._container.classList.add('is-wrong');
             setTimeout(() => this._container.classList.remove('is-wrong'), 500);
         }
+    }
+
+    _setLegalMoves(moves) {
+        this._legalMoves = Array.isArray(moves) ? moves : [];
+        this._legalTargets = groupLegalTargets(this._legalMoves);
+        if (this.renderer) this.renderer.clearSelected();
+    }
+
+    _legalMovesForStep() {
+        const byStep = this._puzzle && this._puzzle.legal_moves_by_step;
+        if (Array.isArray(byStep)) {
+            return byStep[Math.floor(this._solutionIdx / 2)] || [];
+        }
+        return this._solutionIdx === 0 ? (this._puzzle.legal_moves || []) : [];
     }
 
     _markSolved() {

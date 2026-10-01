@@ -89,6 +89,10 @@ public:
     virtual ReadOutcome<std::vector<chess::storage::GameSummary>>
         get_player_games(int64_t player_id, int limit, int offset) = 0;
 
+    /// Durable rating progression reconstructed from rated game snapshots.
+    virtual ReadOutcome<std::vector<chess::storage::RatingHistoryPoint>>
+        get_rating_history(int64_t player_id, int current_elo) = 0;
+
     /// One game's stored record. Unknown id is `{ok:true, value:nullopt}`.
     virtual ReadOutcome<std::optional<chess::storage::StoredGame>>
         find_game_by_id(int64_t game_id) = 0;

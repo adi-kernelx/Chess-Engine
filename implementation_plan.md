@@ -899,6 +899,9 @@ transactional ELO updates — extending, not duplicating, the identity store Pha
 - [ ] **Test**: Simulate a game with artificial "engine-like" move times, verify system flags it
 
 #### 9.4 Tournament System *(Days 71–73)*
+> Detailed corrective plan for scheduled live tournament games:
+> [`tournament_live_play_implementation_plan.md`](tournament_live_play_implementation_plan.md)
+
 - [ ] Create tournament: name, format (Swiss), number of rounds, time control
 - [ ] Registration: players join before tournament starts
 - [ ] Swiss pairing: match players with similar scores, avoid rematches

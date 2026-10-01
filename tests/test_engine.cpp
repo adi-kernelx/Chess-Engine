@@ -461,6 +461,15 @@ static void test_eval_bishop_pair() {
 // ============================================================
 
 int main() {
+    {
+        Engine engine;
+        Board board;
+        board.set_from_fen("3rk3/8/8/3p4/8/8/8/3QK3 w - - 0 1");
+        engine.set_position(board);
+        auto result = engine.search(1000, 1);
+        test_result(result.best_move.to_uci() != "d1d5",
+                    "Quiescence avoids winning a pawn but losing the queen to a recapture");
+    }
     std::cout << "===================================\n";
     std::cout << " Phase 6.1+6.2 Engine Tests\n";
     std::cout << "===================================\n";

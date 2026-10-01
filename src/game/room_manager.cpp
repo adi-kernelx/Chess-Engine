@@ -46,10 +46,13 @@ std::shared_ptr<GameRoom> RoomManager::create_ai_room(PlayerId creator_id,
                                                        const std::string& creator_name,
                                                        int creator_fd,
                                                        const TimeControl& tc,
-                                                       AIDifficulty difficulty) {
+                                                       AIDifficulty difficulty,
+                                                       int64_t db_player_id,
+                                                       int elo) {
     GameId id = next_id_.fetch_add(1);
 
-    auto room = std::make_shared<GameRoom>(id, creator_id, creator_name, creator_fd, tc, difficulty);
+    auto room = std::make_shared<GameRoom>(id, creator_id, creator_name, creator_fd,
+                                           tc, difficulty, db_player_id, elo);
 
     GameEventListenerPtr listener_copy;
     {
@@ -59,6 +62,63 @@ std::shared_ptr<GameRoom> RoomManager::create_ai_room(PlayerId creator_id,
     }
     if (listener_copy) room->add_listener(listener_copy);
     return room;
+}
+
+std::shared_ptr<GameRoom> RoomManager::create_reserved_tournament_room(
+        int64_t tournament_id, int64_t pairing_id,
+        int64_t white_db_id, const std::string& white_name, int white_elo,
+        int64_t black_db_id, const std::string& black_name, int black_elo,
+        const TimeControl& tc) {
+    std::shared_ptr<GameRoom> room;
+    GameEventListenerPtr listener_copy;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto existing = tournament_pairing_rooms_.find(pairing_id);
+        if (existing != tournament_pairing_rooms_.end()) {
+            auto it = rooms_.find(existing->second);
+            if (it != rooms_.end()) return it->second;
+            tournament_pairing_rooms_.erase(existing);
+        }
+        const GameId id = next_id_.fetch_add(1);
+        room = std::make_shared<GameRoom>(id, tournament_id, pairing_id,
+            white_db_id, white_name, white_elo,
+            black_db_id, black_name, black_elo, tc);
+        rooms_[id] = room;
+        tournament_pairing_rooms_[pairing_id] = id;
+        listener_copy = default_listener_;
+    }
+    if (listener_copy) room->add_listener(listener_copy);
+    return room;
+}
+
+std::shared_ptr<GameRoom> RoomManager::find_room_by_pairing(int64_t pairing_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto map_it = tournament_pairing_rooms_.find(pairing_id);
+    if (map_it == tournament_pairing_rooms_.end()) return nullptr;
+    auto room_it = rooms_.find(map_it->second);
+    return room_it == rooms_.end() ? nullptr : room_it->second;
+}
+
+void RoomManager::ensure_next_id_above(GameId existing_id) {
+    GameId desired = existing_id + 1;
+    GameId current = next_id_.load();
+    while (current < desired && !next_id_.compare_exchange_weak(current, desired)) {}
+}
+
+void RoomManager::reserve_tournament_player(int64_t db_player_id) {
+    if (db_player_id <= 0) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    reserved_tournament_players_.insert(db_player_id);
+}
+
+void RoomManager::release_tournament_player(int64_t db_player_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    reserved_tournament_players_.erase(db_player_id);
+}
+
+bool RoomManager::is_tournament_player_reserved(int64_t db_player_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return reserved_tournament_players_.count(db_player_id) != 0;
 }
 
 void RoomManager::set_default_listener(GameEventListenerPtr listener) {
@@ -97,8 +157,36 @@ std::shared_ptr<GameRoom> RoomManager::find_room_by_player(PlayerId player_id) c
     return nullptr;
 }
 
+std::shared_ptr<GameRoom> RoomManager::find_room_by_db_player(int64_t db_player_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& [id, room] : rooms_) {
+        (void)id;
+        if (room->get_state() != RoomState::FINISHED
+            && room->has_db_player_id(db_player_id)) {
+            return room;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<std::shared_ptr<GameRoom>> RoomManager::rooms_snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<std::shared_ptr<GameRoom>> result;
+    result.reserve(rooms_.size());
+    for (const auto& [id, room] : rooms_) {
+        (void)id;
+        result.push_back(room);
+    }
+    return result;
+}
+
 void RoomManager::remove_room(GameId id) {
     std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = tournament_pairing_rooms_.begin();
+         it != tournament_pairing_rooms_.end();) {
+        if (it->second == id) it = tournament_pairing_rooms_.erase(it);
+        else ++it;
+    }
     rooms_.erase(id);
 }
 
@@ -181,6 +269,11 @@ size_t RoomManager::cleanup_finished_rooms() {
     auto it = rooms_.begin();
     while (it != rooms_.end()) {
         if (it->second->get_state() == RoomState::FINISHED) {
+            for (auto map_it = tournament_pairing_rooms_.begin();
+                 map_it != tournament_pairing_rooms_.end();) {
+                if (map_it->second == it->first) map_it = tournament_pairing_rooms_.erase(map_it);
+                else ++map_it;
+            }
             it = rooms_.erase(it);
             removed++;
         } else {

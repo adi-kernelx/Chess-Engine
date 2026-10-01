@@ -6,6 +6,7 @@
       "id": "p001",
       "fen": "6k1/5ppp/8/8/8/8/8/R6K w - - 0 1",
       "solution": ["a1a8"],
+      "legal_moves": ["a1a2", "a1a3", "a1a4", "a1a5", "a1a6", "a1a7", "a1a8", "a1b1", "a1c1", "a1d1", "a1e1", "a1f1", "a1g1", "h1g1", "h1g2", "h1h2"],
       "theme": "back-rank mate",
       "rating": 800,
       "prompt": "White to play — mate in 1."
@@ -14,6 +15,7 @@
       "id": "p002",
       "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
       "solution": ["h5f7"],
+      "legal_moves": ["a2a3", "a2a4", "b1a3", "b1c3", "b2b3", "b2b4", "c2c3", "c4a6", "c4b3", "c4b5", "c4d3", "c4d5", "c4e2", "c4e6", "c4f1", "c4f7", "d2d3", "d2d4", "e1d1", "e1e2", "e1f1", "f2f3", "f2f4", "g1e2", "g1f3", "g1h3", "g2g3", "g2g4", "h2h3", "h2h4", "h5d1", "h5e2", "h5e5", "h5f3", "h5f5", "h5f7", "h5g4", "h5g5", "h5g6", "h5h3", "h5h4", "h5h6", "h5h7"],
       "theme": "Scholar's mate",
       "rating": 900,
       "prompt": "White to play — finish the classic trap."
@@ -22,14 +24,16 @@
       "id": "p003",
       "fen": "4k3/4P3/4K3/8/8/8/8/6Q1 w - - 0 1",
       "solution": ["g1g8"],
+      "legal_moves": ["e6d5", "e6d6", "e6e5", "e6f5", "e6f6", "g1a1", "g1a7", "g1b1", "g1b6", "g1c1", "g1c5", "g1d1", "g1d4", "g1e1", "g1e3", "g1f1", "g1f2", "g1g2", "g1g3", "g1g4", "g1g5", "g1g6", "g1g7", "g1g8", "g1h1", "g1h2"],
       "theme": "K+Q mate",
       "rating": 750,
       "prompt": "White to play — mate in 1."
     },
     {
       "id": "p004",
-      "fen": "6k1/pp4pp/2p5/8/8/8/PPP2PPP/2K4R w - - 0 1",
+      "fen": "6k1/pp3p2/8/8/8/2B5/PPP2PP1/2K4R w - - 0 1",
       "solution": ["h1h8"],
+      "legal_moves": ["a2a3", "a2a4", "b2b3", "b2b4", "c1b1", "c1d1", "c1d2", "c3a5", "c3b4", "c3d2", "c3d4", "c3e1", "c3e5", "c3f6", "c3g7", "c3h8", "f2f3", "f2f4", "g2g3", "g2g4", "h1d1", "h1e1", "h1f1", "h1g1", "h1h2", "h1h3", "h1h4", "h1h5", "h1h6", "h1h7", "h1h8"],
       "theme": "back-rank mate",
       "rating": 900,
       "prompt": "White to play — mate in 1."
@@ -38,6 +42,7 @@
       "id": "p005",
       "fen": "8/8/8/8/8/2k5/8/R3K3 w Q - 0 1",
       "solution": ["e1c1"],
+      "legal_moves": ["a1a2", "a1a3", "a1a4", "a1a5", "a1a6", "a1a7", "a1a8", "a1b1", "a1c1", "a1d1", "e1c1", "e1d1", "e1e2", "e1f1", "e1f2"],
       "theme": "queenside castle safety",
       "rating": 1100,
       "prompt": "White to play — one move keeps the king safest. (Castle.)"

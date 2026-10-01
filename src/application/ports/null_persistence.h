@@ -106,6 +106,12 @@ public:
                  {}, "persistence disabled" };
     }
 
+    ReadOutcome<std::vector<chess::storage::RatingHistoryPoint>>
+    get_rating_history(int64_t /*player_id*/, int /*current_elo*/) override {
+        return { false, chess::storage::StorageError::Disconnected,
+                 {}, "persistence disabled" };
+    }
+
     ReadOutcome<std::optional<chess::storage::StoredGame>>
     find_game_by_id(int64_t /*game_id*/) override {
         return { false, chess::storage::StorageError::Disconnected,

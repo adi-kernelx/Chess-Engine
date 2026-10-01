@@ -146,6 +146,7 @@ int main() {
         r.fen  = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
         r.white_time_ms = 599872;
         r.black_time_ms = 600000;
+        r.legal_moves = {"e7e5", "g8f6"};
         const auto s = codec::encode_move_made(r);
         const auto j = json::parse(s);
         return j["type"]       == "move_made"
@@ -155,6 +156,7 @@ int main() {
             && j["white_time"] == 599872
             && j["black_time"] == 600000
             && j["fen"]        == r.fen
+            && j["legal_moves"] == json::array({"e7e5", "g8f6"})
             && j.find("promotion") == j.end();     // no promo field
     });
 
@@ -204,6 +206,8 @@ int main() {
         r.black_time_ms = 67890;
         r.moves.push_back({"e4", 800});
         r.moves.push_back({"e5", 1200});
+        r.legal_moves = {"g1f3", "f1c4"};
+        r.draw_offer_from = std::string("black");
         const auto s = codec::encode_game_state(r);
         json j = json::parse(s);
         return j["type"]     == "game_state"
@@ -212,7 +216,9 @@ int main() {
             && j["moves"].is_array()
             && j["moves"].size() == 2
             && j["moves"][0]["san"]      == "e4"
-            && j["moves"][0]["think_ms"] == 800;
+            && j["moves"][0]["think_ms"] == 800
+            && j["legal_moves"] == json::array({"g1f3", "f1c4"})
+            && j["draw_offer_from"] == "black";
     });
 
     run_test("game_state: finished game emits result + reason", []() {

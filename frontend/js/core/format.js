@@ -46,6 +46,7 @@ export function reasonLabel(reason) {
         case 'draw_agreement':        return 'Draw by agreement';
         case 'resignation':           return 'Resignation';
         case 'timeout':               return 'Timeout';
+        case 'abandonment':           return 'Opponent disconnected';
         default:                      return 'Game ended';
     }
 }

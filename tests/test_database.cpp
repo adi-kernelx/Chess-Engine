@@ -84,7 +84,10 @@ static const char* DEFAULT_SCHEMA  = "src/storage/schema_phase7.sql";
 /// Reset to a known state before every test that touches data.
 static void reset(Database& db) {
     std::string err;
-    db.run_script("DROP TABLE IF EXISTS tournament_pairings; "
+    db.run_script("DROP TABLE IF EXISTS tournament_result_overrides; "
+                  "DROP TABLE IF EXISTS tournament_round_checkins; "
+                  "DROP TABLE IF EXISTS tournament_rounds; "
+                  "DROP TABLE IF EXISTS tournament_pairings; "
                   "DROP TABLE IF EXISTS tournament_players; "
                   "DROP TABLE IF EXISTS tournaments; "
                   "DROP TABLE IF EXISTS cheat_reports; "
@@ -133,7 +136,7 @@ int main() {
              Param::text("adi@example.com"), Param::text("hash")});
         if (!ins.ok || ins.rows.size() != 1) return false;
         // The DEFAULTS defined in the schema must actually apply.
-        if (ins.first().at(1) != "1200" || ins.first().at(2) != "0") return false;
+        if (ins.first().at(1) != "800" || ins.first().at(2) != "0") return false;
 
         auto sel = db.exec("SELECT username, email, password_hash, google_sub"
                            "  FROM players WHERE username_ci=$1",

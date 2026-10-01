@@ -20,6 +20,8 @@
  * Preview message types (Phase 7+) are added as their screens land.
  */
 
+import { INITIAL_RATING } from '../core/rating.js';
+
 /* ────────────────────────────────────────────────────────────
    Outbound message factories.
    time_base / time_inc are SECONDS on the wire (backend expectation).
@@ -43,7 +45,7 @@ export const Outbound = {
     },
 
     joinGame(accessToken, gameId) {
-        return { type: 'join_game', access_token: accessToken, game_id: gameId };
+        return { type: 'join_game', access_token: accessToken, game_id: Number(gameId) };
     },
 
     makeMove(from, to, promotion = null) {
@@ -53,6 +55,25 @@ export const Outbound = {
     },
 
     resign() { return { type: 'resign' }; },
+
+    offerDraw(accessToken) {
+        return { type: 'offer_draw', access_token: accessToken };
+    },
+    drawResponse(accessToken, accept) {
+        return { type: 'draw_response', access_token: accessToken, accept: !!accept };
+    },
+    offerRematch(accessToken, gameId) {
+        return { type: 'offer_rematch', access_token: accessToken, game_id: gameId };
+    },
+    rematchResponse(accessToken, gameId, accept) {
+        return {
+            type: 'rematch_response', access_token: accessToken,
+            game_id: gameId, accept: !!accept,
+        };
+    },
+    pendingRematch(accessToken) {
+        return { type: 'get_pending_rematch', access_token: accessToken };
+    },
 
     quickPlay(accessToken, timeBaseSec, timeIncSec) {
         return {
@@ -67,7 +88,12 @@ export const Outbound = {
 
     listGames()   { return { type: 'list_games' }; },
 
-    gameState()   { return { type: 'game_state' }; },
+    gameState(accessToken) {
+        return { type: 'game_state', access_token: accessToken };
+    },
+    activeGame(accessToken) {
+        return { type: 'get_active_game', access_token: accessToken };
+    },
 
     playAI(accessToken, difficulty, timeBaseSec, timeIncSec) {
         return {
@@ -79,7 +105,7 @@ export const Outbound = {
         };
     },
 
-    // ── Preview: Phase 7+ (backend TBD; capability.js falls back to demo) ──
+    // ── Identity and query routes (live backend) ──────────────
 
     login(username, password)    { return { type: 'login',    username, password }; },
     register(username, password) { return { type: 'register', username, password }; },
@@ -94,7 +120,7 @@ export const Outbound = {
     sealRequest()                { return { type: 'seal_request' }; },
     getProfile(username)         { return { type: 'get_profile', username }; },
     getHistory(username, limit = 20) { return { type: 'get_history', username, limit }; },
-    leaderboard(limit = 100)     { return { type: 'leaderboard', limit }; },
+    leaderboard(limit = 100)     { return { type: 'get_leaderboard', limit }; },
     // Phase 9.1 — spectator mode. Live going through the real server.
     // list_live_games needs no auth (public directory of ongoing games).
     // spectate requires access_token, matching the game-starting contract.
@@ -116,8 +142,8 @@ export const Outbound = {
     // and the dev-facing report_result); tournament_state and list are
     // unauthenticated reads. The `time_base`/`time_inc` on create match the
     // create_game contract (seconds).
-    createTournament(accessToken, name, rounds, timeBaseSec, timeIncSec) {
-        return {
+    createTournament(accessToken, name, rounds, timeBaseSec, timeIncSec, schedule = null) {
+        const message = {
             type: 'create_tournament',
             access_token: accessToken,
             name,
@@ -125,12 +151,29 @@ export const Outbound = {
             time_base: timeBaseSec,
             time_inc:  timeIncSec,
         };
+        if (schedule) {
+            message.registration_deadline = schedule.registrationDeadline;
+            message.first_round_starts_at = schedule.firstRoundStartsAt;
+            message.round_duration_seconds = schedule.roundDurationSeconds;
+        }
+        return message;
     },
     joinTournament(accessToken, tournamentId) {
         return { type: 'join_tournament', access_token: accessToken, tournament_id: tournamentId };
     },
+    leaveTournament(accessToken, tournamentId) {
+        return { type: 'leave_tournament', access_token: accessToken, tournament_id: tournamentId };
+    },
     startTournament(accessToken, tournamentId) {
         return { type: 'start_tournament', access_token: accessToken, tournament_id: tournamentId };
+    },
+    setTournamentRegistration(accessToken, tournamentId, open) {
+        return { type: 'set_tournament_registration', access_token: accessToken,
+            tournament_id: tournamentId, open };
+    },
+    checkInTournamentRound(accessToken, tournamentId, round) {
+        return { type: 'check_in_tournament_round', access_token: accessToken,
+            tournament_id: tournamentId, round };
     },
     tournamentState(tournamentId) {
         return { type: 'tournament_state', tournament_id: tournamentId };
@@ -140,12 +183,13 @@ export const Outbound = {
         if (status) msg.status = status;
         return msg;
     },
-    reportTournamentResult(accessToken, pairingId, result) {
+    reportTournamentResult(accessToken, pairingId, result, reason = 'Creator correction via tournament console') {
         return {
             type: 'report_tournament_result',
             access_token: accessToken,
             pairing_id: pairingId,
             result,     // '1-0' | '0-1' | '1/2-1/2' | 'bye'
+            reason,
         };
     },
 };
@@ -203,6 +247,9 @@ const normMoveMade = (raw) => ({
     whiteMs: Number(raw.white_time),
     blackMs: Number(raw.black_time),
     fen:  raw.fen || null,
+    legalMoves: Array.isArray(raw.legal_moves)
+        ? raw.legal_moves.filter(m => typeof m === 'string')
+        : [],
 });
 
 const normGameState = (raw) => ({
@@ -213,9 +260,35 @@ const normGameState = (raw) => ({
     whiteMs: Number(raw.white_time),
     blackMs: Number(raw.black_time),
     moves:   (raw.moves || []).map(m => ({ san: m.san, thinkMs: Number(m.think_ms) })),
+    legalMoves: Array.isArray(raw.legal_moves)
+        ? raw.legal_moves.filter(m => typeof m === 'string')
+        : [],
     result:  raw.result || null,
     reason:  raw.reason || null,
+    drawOfferFrom: raw.draw_offer_from === 'white' ? 'w'
+        : raw.draw_offer_from === 'black' ? 'b' : null,
 });
+
+const normActiveGame = (raw) => {
+    if (!raw.game) return { type: 'active_game', game: null };
+    const g = raw.game;
+    return {
+        type: 'active_game',
+        game: {
+            gameId:      Number(g.game_id),
+            color:       g.color === 'black' ? 'b' : 'w',
+            opponent:    g.opponent || 'Opponent',
+            whiteMs:     Number(g.white_time),
+            blackMs:     Number(g.black_time),
+            timeBaseSec: Number(g.time_base),
+            timeIncSec:  Number(g.time_inc),
+            isAI:        !!g.ai_game,
+            state:       g.state === 'in_progress' ? 'in_progress' : 'waiting',
+            tournamentId: Number(g.tournament_id || 0) || null,
+            pairingId:    Number(g.pairing_id || 0) || null,
+        },
+    };
+};
 
 const normGameOver = (raw) => ({
     type: 'game_over',
@@ -247,6 +320,28 @@ const normGameStart = (raw) => ({
     isAI:     !!raw.ai_game,
 });
 
+const normRematchStarted = (raw) => ({
+    type:        'rematch_started',
+    gameId:      raw.game_id,
+    color:       raw.color,
+    opponent:    raw.opponent || 'Opponent',
+    whiteMs:     Number(raw.white_time),
+    blackMs:     Number(raw.black_time),
+    timeBaseSec: Number(raw.time_base),
+    timeIncSec:  Number(raw.time_inc),
+    isAI:        !!raw.ai_game,
+});
+
+const normPendingRematch = (raw) => ({
+    type: 'pending_rematch',
+    offer: raw.offer ? {
+        gameId: Number(raw.offer.game_id),
+        from: String(raw.offer.from || 'Opponent'),
+        role: raw.offer.role === 'sender' ? 'sender' : 'recipient',
+        expiresInMs: Number(raw.offer.expires_in_ms || 45_000),
+    } : null,
+});
+
 const normMatchFound = (raw) => ({
     type: 'match_found',
     gameId:   raw.game_id,
@@ -259,6 +354,48 @@ const normMatchFound = (raw) => ({
 
 const normQueued          = (raw) => ({ type: 'queued', queueSize: Number(raw.queue_size || 0) });
 const normQueueCancelled  = () => ({ type: 'queue_cancelled' });
+
+/* Phase 8 — profile --------------------------------------------- */
+
+/** Profile rows arrive in the storage/API snake_case contract. Keep this
+ *  conversion at the protocol boundary so the screen only handles one shape. */
+const normProfile = (raw) => ({
+    type:          'profile',
+    username:      String(raw.username || ''),
+    elo:           Number(raw.elo ?? INITIAL_RATING),
+    gamesPlayed:   Number(raw.games_played || 0),
+    wins:          Number(raw.wins || 0),
+    losses:        Number(raw.losses || 0),
+    draws:         Number(raw.draws || 0),
+    ratingHistory: Array.isArray(raw.rating_history)
+        ? raw.rating_history.map(p => ({ ts: p.ts, rating: Number(p.rating || 0) }))
+        : [],
+    recentGames: Array.isArray(raw.recent_games) ? raw.recent_games.map(g => ({
+        gameId:      g.game_id,
+        opponent:    String(g.opponent || 'Player'),
+        opponentElo: Number(g.opponent_elo || 0),
+        result:      g.result,
+        color:       g.color,
+        termination: g.termination || '',
+        playedAt:    g.started_at,
+        moves:       Number(g.move_count || 0),
+        timeControl: String(g.time_control || ''),
+        rated:       g.rated !== false,
+    })) : [],
+});
+
+const normLeaderboard = (raw) => ({
+    type: 'leaderboard',
+    players: Array.isArray(raw.players) ? raw.players.map(p => ({
+        rank:        Number(p.rank || 0),
+        username:    String(p.username || ''),
+        elo:         Number(p.elo ?? INITIAL_RATING),
+        wins:        Number(p.wins || 0),
+        losses:      Number(p.losses || 0),
+        draws:       Number(p.draws || 0),
+        gamesPlayed: Number(p.games_played || 0),
+    })) : [],
+});
 
 /* Phase 9.1 — spectator mode ------------------------------------- */
 
@@ -309,6 +446,7 @@ const normHistory = (raw) => ({
         playedAt:     g.played_at,
         moveCount:    Number(g.move_count || 0),
         timeControl:  g.time_control || '',
+        rated:        g.rated !== false,
     })),
 });
 
@@ -330,6 +468,7 @@ const normGame = (raw) => ({
     started_at:  raw.started_at,
     ended_at:    raw.ended_at,
     move_count:  raw.move_count,
+    rated:       raw.rated !== false,
     positions: (raw.positions || []).map(p => ({
         ply:     Number(p.ply || 0),
         fen:     p.fen,
@@ -391,7 +530,12 @@ const normTournamentSummary = (t) => ({
     timeBase:      Number(t.time_base || 0),
     timeInc:       Number(t.time_inc  || 0),
     status:        String(t.status || ''),
+    registrationDeadline: Number(t.registration_deadline || 0),
+    firstRoundStartsAt: Number(t.first_round_starts_at || 0),
+    roundDurationSeconds: Number(t.round_duration_seconds || 0),
+    registrationOpen: !!t.registration_open,
     createdBy:     t.created_by,
+    createdByUsername: String(t.created_by_username || ''),
     createdAt:     String(t.created_at   || ''),
     startedAt:     String(t.started_at   || ''),
     completedAt:   String(t.completed_at || ''),
@@ -399,21 +543,34 @@ const normTournamentSummary = (t) => ({
 
 const normStanding = (s) => ({
     playerId:     s.player_id,
+    username:     String(s.username || 'Unknown player'),
     elo:          Number(s.elo || 0),
     score:        Number(s.score || 0),
     buchholz:     Number(s.buchholz || 0),
+    withdrawn:    !!s.withdrawn,
     whitesPlayed: Number(s.whites_played || 0),
     receivedBye:  !!s.received_bye,
-    withdrawn:    !!s.withdrawn,
 });
 
 const normPairing = (p) => ({
     id:             p.id,
     round:          Number(p.round || 0),
     whitePlayerId:  p.white_player_id,
+    whiteUsername:  String(p.white_username || 'Unknown player'),
     blackPlayerId:  p.black_player_id == null ? null : p.black_player_id,
+    blackUsername:  p.black_username == null ? null : String(p.black_username),
     gameId:         p.game_id         == null ? null : p.game_id,
     result:         String(p.result || 'pending'),
+    resultSource:   String(p.result_source || ''),
+});
+
+const normTournamentRound = (r) => ({
+    round: Number(r.round || 0),
+    status: String(r.status || ''),
+    earliestStartAt: Number(r.earliest_start_at || 0),
+    actualStartAt: Number(r.actual_start_at || 0),
+    checkInClosesAt: Number(r.check_in_closes_at || 0),
+    completedAt: Number(r.completed_at || 0),
 });
 
 const normTournamentCreated = (raw) => ({
@@ -434,6 +591,12 @@ const normTournamentState = (raw) => ({
     tournament: normTournamentSummary(raw.tournament || {}),
     standings:  Array.isArray(raw.standings) ? raw.standings.map(normStanding) : [],
     pairings:   Array.isArray(raw.pairings)  ? raw.pairings.map(normPairing)   : [],
+    rounds:     Array.isArray(raw.rounds) ? raw.rounds.map(normTournamentRound) : [],
+    checkIns:   Array.isArray(raw.check_ins) ? raw.check_ins.map(c => ({
+        round: Number(c.round || 0),
+        playerId: Number(c.player_id || 0),
+        username: String(c.username || 'Unknown player'),
+    })) : [],
 });
 const normTournamentList = (raw) => ({
     type:        'tournament_list',
@@ -446,13 +609,18 @@ const normalizers = {
     game_list:        normGameList,
     move_made:        normMoveMade,
     game_state:       normGameState,
+    active_game:      normActiveGame,
     game_over:        normGameOver,
     game_created:     normGameCreated,
     game_joined:      normGameJoined,
     game_start:       normGameStart,
+    rematch_started:  normRematchStarted,
+    pending_rematch:  normPendingRematch,
     match_found:      normMatchFound,
     queued:           normQueued,
     queue_cancelled:  normQueueCancelled,
+    profile:          normProfile,
+    leaderboard:      normLeaderboard,
     live_game_list:   normLiveGameList,
     spectate_start:   normSpectateStart,
     spectate_end:     normSpectateEnd,
@@ -462,8 +630,25 @@ const normalizers = {
     cheat_report:     normCheatReport,
     tournament_created:          normTournamentCreated,
     tournament_joined:           normTournamentJoined,
+    tournament_left: (raw) => ({
+        type: raw.type, tournamentId: Number(raw.tournament_id),
+    }),
     tournament_started:          normTournamentStarted,
     tournament_state:            normTournamentState,
     tournament_list:             normTournamentList,
     tournament_result_recorded:  normTournamentResultRecorded,
+    tournament_registration_updated: (raw) => ({
+        type: raw.type, tournamentId: raw.tournament_id, open: !!raw.open,
+    }),
+    tournament_round_checked_in: (raw) => ({
+        type: raw.type, tournamentId: raw.tournament_id, round: Number(raw.round || 0),
+        roomReady: !!raw.room_ready, gameStarted: !!raw.game_started,
+        gameId: raw.game_id == null ? null : raw.game_id,
+        color: raw.color == null ? null : String(raw.color),
+    }),
+    tournament_game_ready: (raw) => ({
+        type: raw.type, tournamentId: raw.tournament_id, pairingId: raw.pairing_id,
+        gameId: raw.game_id, color: String(raw.color || ''),
+        state: String(raw.state || 'waiting'),
+    }),
 };

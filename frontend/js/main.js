@@ -10,6 +10,7 @@
  */
 
 import { Store }    from './core/store.js';
+import { INITIAL_RATING } from './core/rating.js';
 import { EventBus } from './core/events.js';
 import { q, h }     from './core/dom.js';
 import { Router }   from './ui/router.js';
@@ -58,6 +59,27 @@ function boot() {
     const socket     = new ChessSocket(CONFIG.wsUrl);
     const capability = new Capability(socket);
     const session    = new Session(socket);
+    const navAuth    = q('#nav-auth');
+
+    const syncAuthNav = () => {
+        if (!navAuth) return;
+        const signedIn = session.isAuthenticated;
+        navAuth.textContent = signedIn ? 'Sign out' : 'Sign in';
+        navAuth.href = signedIn ? '#/' : '#/login';
+        navAuth.setAttribute('aria-label', signedIn
+            ? `Sign out ${session.username || ''}`.trim()
+            : 'Sign in or create an account');
+    };
+
+    if (navAuth) {
+        navAuth.addEventListener('click', async (event) => {
+            if (!session.isAuthenticated) return;
+            event.preventDefault();
+            await session.logout();
+            toast.success('Signed out.', { duration: 1800 });
+            location.hash = '#/login';
+        });
+    }
 
     // Session hydration → keep the store's session segment in lock-step so
     // existing screens (settings, etc.) reflect who the user is without
@@ -66,15 +88,27 @@ function boot() {
     session.on('change', (snap) => {
         store.setSession({
             username: snap.username || 'Player',
-            elo:      snap.elo      || 1200,
+            elo:      snap.elo      ?? INITIAL_RATING,
             // `token` is intentionally NOT set — tokens live in Session only.
             authenticated: snap.authenticated,
         });
+        syncAuthNav();
     });
     session.on('expired', () => {
         toast.warning('Signed out — please sign in again.', { duration: 3200 });
         if (location.hash !== '#/login') location.hash = '#/login';
     });
+
+    // Store used to persist a separate demo identity. Session is now the only
+    // identity source, so reconcile once at boot before any screen renders.
+    // This also removes stale "preview login" names left by older builds.
+    store.setSession({
+        username:      session.username || 'Player',
+        elo:           session.elo ?? INITIAL_RATING,
+        authenticated: session.isAuthenticated,
+        token:         null,
+    });
+    syncAuthNav();
 
     // Drive the nav indicator + toast one-shot on first (re)connect.
     let hasEverConnected = false;
@@ -156,12 +190,14 @@ function boot() {
     router.add('/puzzle',        (ctx) => new PuzzleScreen(ctx), { navKey: 'puzzle' });
     router.add('/spectate/:gameId', (ctx, params) => new SpectateWatchScreen(ctx, params), { navKey: 'spectate' });
     router.add('/spectate',         (ctx) => new SpectateListScreen(ctx),                  { navKey: 'spectate' });
+    router.add('/tournaments/:tournamentId', (ctx, params) => new TournamentScreen(ctx, params), { navKey: 'tournaments' });
     router.add('/tournaments',      (ctx) => new TournamentScreen(ctx),                    { navKey: 'tournaments' });
     router.add('/leaderboard',   (ctx) => new LeaderboardScreen(ctx),                                     { navKey: 'leaderboard' });
     router.add('/replay/:gameId', (ctx, params) => new ReplayDetailScreen(ctx, params));
     router.add('/replay',         (ctx) => new ReplayListScreen(ctx),                    { navKey: 'replay' });
     router.add('/profile',       (ctx) => new ProfileScreen(ctx),                                        { navKey: 'profile' });
     router.add('/login',         (ctx) => new AuthScreen(ctx));
+    router.add('/register',      (ctx) => new AuthScreen(ctx, 'register'));
     router.add('/settings',      (ctx) => new SettingsScreen(ctx),                                       { navKey: 'settings' });
     router.add('/board-test',    (ctx) => new BoardTestScreen(ctx));
 
@@ -211,10 +247,27 @@ function boot() {
         } catch (_) { /* private mode etc — no bypass */ }
     })();
 
-    // Fire the queued OAuth callback (if any) now that router is live.
-    if (oauthCallback) oauthCallback();
+    // Do not mount route screens against the temporary hard-refresh state in
+    // which a persisted refresh token exists but its access token is still
+    // being restored. This single boundary protects Profile, Settings,
+    // Tournaments, Replays, Game, Join, and future routes consistently.
+    const outlet = q('#outlet');
+    if (session.isRestoring && outlet) {
+        while (outlet.firstChild) outlet.removeChild(outlet.firstChild);
+        outlet.appendChild(h('div', { class: 'screen' },
+            h('div', { class: 'screen__body' },
+                h('div', {
+                    class: 'empty', role: 'status', 'aria-live': 'polite',
+                    'aria-busy': 'true',
+                }, 'Restoring your session…'))));
+    }
 
-    router.start('/');
+    session.whenReady().then(() => {
+        // Fire a queued OAuth callback only after the router exists and the
+        // initial local-session decision is settled.
+        if (oauthCallback) oauthCallback();
+        router.start('/');
+    });
 
     // Dev handles for quick console poking
     Object.assign(window, { chess: { store, bus, router, toast, modal, socket, capability, session, Outbound, Inbound, sound } });

@@ -1,5 +1,5 @@
 /**
- * profile.js — PREVIEW screen (Phase 8).
+ * profile.js — Profile screen (Phase 8).
  *
  * Expected backend contract:
  *   → { type: 'get_profile', username }
@@ -10,23 +10,29 @@
  *                          time_control:'600+5' }] }
  *
  * On live: renders straight from server data.
- * On preview: fills with plausible demo data seeded from the username so
- * every load looks the same for a given user.
+ * If the backend cannot answer, renders an explicitly marked empty profile;
+ * it never invents games or rating history for a real username.
  */
 
 import { Screen } from '../ui/screen.js';
 import { h, clear, icon } from '../core/dom.js';
 import { initials, relativeTime, parseAndFormatTimeControl, formatElo } from '../core/format.js';
+import { INITIAL_RATING } from '../core/rating.js';
 
 export class ProfileScreen extends Screen {
     constructor(ctx) {
         super(ctx);
-        this.preview = true;
     }
 
     render() {
+        const signedIn = this.ctx.session && this.ctx.session.isAuthenticated;
         return h('div', { class: 'screen' },
-            this.header('Profile', 'Rating, record, and recent games.'),
+            this.header('Profile', 'Rating, record, and recent games.',
+                signedIn
+                    ? h('button', { class: 'btn btn--ghost', onclick: () => this._signOut() }, 'Sign out')
+                    : h('div', { style: { display: 'flex', gap: '8px' } },
+                        h('a', { class: 'btn btn--ghost', href: '#/login' }, 'Sign in'),
+                        h('a', { class: 'btn btn--primary', href: '#/register' }, 'Create account'))),
             h('div', { class: 'screen__body' },
                 h('div', { class: 'profile-loading', ref: el => this._body = el },
                     h('div', { class: 'card' },
@@ -38,23 +44,50 @@ export class ProfileScreen extends Screen {
     }
 
     async onMount() {
-        const username = this.ctx.store.session.username || 'Player';
-        const { data, live } = await this.ctx.capability.request(
+        if (!this.ctx.session || !this.ctx.session.isAuthenticated) {
+            this._renderSignedOut();
+            return;
+        }
+
+        const username = this.ctx.session.username;
+        const { data, live, error } = await this.ctx.capability.request(
             this.ctx.Outbound.getProfile(username),
             {
                 expect: 'profile',
-                timeout: 1500,
-                demo: () => this._demo(username),
+                timeout: 5000,
+                demo: () => this._emptyProfile(username),
+                failOnError: true,
             }
         );
         if (!live) {
-            this.preview = true;
-            const h1 = this.root && this.root.querySelector('.screen__title-block');
-            if (h1 && !h1.querySelector('.badge--preview')) {
-                h1.appendChild(h('span', { class: 'badge badge--preview' }, 'Preview — backend pending'));
-            }
+            this._renderUnavailable(error);
+            return;
         }
         this._render(data);
+    }
+
+    _renderSignedOut() {
+        clear(this._body);
+        this._body.appendChild(h('div', { class: 'card' },
+            h('div', { class: 'empty' },
+                h('div', {}, 'Sign in to view your rating, record, and game history.'),
+                h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '16px' } },
+                    h('a', { class: 'btn btn--primary', href: '#/login' }, 'Sign in'),
+                    h('a', { class: 'btn btn--ghost', href: '#/register' }, 'Create account'))
+            )));
+    }
+
+    _renderUnavailable(error) {
+        clear(this._body);
+        const detail = error && error.message ? ` (${error.message})` : '';
+        this._body.appendChild(h('div', { class: 'card' },
+            h('div', { class: 'empty' }, `Profile could not be loaded${detail}.`)));
+    }
+
+    async _signOut() {
+        await this.ctx.session.logout();
+        this.ctx.toast.success('Signed out.', { duration: 1800 });
+        this.ctx.router.go('/login');
     }
 
     _render(p) {
@@ -89,7 +122,7 @@ export class ProfileScreen extends Screen {
                     ),
 
                     h('div', { class: 'stats-grid' },
-                        this._stat('Games',   String(p.gamesPlayed)),
+                        this._stat('Rated games', String(p.gamesPlayed)),
                         this._stat('Wins',    String(p.wins),   'success'),
                         this._stat('Losses',  String(p.losses), 'danger'),
                         this._stat('Draws',   String(p.draws),  'info'),
@@ -159,7 +192,7 @@ export class ProfileScreen extends Screen {
                             h('div', {},
                                 h('div', {}, g.opponent),
                                 h('div', { style: { fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)' } },
-                                    formatElo(g.opponentElo),
+                                    g.rated ? formatElo(g.opponentElo) : 'Unrated',
                                 )
                             )
                         )
@@ -204,60 +237,11 @@ export class ProfileScreen extends Screen {
         );
     }
 
-    /** Deterministic demo profile seeded from the username. */
-    _demo(username) {
-        const rng = mulberry32(hashStr(username));
-        const games = 20 + Math.floor(rng() * 100);
-        const wins   = Math.floor(games * (0.35 + rng() * 0.3));
-        const losses = Math.floor(games * (0.3  + rng() * 0.25));
-        const draws  = Math.max(0, games - wins - losses);
-        const elo = 1000 + Math.floor(rng() * 800);
-        // Rating history — 20 points around the current
-        const hist = [];
-        let cur = elo - Math.floor(rng() * 300);
-        for (let i = 0; i < 20; i++) {
-            cur += Math.round((rng() - 0.5) * 40);
-            hist.push({ ts: Date.now() - (20 - i) * 86_400_000 * 2, rating: Math.max(200, cur) });
-        }
-        hist[hist.length - 1].rating = elo;
-        // Recent games
-        const RESULTS = ['w', 'l', 'd', 'w', 'w', 'l'];
-        const NAMES = ['Marta', 'Kai', 'Fen', 'Aria', 'Nikko', 'Jae', 'Rue', 'Vex', 'Oli', 'Zed'];
-        const TCS = ['180+2', '300+3', '600+5', '900+10', '60+0'];
-        const recent = [];
-        for (let i = 0; i < 10; i++) {
-            const opp = NAMES[Math.floor(rng() * NAMES.length)];
-            recent.push({
-                gameId: 100 + i,
-                opponent: opp,
-                opponentElo: elo + Math.round((rng() - 0.5) * 300),
-                result: RESULTS[Math.floor(rng() * RESULTS.length)],
-                color: rng() < 0.5 ? 'w' : 'b',
-                playedAt: Date.now() - i * 3_600_000 - Math.floor(rng() * 3_600_000),
-                moves: 20 + Math.floor(rng() * 60),
-                timeControl: TCS[Math.floor(rng() * TCS.length)],
-            });
-        }
+    _emptyProfile(username) {
         return {
-            type: 'profile',
-            username, elo,
-            gamesPlayed: games, wins, losses, draws,
-            ratingHistory: hist,
-            recentGames: recent,
+            type: 'profile', username, elo: INITIAL_RATING,
+            gamesPlayed: 0, wins: 0, losses: 0, draws: 0,
+            ratingHistory: [], recentGames: [],
         };
     }
-}
-
-function hashStr(s) {
-    let h = 2166136261;
-    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
-    return h >>> 0;
-}
-function mulberry32(seed) {
-    return function () {
-        let t = seed += 0x6D2B79F5;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
 }

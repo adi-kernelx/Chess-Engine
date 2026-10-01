@@ -22,30 +22,32 @@
  *   → { type: 'stop_spectating', game_id }               // No auth needed.
  *   ← { type: 'spectate_end',    game_id }
  *
- * Fallback: SpectateListScreen still ships a demo dataset via capability so
- * the UI stays populated when the server has no live games. The individual
- * SpectateWatchScreen also keeps its Scholar's-Mate demo as a fallback.
+ * Spectating is live-only. Network failures render an explicit unavailable
+ * state instead of substituting fictional games.
  */
 
 import { Screen } from '../ui/screen.js';
 import { h, clear, icon } from '../core/dom.js';
+import { storage } from '../core/storage.js';
 import { BoardRenderer } from '../board/renderer.js';
 import { BoardTheme, THEMES } from '../board/theme.js';
-import { parseFen, findKingSquare, capturedPieces, materialBalance, START_FEN } from '../board/chess.js';
-import { formatClock, parseAndFormatTimeControl, initials } from '../core/format.js';
+import { parseFen, capturedPieces, materialBalance, START_FEN } from '../board/chess.js';
+import { formatClock, parseAndFormatTimeControl, initials, reasonLabel } from '../core/format.js';
+
+const LAST_WATCHED_KEY = 'lastSpectatedGame';
 
 /* ─── List ─────────────────────────────────────────────── */
 
 export class SpectateListScreen extends Screen {
     constructor(ctx) {
         super(ctx);
-        this.preview = true;
     }
 
     render() {
         return h('div', { class: 'screen' },
             this.header('Spectate', 'Watch live games as they happen.'),
             h('div', { class: 'screen__body' },
+                h('div', { ref: el => this._recent = el }),
                 h('div', { class: 'card' },
                     h('div', { class: 'card__header' },
                         icon('eye', 'icon--sm'),
@@ -64,18 +66,22 @@ export class SpectateListScreen extends Screen {
     }
 
     async onMount() {
-        // Phase 9.1: the server actually implements list_live_games now.
-        // capability.request still keeps the demo path — a browser opened
-        // against a dead server can still populate the table for design work.
         const { data, live } = await this.ctx.capability.request(
             this.ctx.Outbound.listLiveGames(),
-            { expect: 'live_game_list', timeout: 1500, demo: () => this._demo() },
+            { expect: 'live_game_list', timeout: 5000, demo: () => null },
         );
-        // When live, this.preview should stay false so users don't see the
-        // "preview" badge on a real feature.
-        if (live) this.preview = false;
-        const normalized = this.ctx.Inbound.normalize(data);
-        this._render(normalized.games || []);
+        if (!live || !data) {
+            clear(this._body);
+            this._count.textContent = '';
+            this._body.appendChild(h('div', { class: 'empty' },
+                'Live games are unavailable. Check the server connection and try again.'));
+            return;
+        }
+        // Capability already normalizes successful replies. A second pass
+        // erased gameId and produced /spectate/undefined → Game #NaN.
+        const games = data.games || [];
+        this._render(games);
+        this._loadRecentResult(games);
 
         // Re-poll every 5 seconds while the screen is mounted so spectator
         // counts and move counts stay fresh — same cadence as the lobby.
@@ -84,9 +90,70 @@ export class SpectateListScreen extends Screen {
                 if (!this.ctx.socket.isConnected()) return;
                 this.ctx.socket.send(this.ctx.Outbound.listLiveGames());
             }, 5000);
-            this.sub(this.ctx.socket.on('live_game_list',
-                raw => this._render(this.ctx.Inbound.normalize(raw).games || [])));
+            this.sub(this.ctx.socket.on('live_game_list', raw => {
+                const next = this.ctx.Inbound.normalize(raw).games || [];
+                this._render(next);
+                this._loadRecentResult(next);
+            }));
         }
+    }
+
+    async _loadRecentResult(liveGames) {
+        if (this._recentLoading || !this.root) return;
+        const watched = storage.get(LAST_WATCHED_KEY);
+        if (!watched || !Number.isSafeInteger(Number(watched.gameId))
+            || Number(watched.gameId) <= 0) return;
+        const gameId = Number(watched.gameId);
+        if (liveGames.some(g => Number(g.gameId) === gameId)) {
+            clear(this._recent);
+            return;
+        }
+        if (watched.result) {
+            this._renderRecentResult(watched);
+            return;
+        }
+
+        this._recentLoading = true;
+        try {
+            const { data, live } = await this.ctx.capability.request(
+                this.ctx.Outbound.getGame(gameId),
+                { expect: 'game', timeout: 3000, demo: () => null, failOnError: true },
+            );
+            if (!this.root || !live || !data || !data.result || data.result === '*') return;
+            const completed = {
+                gameId,
+                white: data.white,
+                black: data.black,
+                result: data.result,
+                reason: data.reason,
+            };
+            storage.set(LAST_WATCHED_KEY, completed);
+            this._renderRecentResult(completed);
+        } finally {
+            this._recentLoading = false;
+        }
+    }
+
+    _renderRecentResult(game) {
+        if (!this._recent) return;
+        clear(this._recent);
+        let outcome = 'Draw';
+        if (game.result === '1-0') outcome = `${game.white || 'White'} (White) wins`;
+        if (game.result === '0-1') outcome = `${game.black || 'Black'} (Black) wins`;
+        this._recent.appendChild(h('div', {
+            class: 'card', style: { marginBottom: 'var(--sp-4)' },
+        }, h('div', {
+            class: 'card__body',
+            style: { display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' },
+        },
+            h('div', { style: { flex: 1, minWidth: '220px' } },
+                h('div', { class: 'card__title' }, 'Recently watched result'),
+                h('div', { class: 'field__hint', role: 'status' },
+                    `${game.white || 'White'} vs ${game.black || 'Black'} · ${outcome} · ${reasonLabel(game.reason)} (${game.result})`)),
+            h('button', {
+                class: 'btn btn--sm',
+                onclick: () => this.ctx.router.go('/replay/' + game.gameId),
+            }, 'Open replay'))));
     }
 
     _render(games) {
@@ -132,20 +199,6 @@ export class SpectateListScreen extends Screen {
         );
     }
 
-    // Demo fallback — used only when the socket can't confirm the live wire
-    // type within the capability probe window. Kept for offline UI work.
-    _demo() {
-        return {
-            type: 'live_game_list',
-            games: [
-                { game_id: 501, white: 'Marta',   black: 'Kai',    time_control: '600+5',  move_count: 24, spectator_count: 12 },
-                { game_id: 502, white: 'Aria',    black: 'Nikko',  time_control: '300+3',  move_count: 18, spectator_count: 4  },
-                { game_id: 503, white: 'Vex',     black: 'Rue',    time_control: '180+2',  move_count: 32, spectator_count: 27 },
-                { game_id: 504, white: 'Sable',   black: 'Corvin', time_control: '600+5',  move_count: 6,  spectator_count: 1  },
-                { game_id: 505, white: 'Wren',    black: 'Yuki',   time_control: '900+10', move_count: 45, spectator_count: 8  },
-            ],
-        };
-    }
 }
 
 /* ─── Watch (individual game) ──────────────────────────── */
@@ -153,19 +206,22 @@ export class SpectateListScreen extends Screen {
 export class SpectateWatchScreen extends Screen {
     constructor(ctx, params) {
         super(ctx);
-        this.preview = true;
-        this._gameId = parseInt(params.gameId, 10);
+        const rawGameId = params && String(params.gameId || '');
+        this._gameId = /^\d+$/.test(rawGameId) ? Number(rawGameId) : null;
+        this._liveJoined = false;
         this._fen = START_FEN;
         this._moves = [];
         this._whiteMs = 0;
         this._blackMs = 0;
-        this._demoTimer = null;
-        this._demoPly = 0;
+        this._clockAnchoredAt = performance.now();
+        this._activeSide = 'w';
+        this._ended = false;
+        this._spectateStarting = false;
     }
 
     render() {
         return h('div', { class: 'screen' },
-            this.header('Game #' + this._gameId, 'Live spectator view.',
+            this.header(this._gameId === null ? 'Live game' : 'Game #' + this._gameId, 'Live spectator view.',
                 h('button', {
                     class: 'btn btn--ghost btn--sm',
                     onclick: () => this.ctx.router.go('/spectate'),
@@ -180,7 +236,10 @@ export class SpectateWatchScreen extends Screen {
                             )
                         ),
                         this._bar('white'),
-                        h('div', { class: 'status-line', ref: el => this._status = el }, 'Loading…')
+                        h('div', {
+                            class: 'status-line', role: 'status', 'aria-live': 'polite',
+                            ref: el => this._status = el,
+                        }, 'Loading…')
                     ),
                     h('div', { class: 'game-side' },
                         h('div', { class: 'card' },
@@ -208,52 +267,101 @@ export class SpectateWatchScreen extends Screen {
         return h('div', { class: 'player-bar' },
             h('div', { class: 'avatar', ref: el => this['_' + color + 'Avatar'] = el }, '?'),
             h('div', { class: 'player-bar__name-block' },
-                h('div', { class: 'player-bar__name', ref: el => this['_' + color + 'Name'] = el }, color === 'white' ? 'White' : 'Black'),
+                h('div', { class: 'player-bar__name', ref: el => this['_' + color + 'NameEl'] = el }, color === 'white' ? 'White' : 'Black'),
                 h('div', { class: 'player-bar__captured', ref: el => this['_' + color + 'Captured'] = el })
             ),
             h('div', { class: 'clock', ref: el => this['_' + color + 'Clock'] = el }, '--:--')
         );
     }
 
-    async onMount() {
+    onMount() {
         this.renderer = new BoardRenderer(this._canvas,
             (THEMES[this.ctx.store.prefs.boardTheme] || THEMES.classic).factory());
+        this.renderer.onRastersReady = () => this._renderCaptured();
         this.renderer.pieceSetUrl = `assets/pieces/${this.ctx.store.prefs.pieceSet || 'classic'}.svg`;
 
         this._boot();
 
-        // Auth is mandatory on spectate (see Phase 9 pre-work migration).
-        // If we don't have a token, we can still show the demo, but the real
-        // server will refuse; nudge them once so it's not a mystery.
-        const token = this.ctx.session && this.ctx.session.accessToken;
-        if (!token) {
-            this.ctx.toast.info('Sign in to spectate live games.', { duration: 2800 });
+        if (this._gameId === null) {
+            this._status.textContent = 'Invalid game link.';
+            this.ctx.toast.error('This spectator link has no valid game ID.', { duration: 3200 });
+            return;
         }
 
+        // A hard refresh reconstructs the access token from the persisted
+        // refresh token asynchronously. Do not mistake that short hydration
+        // window for a signed-out user.
+        this.sub(this.ctx.session.on('change', () => this._beginSpectating()));
+        this.sub(this.ctx.socket.onState(state => {
+            if (state !== 'connected' || this._ended) return;
+            if (this._liveJoined) this._sendSpectateSnapshot();
+            else this._beginSpectating();
+        }));
+        this._beginSpectating();
+    }
+
+    async _beginSpectating() {
+        if (this._liveJoined || this._spectateStarting || this._ended || !this.root) return;
+
+        const session = this.ctx.session;
+        const token = session && session.accessToken;
+        if (!token) {
+            if (session && session.hasRefreshToken) {
+                this._status.textContent = 'Restoring your session…';
+                return;
+            }
+            this.ctx.postAuthPath = '/spectate/' + this._gameId;
+            this.ctx.toast.warning('Sign in to spectate live games.', { duration: 2800 });
+            this.ctx.router.go('/login');
+            return;
+        }
+
+        if (!this.ctx.socket.isConnected()) {
+            this._status.textContent = 'Connecting to the server…';
+            return;
+        }
+
+        this._spectateStarting = true;
+        this._status.textContent = 'Joining live view…';
+
         const { data, live } = await this.ctx.capability.request(
-            this.ctx.Outbound.spectate(token || '', this._gameId),
-            { expect: 'spectate_start', timeout: 1500, demo: () => this._demoSnapshot() },
+            this.ctx.Outbound.spectate(token, this._gameId),
+            { expect: 'spectate_start', timeout: 5000, demo: () => null, failOnError: true },
         );
-        if (live) this.preview = false;
+        this._spectateStarting = false;
+        if (!this.root) return;
+        if (!live || !data) {
+            this._status.textContent = 'Unable to spectate this game.';
+            this.ctx.toast.error('The live spectator request failed.', { duration: 3200 });
+            return;
+        }
 
-        // Normalize once — the rest of the screen deals in camelCase already.
-        const snap = this.ctx.Inbound.normalize(data);
-        this._applySnapshot(snap);
+        this._liveJoined = true;
+        this._applySnapshot(data);
+        this.sub(this.ctx.socket.on('move_made', raw => this._onLiveMove(raw)));
+        this.sub(this.ctx.socket.on('game_over', raw => this._onLiveEnd(raw)));
+        this.sub(this.ctx.socket.on('spectate_start', raw => {
+            const snap = this.ctx.Inbound.normalize(raw);
+            if (Number(snap.gameId) === Number(this._gameId)) this._applySnapshot(snap);
+        }));
+        // Push frames are the fast path. Periodic snapshots repair a dropped
+        // frame and re-assert membership after navigation/reconnect.
+        this.interval(() => {
+            if (!this._ended) this._sendSpectateSnapshot();
+        }, 3000);
+        this.interval(() => this._paintClocks(), 100);
+    }
 
-        if (!live) {
-            this.interval(() => this._demoAdvance(), 1400);
-        } else {
-            // Live path: spectators receive the SAME move_made / game_over
-            // frames as the seated players. No dedicated spectate_move
-            // opcode — that keeps the fan-out on one code path server-side.
-            this.sub(this.ctx.socket.on('move_made', raw => this._onLiveMove(raw)));
-            this.sub(this.ctx.socket.on('game_over', raw => this._onLiveEnd(raw)));
+    _sendSpectateSnapshot() {
+        const token = this.ctx.session && this.ctx.session.accessToken;
+        if (token && this.ctx.socket.isConnected()) {
+            this.ctx.socket.send(this.ctx.Outbound.spectate(token, this._gameId));
         }
     }
 
     onUnmount() {
         if (this._resizeObs) this._resizeObs.disconnect();
-        if (this.ctx.socket.isConnected()) {
+        if (this._liveJoined && this.ctx.socket.isConnected()) {
             this.ctx.socket.send(this.ctx.Outbound.stopSpectating(this._gameId));
         }
     }
@@ -288,48 +396,25 @@ export class SpectateWatchScreen extends Screen {
         // The wire has no ELO for spectator rows — display names only. If a
         // future phase adds elo to the room-info payload, plumb it here.
         this._whiteName = snap.white; this._blackName = snap.black;
+        storage.set(LAST_WATCHED_KEY, {
+            gameId: this._gameId, white: snap.white, black: snap.black,
+        });
         this._whiteAvatar.textContent = initials(snap.white);
         this._blackAvatar.textContent = initials(snap.black);
-        const bars = document.querySelectorAll('.player-bar__name');
-        if (bars.length >= 2) {
-            bars[0].textContent = snap.black;   // top bar (opponent-side layout)
-            bars[1].textContent = snap.white;
-        }
+        this._blackNameEl.textContent = snap.black;
+        this._whiteNameEl.textContent = snap.white;
         this._fen     = snap.fen || START_FEN;
         this._moves   = snap.moves ? snap.moves.slice() : [];
         this._whiteMs = snap.whiteMs || 0;
         this._blackMs = snap.blackMs || 0;
+        this._clockAnchoredAt = performance.now();
+        this._activeSide = parseFen(this._fen).sideToMove;
         this._specCount.textContent = String(snap.spectatorCount || 0);
         this.renderer.setPosition(this._fen);
         this._renderMoves();
         this._paintClocks();
         this._updateStatus();
         this._renderCaptured();
-    }
-
-    _demoAdvance() {
-        const next = SCHOLARS_MATE.positions[this._demoPly + 1];
-        if (!next) return;
-        this._demoPly++;
-        this._fen = next.fen;
-        this._whiteMs = next.white_time;
-        this._blackMs = next.black_time;
-        this._moves.push({ san: next.san, think_ms: next.think_ms || 0 });
-        this.renderer.animateMove(next.from, next.to, () => {
-            this.renderer.setPosition(this._fen);
-            this.renderer.setLastMove(next.from, next.to);
-            const parsed = parseFen(this._fen);
-            const inCheck = /[+#]$/.test(next.san);
-            if (inCheck) {
-                const kSq = findKingSquare(parsed, parsed.sideToMove);
-                if (kSq) this.renderer.setCheck(kSq);
-            } else this.renderer.clearCheck();
-            this._renderMoves();
-            this._paintClocks();
-            this._updateStatus();
-            this._renderCaptured();
-            if (next.san.includes('#')) this._status.textContent = 'Checkmate — White wins';
-        });
     }
 
     _onLiveMove(raw) {
@@ -340,20 +425,41 @@ export class SpectateWatchScreen extends Screen {
         this._fen = norm.fen || this._fen;
         this._whiteMs = norm.whiteMs;
         this._blackMs = norm.blackMs;
+        this._clockAnchoredAt = performance.now();
+        this._activeSide = parseFen(this._fen).sideToMove;
         this._moves.push({ san: norm.san, thinkMs: 0 });
         this.renderer.animateMove(norm.from, norm.to, () => {
             this.renderer.setPosition(this._fen);
             this.renderer.setLastMove(norm.from, norm.to);
             this._renderMoves();
             this._paintClocks();
-            this._updateStatus();
+            // `game_over` can arrive while the final-move animation is still
+            // running. Never let the later animation callback overwrite the
+            // winner announcement with "White/Black to move".
+            if (!this._ended) this._updateStatus();
             this._renderCaptured();
         });
     }
     _onLiveEnd(raw) {
         // Spectators receive the same `game_over` frame the seated players do.
-        this._status.textContent = `Game over — ${raw.result} (${raw.reason})`;
+        let outcome = 'Game over';
+        if (raw.result === '1-0') {
+            outcome = `${this._whiteName || 'White'} (White) wins`;
+        } else if (raw.result === '0-1') {
+            outcome = `${this._blackName || 'Black'} (Black) wins`;
+        } else if (raw.result === '1/2-1/2') {
+            outcome = 'Draw';
+        }
+        this._status.textContent = `${outcome} · ${reasonLabel(raw.reason)} (${raw.result || '*'})`;
         this._status.classList.add('is-over');
+        this._ended = true;
+        storage.set(LAST_WATCHED_KEY, {
+            gameId: this._gameId,
+            white: this._whiteName,
+            black: this._blackName,
+            result: raw.result,
+            reason: raw.reason,
+        });
     }
 
     _renderCaptured() {
@@ -366,21 +472,24 @@ export class SpectateWatchScreen extends Screen {
     _paintCaptured(root, list, capturedColor, advantage) {
         clear(root);
         for (const t of list) {
-            const img = this.renderer.rasters[`${capturedColor}_${t}`];
-            if (!img) continue;
-            const clone = new Image();
-            clone.src = img.src;
-            root.appendChild(clone);
+            const thumbnail = this.renderer.createPieceThumbnail(`${capturedColor}_${t}`);
+            if (thumbnail) root.appendChild(thumbnail);
         }
         if (advantage > 0) root.appendChild(h('span', { class: 'player-bar__adv' }, `+${advantage}`));
     }
 
     _paintClocks() {
-        this._whiteClock.textContent = formatClock(this._whiteMs);
-        this._blackClock.textContent = formatClock(this._blackMs);
-        const stm = parseFen(this._fen).sideToMove;
-        this._whiteClock.classList.toggle('is-active', stm === 'w');
-        this._blackClock.classList.toggle('is-active', stm === 'b');
+        let white = this._whiteMs;
+        let black = this._blackMs;
+        if (!this._ended) {
+            const elapsed = Math.max(0, performance.now() - this._clockAnchoredAt);
+            if (this._activeSide === 'w') white = Math.max(0, white - elapsed);
+            else black = Math.max(0, black - elapsed);
+        }
+        this._whiteClock.textContent = formatClock(white);
+        this._blackClock.textContent = formatClock(black);
+        this._whiteClock.classList.toggle('is-active', !this._ended && this._activeSide === 'w');
+        this._blackClock.classList.toggle('is-active', !this._ended && this._activeSide === 'b');
     }
 
     _updateStatus() {
@@ -403,20 +512,6 @@ export class SpectateWatchScreen extends Screen {
         this._moveList.scrollTop = this._moveList.scrollHeight;
     }
 
-    // Demo fallback. Matches the wire shape of `spectate_start` so the
-    // Inbound.normalize path handles it the same way as live data.
-    _demoSnapshot() {
-        return {
-            type: 'spectate_start',
-            game_id: this._gameId,
-            white: 'Marta', black: 'Kai',
-            fen: START_FEN,
-            white_time: 600000, black_time: 600000,
-            time_control: '600+5',
-            moves: [],
-            spectator_count: 12,
-        };
-    }
 }
 
 /** Canned demo game (Scholar's Mate) used by the preview watch view. */

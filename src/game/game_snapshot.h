@@ -73,6 +73,8 @@ struct GameSnapshot {
     /// creating duplicate rows. Populated as UUID v4 (36 chars).
     std::string  completion_uuid;
     bool         is_ai_game  = false;
+    int64_t      tournament_id = 0; ///< 0 for ordinary games
+    int64_t      pairing_id    = 0; ///< stable tournament pairing identity
 
     /// LLD-6.4: monotonically-increasing revision of the source room
     /// at the moment this snapshot was taken. Every mutating GameRoom

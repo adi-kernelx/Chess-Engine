@@ -103,6 +103,20 @@ public:
                      const chess::protocol::ResignRequest&    req,
                      MessageSink&                             caller_sink);
 
+    void offer_draw(const RequestContext& ctx, MessageSink& caller_sink);
+    void respond_to_draw(const RequestContext& ctx, bool accept,
+                         MessageSink& caller_sink);
+    void offer_rematch(const RequestContext& ctx,
+                       const AuthenticatedIdentity& actor,
+                       int64_t game_id, MessageSink& caller_sink);
+    void respond_to_rematch(const RequestContext& ctx,
+                            const AuthenticatedIdentity& actor,
+                            int64_t game_id, bool accept,
+                            MessageSink& caller_sink);
+    void get_pending_rematch(const RequestContext& ctx,
+                             const AuthenticatedIdentity& actor,
+                             MessageSink& caller_sink);
+
     // (chess::GameStatus is used by the private persist_game helper;
     // it lives in chess::, not chess::game::, and is pulled in via
     // game_room.h below.)
@@ -110,6 +124,14 @@ public:
     void game_state (const RequestContext&                    ctx,
                      const chess::protocol::GameStateRequest& req,
                      MessageSink&                             caller_sink);
+
+    /// Return the authenticated player's current live room, if any, and bind
+    /// the caller's current socket to that durable seat. This makes the
+    /// discovery response a complete recovery primitive for navigation,
+    /// refresh, and a match_found frame racing a socket replacement.
+    void get_active_game(const RequestContext&        ctx,
+                         const AuthenticatedIdentity& actor,
+                         MessageSink&                 caller_sink);
 
     // ── Legacy routes: identity + primitive inputs, JSON caller_sink ──
     //
@@ -152,6 +174,15 @@ public:
     /// from the matchmaking queue and notifies its room (if any) of
     /// the disconnect. Idempotent.
     void on_player_disconnect(int fd);
+
+    /// Periodic server maintenance. Enforces authoritative clock expiry,
+    /// draw-offer lifetime, and the bounded reconnect window, broadcasting
+    /// and persisting terminal transitions without waiting for another move.
+    void expire_disconnected_games();
+
+    static constexpr int DISCONNECT_GRACE_MS = 120'000;
+    static constexpr int DRAW_OFFER_TTL_MS = 45'000;
+    static constexpr int REMATCH_OFFER_TTL_MS = 45'000;
 
 private:
     /// After a human makes a move in an AI game, compute + submit the

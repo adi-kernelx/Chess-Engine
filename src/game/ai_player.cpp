@@ -46,8 +46,15 @@ application::ports::SearchLimits limits_for(AIDifficulty diff) {
 
 AIPlayer::AIPlayer() : engine_(16) {}  // 16 MB TT for AI
 
-AIMove AIPlayer::compute_move(const Board& board, AIDifficulty difficulty) {
+AIMove AIPlayer::compute_move(const Board& board, AIDifficulty difficulty,
+                              int remaining_ms, int increment_ms) {
     auto lim = limits_for(difficulty);
+    if (remaining_ms >= 0) {
+        // Reserve time for future moves and transport/clock processing.
+        const int safe = std::max(1, remaining_ms - 50);
+        const int budget = std::max(1, remaining_ms / 25 + increment_ms / 2);
+        lim.time_ms = std::min({lim.time_ms, safe, budget});
+    }
 
     engine_.set_position(board);
     auto result = engine_.search(lim.time_ms, lim.max_depth);

@@ -151,11 +151,39 @@ void Engine::order_moves(std::vector<Move>& moves, const Board& board, const Mov
 // Alpha-beta negamax search with Transposition Table
 // ============================================================
 
+int Engine::quiescence(Board& board, int ply, int alpha, int beta) {
+    ++nodes_searched_;
+    if (time_up()) return 0;
+    auto moves = move_gen::generate_legal_moves(board);
+    const bool checked = move_gen::is_in_check(board, board.side_to_move());
+    if (moves.empty()) return checked ? -(SCORE_MATE - ply) : SCORE_DRAW;
+    if (board.halfmove_clock() >= 100) return SCORE_DRAW;
+    // Bound checking/capture sequences; never stand pat while in check.
+    if (ply >= 64) return evaluate(board);
+    if (!checked) {
+        const int stand_pat = evaluate(board);
+        if (stand_pat >= beta) return stand_pat;
+        alpha = std::max(alpha, stand_pat);
+    }
+    order_moves(moves, board);
+    for (const auto& move : moves) {
+        if (!checked && board.piece_at(move.to).is_none() &&
+            !move.is_en_passant() && !move.is_promotion()) continue;
+        auto undo = board.make_move(move);
+        const int score = -quiescence(board, ply + 1, -beta, -alpha);
+        board.undo_move(move, undo);
+        if (time_up()) return 0;
+        if (score >= beta) return score;
+        alpha = std::max(alpha, score);
+    }
+    return alpha;
+}
+
 int Engine::alpha_beta(Board& board, int depth, int ply, int alpha, int beta) {
     ++nodes_searched_;
 
-    // Check time limit every 2048 nodes (avoids syscall overhead on every node)
-    if ((nodes_searched_ & 2047) == 0 && time_up()) {
+    // Check every node so short clock budgets unwind promptly.
+    if (time_up()) {
         // Return a neutral score; the caller will discard this result
         return 0;
     }
@@ -180,7 +208,7 @@ int Engine::alpha_beta(Board& board, int depth, int ply, int alpha, int beta) {
 
     // Base case: evaluate the leaf position
     if (depth == 0) {
-        return evaluate(board);
+        return quiescence(board, ply, alpha, beta);
     }
 
     // Generate all legal moves
@@ -214,7 +242,7 @@ int Engine::alpha_beta(Board& board, int depth, int ply, int alpha, int beta) {
         board.undo_move(m, undo);
 
         // Abort if time expired mid-search
-        if (time_up() && (nodes_searched_ & 2047) == 0) {
+        if (time_up()) {
             return best_score; // Return what we have so far
         }
 
