@@ -368,14 +368,46 @@ static void test_sessions(Database& db) {
         // conceptually, whichever ones we chose. Now REPLAY the old rotated
         // token `a`. That must destroy the whole family, including `c`.
         RefreshOutcome replay_out;
-        (void)refresh_session(db, signer, a.refresh_token, now + 100, replay_out);
+        (void)refresh_session(db, signer, a.refresh_token,
+                              now + 60 + REFRESH_REUSE_GRACE_SECONDS + 1,
+                              replay_out);
         if (replay_out != RefreshOutcome::InvalidOrRevoked) return false;
 
         // And `c` must no longer work either — the family is gone.
         RefreshOutcome after;
-        (void)refresh_session(db, signer, c.refresh_token, now + 110, after);
+        (void)refresh_session(db, signer, c.refresh_token,
+                              now + 60 + REFRESH_REUSE_GRACE_SECONDS + 2, after);
         return after == RefreshOutcome::InvalidOrRevoked &&
                session_count(db) == 0;
+    });
+
+    run_test("Immediate rotated-token retry recovers a lost browser response", [&] {
+        reset(db);
+        const int64_t pid = make_player(db);
+        auto first = issue_session(db, signer, pid, "adi", 0, now);
+
+        RefreshOutcome first_out;
+        auto lost = refresh_session(db, signer, first.refresh_token, now + 30, first_out);
+        if (first_out != RefreshOutcome::Ok || !lost.ok) return false;
+
+        // Simulate a hard reload that happened before `lost` reached storage:
+        // the browser still has the predecessor and retries it immediately.
+        RefreshOutcome retry_out;
+        auto recovered = refresh_session(db, signer, first.refresh_token,
+                                         now + 31, retry_out);
+        if (retry_out != RefreshOutcome::Ok || !recovered.ok) return false;
+        if (recovered.refresh_token == lost.refresh_token) return false;
+
+        // The abandoned successor was removed; only the recovered successor is
+        // active, and it can continue the rotation chain normally.
+        auto active = db.exec(
+            "SELECT count(*) FROM sessions WHERE player_id=$1 AND rotated=FALSE",
+            {Param::int64(pid)});
+        RefreshOutcome next_out;
+        auto next = refresh_session(db, signer, recovered.refresh_token,
+                                    now + 32, next_out);
+        return active.ok && active.first().at(0) == "1" &&
+               next_out == RefreshOutcome::Ok && next.ok;
     });
 
     run_test("Unknown refresh token = InvalidOrRevoked, no crash", [&] {

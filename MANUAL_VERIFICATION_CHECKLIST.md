@@ -193,6 +193,14 @@ OC9DOU673AWa9T/Gttb7Ogz/cUmXE0HLc5rAKTzLC5bH0BBPyxCN3axlGTZZzSf8
 - [x] Wrong password returns `invalid_credentials` without an indefinite wait or a local session.
 - [ ] Unknown username also returns `invalid_credentials`.
 - [x] Reload preserves an authenticated session.
+- [ ] After applying migration `0011`, repeatedly hard-refresh Profile,
+      Replays, Tournaments, and Leaderboard while the connection indicator is
+      still **Connecting**, and switch routes between refreshes. The account
+      remains signed in once connectivity settles; no stale refresh response,
+      unrelated `auth_error`, or transient timeout clears the session.
+- [ ] Open two tabs for the same signed-in browser profile and hard-refresh
+      both close together. Refresh-token rotation is serialized across tabs,
+      both recover, and the backend emits no `invalid_refresh` loop.
 - [x] Logout removes the session.
 - [x] Refresh after logout does not restore the session.
 - [ ] Registration/login WebSocket traffic does not expose the plaintext password. **BLOCKED:** local loopback auth is unsealed until the deferred browser PQC provider is added; do not use this configuration for deployment.

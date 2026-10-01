@@ -1,5 +1,7 @@
 #include "auth/session.h"
 
+#include "storage/transaction.h"
+
 #include <cstdlib>
 
 namespace chess {
@@ -71,30 +73,50 @@ SessionTokens refresh_session(Database& db, const TokenSigner& signer,
     if (refresh_token.empty()) return t;
     const std::string hash = refresh_token_hash(refresh_token);
 
-    // Look up the row. rotated/expired are handled inline rather than by SQL
-    // filters, so the "already rotated" branch can also delete the family.
+    Transaction tx(db);
+    if (!tx.ok()) { outcome = RefreshOutcome::DatabaseError; return t; }
+
+    // Lock this lineage point so two server workers cannot both observe it as
+    // fresh. rotated/expired stay visible for recovery and reuse detection.
     auto sel = db.exec(
         "SELECT player_id, family_id::text, rotated,"
-        "       extract(epoch from expires_at)::bigint"
-        "  FROM sessions WHERE token_hash=$1",
+        "       extract(epoch from expires_at)::bigint,"
+        "       COALESCE(extract(epoch from rotated_at)::bigint, 0)"
+        "  FROM sessions WHERE token_hash=$1 FOR UPDATE",
         {Param::text(hash)});
     if (!sel.ok)                { outcome = RefreshOutcome::DatabaseError; return t; }
-    if (sel.rows.empty())       return t;    // unknown token — treat as invalid
+    if (sel.rows.empty())       { (void)tx.commit(); return t; }
 
     const int64_t     player_id = std::strtoll(sel.first().at(0).c_str(), nullptr, 10);
     const std::string family    = sel.first().at(1);
     const bool        rotated   = sel.first().at(2) == "t";
     const int64_t     expires_at = std::strtoll(sel.first().at(3).c_str(), nullptr, 10);
+    const int64_t     rotated_at = std::strtoll(sel.first().at(4).c_str(), nullptr, 10);
 
     if (rotated) {
-        // Reuse of an already-rotated token — either the client resent by
-        // accident, or an attacker has a copy. Either way, kill the whole
-        // family; the legitimate client can log in again from scratch.
-        db.exec("DELETE FROM sessions WHERE family_id=$1::uuid", {Param::text(family)});
-        return t;
+        const bool transport_retry = rotated_at > 0 &&
+            now_unix >= rotated_at &&
+            now_unix - rotated_at <= REFRESH_REUSE_GRACE_SECONDS;
+        if (!transport_retry) {
+            // Reuse outside the response-loss window remains a security
+            // signal: revoke every descendant in this login family.
+            auto del = db.exec("DELETE FROM sessions WHERE family_id=$1::uuid",
+                               {Param::text(family)});
+            if (!del.ok || !tx.commit()) outcome = RefreshOutcome::DatabaseError;
+            return t;
+        }
+
+        // The previous response was probably lost during navigation/reload.
+        // Replace (rather than branch from) the active successor so the family
+        // still has exactly one usable refresh token.
+        auto del = db.exec(
+            "DELETE FROM sessions WHERE family_id=$1::uuid AND rotated=FALSE",
+            {Param::text(family)});
+        if (!del.ok) { outcome = RefreshOutcome::DatabaseError; return t; }
     }
     if (expires_at <= now_unix) {
-        db.exec("DELETE FROM sessions WHERE token_hash=$1", {Param::text(hash)});
+        auto del = db.exec("DELETE FROM sessions WHERE token_hash=$1", {Param::text(hash)});
+        if (!del.ok || !tx.commit()) outcome = RefreshOutcome::DatabaseError;
         return t;
     }
 
@@ -103,7 +125,9 @@ SessionTokens refresh_session(Database& db, const TokenSigner& signer,
                      {Param::int64(player_id)});
     if (!p.ok || p.rows.empty()) {
         // Player deleted underneath us — treat as invalid, no useful successor.
-        db.exec("DELETE FROM sessions WHERE family_id=$1::uuid", {Param::text(family)});
+        auto del = db.exec("DELETE FROM sessions WHERE family_id=$1::uuid",
+                           {Param::text(family)});
+        if (!del.ok || !tx.commit()) outcome = RefreshOutcome::DatabaseError;
         return t;
     }
     const std::string username    = p.first().at(0);
@@ -118,14 +142,14 @@ SessionTokens refresh_session(Database& db, const TokenSigner& signer,
     const std::string new_hash = refresh_token_hash(fresh.refresh_token);
     const int64_t     new_exp  = now_unix + REFRESH_TOKEN_TTL_SECONDS;
 
-    // Rotate: mark the old row `rotated=true` (so replay hits the family-kill
-    // path) and insert the successor in the SAME family. Doing both in one
-    // transaction would be nicer, but Postgres implicit transactions treat
-    // each statement atomically for our needs — a race between step 1 and
-    // step 2 is not observable because a caller cannot see the intermediate
-    // state.
-    auto mark = db.exec("UPDATE sessions SET rotated=TRUE WHERE token_hash=$1",
-                        {Param::text(hash)});
+    // Rotate atomically: mark the old row as a reuse tripwire and insert its
+    // single successor in the same family. The row lock plus transaction also
+    // makes this safe when multiple server workers receive refreshes together.
+    auto mark = db.exec(
+        "UPDATE sessions SET rotated=TRUE,"
+        " rotated_at=COALESCE(rotated_at, to_timestamp($2::bigint))"
+        " WHERE token_hash=$1",
+        {Param::text(hash), Param::int64(now_unix)});
     if (!mark.ok) { outcome = RefreshOutcome::DatabaseError; return t; }
 
     auto ins = db.exec(
@@ -136,14 +160,12 @@ SessionTokens refresh_session(Database& db, const TokenSigner& signer,
          Param::text(family),
          Param::int64(new_exp)});
     if (!ins.ok) {
-        // Undo the mark so the client can retry; otherwise a hiccup here
-        // would look like a stolen token and revoke the family.
-        db.exec("UPDATE sessions SET rotated=FALSE WHERE token_hash=$1",
-                {Param::text(hash)});
+        // Transaction destruction rolls the mark back with the failed insert.
         outcome = RefreshOutcome::DatabaseError;
         return t;
     }
 
+    if (!tx.commit()) { outcome = RefreshOutcome::DatabaseError; return SessionTokens{}; }
     outcome = RefreshOutcome::Ok;
     fresh.ok = true;
     return fresh;

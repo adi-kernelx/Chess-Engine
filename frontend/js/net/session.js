@@ -30,6 +30,8 @@ import { INITIAL_RATING } from '../core/rating.js';
 const REFRESH_KEY   = 'refreshToken';
 const IDENTITY_KEY  = 'sessionIdentity'; // { username, elo }
 const REQUEST_TIMEOUT_MS = 4000;
+const REFRESH_LOCK_NAME = 'chess-session-refresh';
+const REFRESH_RETRY_MS = 1500;
 
 // Refresh at this fraction of the access-token TTL. 0.8 gives us a full
 // 20% of the window to retry on transient failures before the token dies.
@@ -53,6 +55,7 @@ export class Session {
         this._refresh  = storage.get(REFRESH_KEY)  || null;   // opaque string
 
         this._refreshTimer = null;
+        this._refreshRetryTimer = null;
         this._refreshInFlight = null;
 
         // A persisted refresh token means authentication is not yet known on
@@ -162,6 +165,10 @@ export class Session {
         this._identity = null;
         this._accessExpiresAt = 0;
         if (this._refreshTimer) { clearTimeout(this._refreshTimer); this._refreshTimer = null; }
+        if (this._refreshRetryTimer) {
+            clearTimeout(this._refreshRetryTimer);
+            this._refreshRetryTimer = null;
+        }
         storage.remove(REFRESH_KEY);
         storage.remove(IDENTITY_KEY);
         this.bus.emit('change', this._snapshot());
@@ -192,7 +199,15 @@ export class Session {
         // concurrent refreshes with the same token could look like replay and
         // revoke the whole family. Share the one in-flight operation.
         if (this._refreshInFlight) return this._refreshInFlight;
-        const task = this._performRefreshNow();
+        // localStorage is shared by browser tabs, but the in-memory de-dupe
+        // above is not. Web Locks prevents two tabs from rotating the same
+        // one-use token concurrently. Once the lock is acquired, reload the
+        // token because the preceding tab may just have persisted a successor.
+        const task = this._withCrossTabRefreshLock(async () => {
+            const latest = storage.get(REFRESH_KEY);
+            if (latest) this._refresh = latest;
+            return this._performRefreshNow();
+        });
         this._refreshInFlight = task;
         try { return await task; }
         finally {
@@ -202,18 +217,41 @@ export class Session {
 
     async _performRefreshNow() {
         if (!this._refresh) throw new Error('no refresh token');
-        const data = await this._requestOnce(
+        const result = await this._requestOnceDetailed(
             { type: 'refresh', refresh_token: this._refresh },
-            'auth_ok'
+            'auth_ok',
+            new Set(['invalid_refresh'])
         );
-        if (!data) {
-            // Refresh failed — the family may be revoked, the token expired,
-            // or the server unreachable. Wipe and let the UI redirect.
+        if (result.status === 'error') {
+            // Only the refresh handler's definitive invalid_refresh response
+            // proves this credential is unusable. An unrelated auth_error,
+            // database hiccup, disconnect, or timeout must not erase a valid
+            // persisted login.
             this._clear();
             this.bus.emit('expired');
-            throw new Error('refresh failed');
+            throw new Error('refresh invalid');
         }
-        this.adopt(data);
+        if (result.status !== 'ok') {
+            this._scheduleRefreshRetry();
+            throw new Error('refresh temporarily unavailable');
+        }
+        this.adopt(result.data);
+    }
+
+    _withCrossTabRefreshLock(fn) {
+        const locks = typeof navigator !== 'undefined' && navigator.locks;
+        if (!locks || typeof locks.request !== 'function') return Promise.resolve().then(fn);
+        return locks.request(REFRESH_LOCK_NAME, { mode: 'exclusive' }, fn);
+    }
+
+    _scheduleRefreshRetry() {
+        if (this._refreshRetryTimer || !this._refresh) return;
+        this._refreshRetryTimer = setTimeout(() => {
+            this._refreshRetryTimer = null;
+            if (!this._access && this.socket.isConnected()) {
+                this._refreshNow().catch(() => {});
+            }
+        }, REFRESH_RETRY_MS);
     }
 
     /**
@@ -222,6 +260,16 @@ export class Session {
      * exact failure mode is intentionally opaque to callers.
      */
     _requestOnce(message, expect) {
+        return this._requestOnceDetailed(message, expect).then(result =>
+            result.status === 'ok' ? result.data : null);
+    }
+
+    /**
+     * Detailed request outcome used by refresh restoration. When
+     * `definitiveErrorCodes` is supplied, unrelated auth_error frames are
+     * ignored instead of being allowed to sign the user out.
+     */
+    _requestOnceDetailed(message, expect, definitiveErrorCodes = null) {
         return new Promise((resolve) => {
             let settled = false;
             const cleanup = [];
@@ -231,9 +279,14 @@ export class Session {
                 for (const off of cleanup) { try { off(); } catch (_) {} }
                 resolve(v);
             };
-            cleanup.push(this.socket.on(expect,       (m) => finish(m)));
-            cleanup.push(this.socket.on('auth_error', ()  => finish(null)));
-            const t = setTimeout(() => finish(null), REQUEST_TIMEOUT_MS);
+            cleanup.push(this.socket.on(expect, (m) =>
+                finish({ status: 'ok', data: m })));
+            cleanup.push(this.socket.on('auth_error', (m) => {
+                const code = m && m.code;
+                if (definitiveErrorCodes && !definitiveErrorCodes.has(code)) return;
+                finish({ status: 'error', code: code || 'unknown' });
+            }));
+            const t = setTimeout(() => finish({ status: 'timeout' }), REQUEST_TIMEOUT_MS);
             cleanup.push(() => clearTimeout(t));
             this.socket.send(message);
         });

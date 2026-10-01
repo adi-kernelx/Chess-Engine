@@ -41,6 +41,15 @@ class FakeSocket {
 }
 
 globalThis.localStorage = new MemoryStorage();
+Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {
+    locks: {
+        requests: 0,
+        async request(_name, _options, fn) {
+            this.requests += 1;
+            return fn();
+        },
+    },
+} });
 const { Session } = await import('../frontend/js/net/session.js');
 
 function persistSession(refreshToken = 'refresh-1') {
@@ -88,12 +97,36 @@ function persistSession(refreshToken = 'refresh-1') {
     const socket = new FakeSocket();
     const session = new Session(socket);
     socket.emitState('connected');
-    socket.emit('auth_error', { message: 'expired' });
+    socket.emit('auth_error', { code: 'invalid_refresh' });
     await session.whenReady();
     assert.equal(session.isRestoring, false);
     assert.equal(session.isAuthenticated, false);
     assert.equal(session.hasRefreshToken, false);
     assert.equal(localStorage.getItem('chess:refreshToken'), null);
 }
+
+// An unrelated auth failure can arrive while route requests overlap session
+// restoration. It must not consume the refresh request or clear local state.
+{
+    localStorage.clear();
+    persistSession('still-valid');
+    const socket = new FakeSocket();
+    const session = new Session(socket);
+    socket.emitState('connected');
+    socket.emit('auth_error', { code: 'unauthorized' });
+    assert.equal(session.hasRefreshToken, true);
+    assert.equal(session.isRestoring, true);
+
+    socket.emit('auth_ok', {
+        access_token: 'access-2', refresh_token: 'refresh-3',
+        username: 'adi', elo: 800,
+    });
+    await session.whenReady();
+    assert.equal(session.isAuthenticated, true);
+    assert.equal(session.refreshToken, 'refresh-3');
+}
+
+assert.ok(navigator.locks.requests >= 2,
+          'session restoration should use the cross-tab refresh lock');
 
 console.log('frontend session restoration tests passed');

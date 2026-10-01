@@ -266,7 +266,11 @@ void AuthHandler::handle_refresh(net::Connection& conn, const std::string& messa
     RefreshOutcome outcome;
     auto tokens = refresh_session(db_, signer_, refresh_token, now_seconds(), outcome);
     if (outcome != RefreshOutcome::Ok || !tokens.ok) {
-        send_auth_error(conn, "invalid_refresh");
+        // A database/transport problem is retryable and must not instruct the
+        // browser to erase an otherwise valid persisted login. Only a token
+        // the session layer actually rejected is reported as invalid_refresh.
+        send_auth_error(conn, outcome == RefreshOutcome::DatabaseError
+            ? "internal" : "invalid_refresh");
         return;
     }
     // A refreshed token is bound to the SAME player — reconstruct the reply

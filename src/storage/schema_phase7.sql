@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- a rotated token again is the signal that a copy exists in someone
     -- else's hands.
     rotated       BOOLEAN NOT NULL DEFAULT FALSE,
+    -- A very short retry window lets a browser recover when a hard refresh
+    -- interrupts the response after the server has already rotated a token.
+    -- Outside that window, reuse still revokes the whole family.
+    rotated_at    TIMESTAMPTZ,
 
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at    TIMESTAMPTZ NOT NULL

@@ -78,12 +78,19 @@ enum class RefreshOutcome {
     DatabaseError,
 };
 
+/// A hard reload can close the socket after rotation commits but before the
+/// browser persists the successor.  Re-presenting the predecessor inside this
+/// narrow window is treated as transport recovery; later reuse still revokes
+/// the complete family.
+constexpr int64_t REFRESH_REUSE_GRACE_SECONDS = 10;
+
 /**
  * Exchange `refresh_token` for a new pair. Rotates: the old token is marked
  * `rotated=true`, a fresh one is issued into the same family.
  *
- * If the presented token is ALREADY rotated, the family is deleted and
- * InvalidOrRevoked is returned. That branch is the reuse-detection path.
+ * If the presented token is ALREADY rotated outside the bounded retry grace,
+ * the family is deleted and InvalidOrRevoked is returned. During the grace,
+ * the active successor is replaced so a lost browser response can recover.
  */
 SessionTokens refresh_session(storage::Database& db,
                               const TokenSigner& signer,

@@ -84,7 +84,6 @@ set(SOURCES
     src/storage/database.cpp
     # LLD-3.1 — typed storage failures + RAII transactions
     src/storage/storage_error.cpp
-    src/storage/transaction.cpp
     # Phase 7.6 — password + username + auth service
     src/auth/username.cpp
     src/auth/password.cpp
@@ -92,6 +91,7 @@ set(SOURCES
     # Phase 7.7 — JWT + sessions
     src/auth/token.cpp
     src/auth/session.cpp
+    src/storage/transaction.cpp
     # Phase 7.8 — Google Sign-In via Supabase Auth
     src/auth/oauth_verify.cpp
     # Phase 7.9 — rate limiter + safe match_found builder
@@ -460,6 +460,7 @@ add_executable(test_token
     tests/test_token.cpp
     src/auth/token.cpp
     src/auth/session.cpp
+    src/storage/transaction.cpp
     src/crypto/random.cpp
     src/crypto/sha256.cpp
     src/crypto/sha512.cpp
@@ -620,6 +621,7 @@ add_executable(test_auth_required
     src/tournament/tournament_manager.cpp
     src/auth/token.cpp
     src/auth/session.cpp
+    src/storage/transaction.cpp
     src/crypto/random.cpp
     src/crypto/sha256.cpp
     src/crypto/sha512.cpp
@@ -680,6 +682,7 @@ add_executable(test_spectator
     src/tournament/tournament_manager.cpp
     src/auth/token.cpp
     src/auth/session.cpp
+    src/storage/transaction.cpp
     src/crypto/random.cpp
     src/crypto/sha256.cpp
     src/crypto/sha512.cpp
@@ -739,6 +742,7 @@ add_executable(test_replay
     src/tournament/tournament_manager.cpp
     src/auth/token.cpp
     src/auth/session.cpp
+    src/storage/transaction.cpp
     src/crypto/random.cpp
     src/crypto/sha256.cpp
     src/crypto/sha512.cpp
@@ -799,6 +803,7 @@ add_executable(test_anti_cheat
     src/tournament/tournament_manager.cpp
     src/auth/token.cpp
     src/auth/session.cpp
+    src/storage/transaction.cpp
     src/crypto/random.cpp
     src/crypto/sha256.cpp
     src/crypto/sha512.cpp
@@ -877,6 +882,7 @@ add_executable(test_request_pipeline
     src/application/auth/identity_extractor.cpp
     src/auth/token.cpp
     src/auth/session.cpp
+    src/storage/transaction.cpp
     src/auth/username.cpp
     src/storage/database.cpp
     src/storage/player_repo.cpp
