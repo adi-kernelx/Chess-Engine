@@ -398,7 +398,7 @@ static void test_sessions(Database& db) {
         if (retry_out != RefreshOutcome::Ok || !recovered.ok) return false;
         if (recovered.refresh_token == lost.refresh_token) return false;
 
-        // The abandoned successor was removed; only the recovered successor is
+        // The abandoned successor was rotated; only the recovered successor is
         // active, and it can continue the rotation chain normally.
         auto active = db.exec(
             "SELECT count(*) FROM sessions WHERE player_id=$1 AND rotated=FALSE",
@@ -408,6 +408,23 @@ static void test_sessions(Database& db) {
                                     now + 32, next_out);
         return active.ok && active.first().at(0) == "1" &&
                next_out == RefreshOutcome::Ok && next.ok;
+    });
+
+    run_test("Late delivered successor survives predecessor recovery", [&] {
+        reset(db);
+        const auto pid = make_player(db);
+        auto first = issue_session(db, signer, pid, "adi", 0, now);
+        RefreshOutcome outcome;
+        auto delayed = refresh_session(db, signer, first.refresh_token, now + 30, outcome);
+        if (!delayed.ok) return false;
+        auto retry = refresh_session(db, signer, first.refresh_token, now + 31, outcome);
+        if (!retry.ok) return false;
+        // Browser receives the first reply after the retry superseded it.
+        auto reload = refresh_session(db, signer, delayed.refresh_token, now + 32, outcome);
+        auto active = db.exec("SELECT count(*) FROM sessions WHERE player_id=$1 AND rotated=FALSE",
+                              {Param::int64(pid)});
+        return reload.ok && outcome == RefreshOutcome::Ok
+            && active.ok && active.first().at(0) == "1";
     });
 
     run_test("Unknown refresh token = InvalidOrRevoked, no crash", [&] {

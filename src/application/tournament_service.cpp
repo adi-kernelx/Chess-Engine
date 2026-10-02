@@ -70,6 +70,9 @@ json standing_to_json(const chess::tournament::StandingRow& r,
     j["username"]      = participant_name(names, r.player_id);
     j["elo"]           = r.initial_elo;
     j["score"]         = r.score;
+    j["round_wins"]    = r.round_wins;
+    j["round_draws"]   = r.round_draws;
+    j["rank"]          = r.rank;
     j["buchholz"]      = r.buchholz;
     j["whites_played"] = r.whites_played;
     j["received_bye"]  = r.received_bye;
@@ -93,6 +96,8 @@ json pairing_to_json(const chess::tournament::StoredPairing& p,
     }
     if (p.game_id.has_value())         j["game_id"]         = *p.game_id;
     else                               j["game_id"]         = nullptr;
+    if (p.replay_game_id.has_value())  j["replay_game_id"]  = *p.replay_game_id;
+    else                               j["replay_game_id"]  = nullptr;
     j["result"]          = p.result;
     j["result_source"]   = p.result_source;
     return j;
@@ -115,7 +120,8 @@ void TournamentService::create_tournament(const RequestContext& /*ctx*/,
                                           int64_t               registration_deadline_unix,
                                           int64_t               first_round_starts_at_unix,
                                           int                   round_duration_seconds,
-                                          MessageSink&          caller_sink) {
+                                          MessageSink&          caller_sink,
+                                          const std::string&    format) {
     if (!db_) {
         caller_sink.send(make_error_frame("Tournaments require a database"));
         return;
@@ -130,7 +136,10 @@ void TournamentService::create_tournament(const RequestContext& /*ctx*/,
         caller_sink.send(make_error_frame("Tournament name too long"));
         return;
     }
-    if (rounds <= 0 || rounds > 30) {
+    if (format != "swiss" && format != "winners_advance") {
+        caller_sink.send(make_error_frame("invalid_format")); return;
+    }
+    if (format == "swiss" && (rounds <= 0 || rounds > 30)) {
         caller_sink.send(make_error_frame("Rounds must be between 1 and 30"));
         return;
     }
@@ -157,7 +166,7 @@ void TournamentService::create_tournament(const RequestContext& /*ctx*/,
         /*tc_initial=*/time_base_sec * 1000,
         /*tc_increment=*/time_inc_sec * 1000,
         actor_db_player_id, registration_deadline_unix,
-        first_round_starts_at_unix, round_duration_seconds);
+        first_round_starts_at_unix, round_duration_seconds, format);
     if (!cr.ok) {
         caller_sink.send(make_error_frame("create_tournament failed: " + cr.error));
         return;
@@ -347,12 +356,16 @@ void TournamentService::tournament_state(const RequestContext& /*ctx*/,
     response["rounds"] = rounds;
 
     json check_ins = json::array();
-    for (const auto& r : st->rounds) {
-        for (int64_t player_id : chess::tournament::get_round_checkins(
-                 *db_, tournament_id, r.round)) {
-            check_ins.push_back({{"round", r.round}, {"player_id", player_id},
-                {"username", participant_name(names, player_id)}});
-        }
+    const auto checked = db_->exec(
+        "SELECT round,player_id FROM tournament_round_checkins WHERE tournament_id=$1 ORDER BY round,player_id",
+        {chess::storage::Param::int64(tournament_id)});
+    if (!checked.ok) {
+        caller_sink.send(make_error_frame("Tournament check-ins temporarily unavailable")); return;
+    }
+    for (const auto& row : checked.rows) {
+        const int64_t player_id = std::stoll(row.at(1));
+        check_ins.push_back({{"round", std::stoi(row.at(0))}, {"player_id", player_id},
+            {"username", participant_name(names, player_id)}});
     }
     response["check_ins"] = check_ins;
 

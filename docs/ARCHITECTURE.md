@@ -322,6 +322,43 @@ GameCompletionService → PostgresGameStore → TournamentCompletionSink
 
 `TournamentManager` owns deadlines, lifecycle transitions, Swiss state, and
 audited corrections. `GameRoom` owns chess rules and clocks.
+Both ordinary and tournament games use the same `GameplayService` and frontend
+`GameScreen`, including legal moves, resignation, and draw offers. The shared
+`game_state` snapshot supplies both player names; tournament-ready events ask
+that screen to refresh a waiting room when its second player joins.
+
+Authentication startup is a shared Session/Router boundary: transient refresh
+failure preserves the restoration gate, and pre-start hashchange events retain
+the latest URL without mounting a screen. Spectator entry uses Session's fresh
+token method and retries reserved-room waiting or transport failure. Existing
+seated players remain prohibited from spectating; event registration is not
+required for an authenticated observer.
+
+Pairing minimizes a lexicographic cost over complete rounds: rematch count,
+total absolute initial-rating difference, and total score gap. Colour balance
+and fair bye allocation remain separate rules. The memoized branch-and-bound
+implementation is exact for small fields but exponential in the worst case;
+large-scale events need a minimum-weight general matching solver. This custom
+rating-first policy differs from standard score-first Swiss pairing.
+
+Transport maintenance is coalesced into one background pass, drained when the
+event loop exits, so SQL deadlines cannot block socket reads. The composition
+root injects the worker-pool executor into `GameCompletionService`: terminal
+snapshots are copied and queued before the gameplay handler sends move/game-over
+frames. Persistence and tournament progression run afterward through the same
+completion observer for both game modes. The pool drains before service/store
+destruction. This is in-process scheduling, not a durable outbox: crash recovery
+or automatic retries after a failed save remain separate work. Foreign frames
+from background maintenance keep shared connection ownership through their
+send and lock only that connection's write buffer. The registry mutex is held
+only for lookup/accept/removal, never for a handler's SQL. Inbound parsing and
+dispatch are serialized per connection; independent clients use independent
+worker threads. Queued tasks capture the connection object rather than a
+reusable fd. Socket writes use MSG_NOSIGNAL, so closing a peer during refresh
+produces EPIPE instead of process-wide SIGPIPE. Heartbeat checks try-lock busy
+connections without blocking the event loop. The existing single PostgreSQL
+session is still serialized; this change does not claim parallel SQL or a
+production load-test result.
 `TournamentRuntimeService` is the Facade/Mediator that creates or reconstructs
 scheduled rooms and binds sockets only when the authenticated database player
 id matches a reserved seat. A `pairing_id` survives in the immutable
@@ -332,12 +369,35 @@ game and tournament boundaries.
 The browser is a projection of this state. It displays local-time schedules,
 one contextual countdown, registration/check-in controls, pairings, and live
 game links, but it never decides whether a deadline passed or a result counts.
-`tournament_game_ready` is emitted only after `pairing.game_id` is durable;
-refresh recovery uses public `tournament_state` plus authenticated
-`get_active_game`. Creator overrides change tournament standings and Buchholz
-only; they intentionally do not rewrite the immutable replay, profile record,
-or global rating.
+`tournament_game_ready` is emitted only after the pairing's runtime `game_id`
+is durable; refresh recovery uses public `tournament_state` plus authenticated
+`get_active_game`. Runtime room identity is deliberately separate from
+`replay_game_id`, which is assigned from the persisted `games.id` only after
+normal completion storage succeeds. Creator overrides change tournament
+standings and Buchholz only; they intentionally do not rewrite the immutable
+replay, profile record, or global rating.
 
 Scheduled but unstarted rooms can be reconstructed after process loss.
 Already-moving rooms are still process-memory state, so the first Cloud Run
 deployment must remain single-instance and must not claim active-game failover.
+
+### Custom winners-advance format
+
+The creator selects `swiss` (fixed rounds) or `winners_advance` (dynamic stages).
+Migration 0013 extends only the allowed format values. Custom events allocate
+one scheduled stage initially; completion allocates the next only when needed.
+Winners and bye recipients survive; losses and double forfeits eliminate.
+A first draw reserves the same pair in the next stage with reversed colors.
+After the second draw that pair is permanently excluded and both advance.
+The shared matching solver maximizes playable games under those hard
+exclusions, allocates fair byes to unmatched survivors, then minimizes
+rematches/rating distance. This can require more than one bye when draw caps
+prevent a complete matching. When no eligible game remains, play ends.
+
+Advancement is distinct from ranking: final standings use the count of
+decisive game wins (including single-player forfeits), never bye points or
+draws. Equal win counts share competition ranks (1, 1, 3); rating only supplies
+pairing seeds, not a rank tiebreak. Swiss retains score/Buchholz ranking.
+Creator corrections cannot rewrite custom results after advancement/final
+outcome is locked. Both formats reuse TournamentRuntimeService, GameRoom,
+the completion observer, normal replay storage, and GameScreen draw controls.

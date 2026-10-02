@@ -64,6 +64,12 @@ function boot() {
     const syncAuthNav = () => {
         if (!navAuth) return;
         const signedIn = session.isAuthenticated;
+        if (session.isRestoring) {
+            navAuth.textContent = 'Restoring session…';
+            navAuth.href = location.hash || '#/';
+            navAuth.setAttribute('aria-label', 'Restoring your saved session');
+            return;
+        }
         navAuth.textContent = signedIn ? 'Sign out' : 'Sign in';
         navAuth.href = signedIn ? '#/' : '#/login';
         navAuth.setAttribute('aria-label', signedIn

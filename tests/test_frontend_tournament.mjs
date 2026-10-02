@@ -10,6 +10,9 @@ const {
     tournamentErrorMessage,
     tournamentPath,
     validateTournamentSchedule,
+    TournamentScreen,
+    canJoinTournamentRound,
+    tournamentRoundStatus,
 } = await import('../frontend/js/screens/tournament.js');
 
 const state = Inbound.normalize({
@@ -27,7 +30,7 @@ const state = Inbound.normalize({
         id: 9, round: 1,
         white_player_id: 6, white_username: 'Alice',
         black_player_id: 3, black_username: 'Bob',
-        game_id: null, result: 'pending',
+        game_id: 77, replay_game_id: 501, result: 'pending',
     }],
     check_ins: [{ round: 1, player_id: 6, username: 'Alice' }],
 });
@@ -36,6 +39,8 @@ assert.equal(state.standings[0].username, 'Alice');
 assert.equal(state.tournament.createdByUsername, 'Alice');
 assert.equal(state.pairings[0].whiteUsername, 'Alice');
 assert.equal(state.pairings[0].blackUsername, 'Bob');
+assert.equal(state.pairings[0].gameId, 77);
+assert.equal(state.pairings[0].replayGameId, 501);
 assert.equal(state.standings[0].withdrawn, true);
 assert.deepEqual(state.checkIns[0], { round: 1, playerId: 6, username: 'Alice' });
 assert.deepEqual(Outbound.leaveTournament('token', 42), {
@@ -82,3 +87,74 @@ assert.equal(
 );
 
 console.log('frontend tournament normalization and copy tests passed');
+
+const automatic = validateTournamentSchedule({
+    name: 'Advance', format: 'winners_advance', rounds: '', base: 60, inc: 0, roundMinutes: 1,
+    registrationDeadline: '2026-10-01T10:05:00Z', firstRoundStartsAt: '2026-10-01T10:06:00Z',
+}, now);
+assert.equal(automatic.valid, true);
+assert.equal(automatic.value.rounds, 1);
+assert.equal(Outbound.createTournament('token', 'Advance', 1, 60, 0, automatic.value).format, 'winners_advance');
+assert.equal(Outbound.createTournament('token', 'Swiss', 3, 60, 0).format, 'swiss');
+
+const elimination = { tournament: { format: 'winners_advance', status: 'in_progress', currentRound: 2 },
+    pairings: [{ round: 1, whitePlayerId: 1, blackPlayerId: 2, result: '1-0' }], checkIns: [] };
+assert.equal(tournamentRoundStatus(elimination, { playerId: 2 }, { round: 2 }), 'Eliminated');
+assert.equal(canJoinTournamentRound(elimination, { playerId: 2 }, { round: 2 }), false);
+elimination.tournament.status = 'completed';
+assert.equal(tournamentRoundStatus(elimination, { playerId: 1, rank: 1 }, null), 'Champion');
+elimination.pairings[0].result = '1/2-1/2';
+assert.equal(tournamentRoundStatus(elimination, { playerId: 2, rank: 1 }, null), 'Champion');
+assert.equal(tournamentRoundStatus(elimination, { playerId: 2, rank: 2 }, null), 'Finished');
+
+// No browser interaction: exercise asynchronous write outcomes and duplicate
+// submission guards using the real screen method with rendering stubbed.
+for (const outcome of [{ live: false }, { live: false, error: { message: 'registration_closed' } }, { live: true }]) {
+    let sends = 0, successes = 0, warnings = 0, errors = 0;
+    let resolveRequest;
+    const screen = new TournamentScreen({
+        session: { accessTokenForRequest: async () => 'token' }, Outbound,
+        capability: { request: () => { sends++; return new Promise(resolve => resolveRequest = resolve); } },
+        toast: { success: () => successes++, warning: () => warnings++ },
+    });
+    screen.root = {};
+    screen._renderDetail = () => {};
+    screen._refreshDetail = async () => {};
+    screen._showError = () => errors++;
+    const request = screen._join({ id: 42, name: 'Test' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await screen._join({ id: 42, name: 'Test' });
+    assert.equal(sends, 1);
+    resolveRequest(outcome);
+    await request;
+    assert.equal(errors, outcome.error ? 1 : 0);
+    assert.equal(warnings, !outcome.live && !outcome.error ? 1 : 0);
+    assert.equal(successes, outcome.live ? 1 : 0);
+    assert.equal(screen._joiningTournamentId, !outcome.live && !outcome.error ? 42 : null);
+}
+console.log('frontend format choice, elimination outcomes and pending registration tests passed');
+
+{
+    let confirmed = 0;
+    const screen = new TournamentScreen({
+        session: { username: 'Alice', isAuthenticated: true },
+        Outbound, toast: { success: () => confirmed++ },
+    });
+    screen.root = {};
+    screen._detailTournamentId = 42;
+    screen._joiningTournamentId = 42;
+    screen._renderDetail = () => {};
+    screen._readRequest = async () => ({ live: true, data: {
+        ...state, standings: state.standings.map(row => ({ ...row, withdrawn: false })),
+    } });
+    await screen._refreshDetail(true);
+    assert.equal(screen._joiningTournamentId, null);
+    assert.equal(confirmed, 1);
+}
+const ranked = Inbound.normalize({ type: 'tournament_state', tournament: { format: 'winners_advance' },
+    standings: [{ player_id: 1, username: 'A', round_wins: 3, round_draws: 2, rank: 1 }] });
+assert.equal(ranked.standings[0].roundWins, 3);
+assert.equal(ranked.standings[0].roundDraws, 2);
+assert.equal(ranked.standings[0].rank, 1);
+console.log('frontend authoritative registration confirmation and ranking contract tests passed');

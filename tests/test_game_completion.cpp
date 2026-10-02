@@ -204,6 +204,23 @@ int main() {
 
     // ── Unit tests (no DB) ────────────────────────────────────────────
 
+    run_test("completion queues an immutable snapshot without waiting for storage", [] {
+        RecordingStore store;
+        std::vector<std::function<void()>> tasks;
+        GameCompletionService service(store, nullptr, [&](std::function<void()> task) {
+            tasks.push_back(std::move(task));
+        });
+        chess::game::GameCompleted event;
+        event.snapshot = make_snapshot(1, 2);
+        const auto uuid = event.snapshot.completion_uuid;
+        service.on_game_completed(event);
+        if (!store.calls.empty() || tasks.size() != 1) return false;
+        event.snapshot.result = "1-0";
+        tasks.front()();
+        return store.calls.size() == 1 && store.calls[0].completion_uuid == uuid
+            && store.calls[0].result == "0-1";
+    });
+
     run_test("capable()=false short-circuits — no store call", [] {
         ports::NullGameStore null_store;
         GameCompletionService svc(null_store);

@@ -479,6 +479,8 @@ int main() {
         const auto state = json::parse(state_sink.frames[0]);
         return state.value("type", "") == "game_state"
             && state.value("game_id", int64_t{0}) == game_id
+            && state.value("white_username", "") == "Alice"
+            && !state.value("black_username", "").empty()
             && state.value("state", "") == "in_progress";
     });
 

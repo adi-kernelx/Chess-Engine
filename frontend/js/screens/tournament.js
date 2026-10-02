@@ -2,6 +2,7 @@
 import { Screen } from '../ui/screen.js';
 import { h, clear, icon } from '../core/dom.js';
 import { absoluteUrl, copyText } from '../core/share.js';
+import { formatTimeControl } from '../core/format.js';
 
 const TOURNAMENT_ERROR_COPY = Object.freeze({
     not_creator: 'Only the tournament creator can change tournament controls.',
@@ -11,9 +12,12 @@ const TOURNAMENT_ERROR_COPY = Object.freeze({
     registration_deadline_passed: 'The registration deadline has passed.',
     registration_state_locked: 'Registration can no longer be changed.',
     not_registered: 'You are not registered for this tournament.',
+    player_eliminated: 'You have been eliminated. You can still spectate.',
+    advancement_already_locked: 'That result cannot be changed after the next stage or final outcome is locked.',
     not_enough_players: 'At least two players must register before registration can close.',
     pairing_not_found: 'That tournament pairing no longer exists.',
     check_in_closed_or_not_registered: 'Round check-in is closed or you are not registered.',
+    round_already_resolved_for_player: 'Your result for this round is already recorded. No check-in is needed.',
     override_reason_required: 'Explain why this result needs to be corrected.',
     result_already_recorded: 'This pairing already has a different result.',
 });
@@ -27,6 +31,35 @@ export function tournamentPath(id) {
     return Number.isSafeInteger(value) && value > 0 ? `/tournaments/${value}` : '/tournaments';
 }
 
+/** Round outcome/readiness, rather than a stale check-in flag after play. */
+export function tournamentRoundStatus(state, player, round, now = Date.now() / 1000) {
+    if (player.withdrawn) return 'Withdrawn';
+    if (state.tournament.format === 'winners_advance') {
+        if (state.tournament.status === 'completed') return player.rank === 1 ? 'Champion' : 'Finished';
+        const last = (state.pairings || []).filter(p => p.whitePlayerId === player.playerId || p.blackPlayerId === player.playerId)
+            .sort((a, b) => b.round - a.round)[0];
+        if (last && (last.result === 'double_forfeit' || last.result === '0-0'
+            || (last.result === '1-0' && last.blackPlayerId === player.playerId)
+            || (last.result === '0-1' && last.whitePlayerId === player.playerId))) return 'Eliminated';
+    }
+    const number = round ? round.round : state.tournament.currentRound;
+    const pairing = (state.pairings || []).find(p => p.round === number
+        && (p.whitePlayerId === player.playerId || p.blackPlayerId === player.playerId));
+    if (pairing && pairing.result !== 'pending') {
+        if (pairing.result === 'bye') return 'Bye';
+        if (pairing.result === '1/2-1/2') return 'Draw';
+        if (pairing.result === '0-0' || pairing.result === 'double_forfeit') return 'Double forfeit';
+        const white = pairing.whitePlayerId === player.playerId;
+        return (pairing.result === '1-0') === white ? 'Won' : 'Lost';
+    }
+    if (state.tournament.status === 'completed') return 'Finished';
+    if (!round) return 'Waiting for round';
+    if (round.status === 'scheduled') return `Round ${number} upcoming`;
+    const checked = (state.checkIns || []).some(c => c.round === number && c.playerId === player.playerId);
+    if (checked) return pairing && pairing.gameId ? 'Game assigned' : 'Checked in';
+    return now > round.checkInClosesAt ? 'Missed check-in' : 'Check-in required';
+}
+
 export function toLocalDateTimeInput(date) {
     const d = new Date(date);
     if (!Number.isFinite(d.getTime())) return '';
@@ -37,7 +70,8 @@ export function toLocalDateTimeInput(date) {
 export function validateTournamentSchedule(values, nowMs = Date.now()) {
     const errors = {};
     const name = String(values.name || '').trim();
-    const rounds = Number(values.rounds);
+    const format = values.format || 'swiss';
+    const rounds = format === 'winners_advance' ? 1 : Number(values.rounds);
     const base = Number(values.base);
     const inc = Number(values.inc);
     const roundMinutes = Number(values.roundMinutes);
@@ -46,6 +80,7 @@ export function validateTournamentSchedule(values, nowMs = Date.now()) {
     if (!name) errors.name = 'Enter a tournament name.';
     else if (name.length > 128) errors.name = 'Use 128 characters or fewer.';
     if (!Number.isInteger(rounds) || rounds < 1 || rounds > 30) errors.rounds = 'Choose 1 to 30 rounds.';
+    if (!['swiss', 'winners_advance'].includes(format)) errors.format = 'Choose a tournament format.';
     if (!Number.isInteger(base) || base < 1) errors.base = 'Base time must be at least 1 second.';
     if (!Number.isInteger(inc) || inc < 0) errors.inc = 'Increment cannot be negative.';
     if (!Number.isFinite(deadlineMs) || deadlineMs <= nowMs) errors.registrationDeadline = 'Choose a future registration deadline.';
@@ -55,12 +90,20 @@ export function validateTournamentSchedule(values, nowMs = Date.now()) {
         errors,
         valid: Object.keys(errors).length === 0,
         value: {
-            name, rounds, base, inc,
+            name, format, rounds, base, inc,
             registrationDeadline: Math.floor(deadlineMs / 1000),
             firstRoundStartsAt: Math.floor(startMs / 1000),
             roundDurationSeconds: roundMinutes * 60,
         },
     };
+}
+
+export function canJoinTournamentRound(state, player, round) {
+    if (!player || player.withdrawn || !round || state.tournament.status === 'completed') return false;
+    if (tournamentRoundStatus(state, player, round) === 'Eliminated') return false;
+    const pairing = (state.pairings || []).find(p => p.round === round.round
+        && (p.whitePlayerId === player.playerId || p.blackPlayerId === player.playerId));
+    return !pairing || pairing.result === 'pending';
 }
 
 export class TournamentScreen extends Screen {
@@ -82,7 +125,7 @@ export class TournamentScreen extends Screen {
             ? h('button', { class: 'btn btn--primary btn--lg', onclick: () => this._openCreate() }, 'Create tournament')
             : h('a', { class: 'btn btn--primary', href: '#/login' }, 'Sign in to join');
         return h('div', { class: 'screen' },
-            this.header('Tournaments', 'Scheduled Swiss events with live games and automatic standings.', action),
+            this.header('Tournaments', 'Scheduled events with live games and automatic results.', action),
             h('div', { class: 'screen__body' }, h('div', { class: 'card' },
                 h('div', { class: 'card__header' }, icon('trophy', 'icon--sm'),
                     h('div', {}, h('div', { class: 'card__title' }, 'Tournament directory'),
@@ -95,6 +138,11 @@ export class TournamentScreen extends Screen {
     async onMount() {
         this.sub(this.ctx.socket.on('tournament_game_ready', raw =>
             this._onTournamentReady(this.ctx.Inbound.normalize(raw))));
+        this.sub(this.ctx.socket.onState(state => {
+            if (state !== 'connected' || !this.root) return;
+            void this._load();
+            if (this._detailTournamentId) void this._refreshDetail(true);
+        }));
         this.interval(() => {
             this._updateCountdown();
             if (this._detailTournamentId) void this._refreshDetail(true);
@@ -118,7 +166,7 @@ export class TournamentScreen extends Screen {
     async _load() {
         if (!this._body) return;
         clear(this._body); this._body.appendChild(this._loading('Loading tournaments…'));
-        const { data, live, error } = await this.ctx.capability.request(
+        const { data, live, error } = await this._readRequest(
             this.ctx.Outbound.listTournaments(),
             { expect: 'tournament_list', timeout: 5000, demo: () => ({ tournaments: [] }), failOnError: true });
         if (!live) { this._renderUnavailable(error); return; }
@@ -148,7 +196,7 @@ export class TournamentScreen extends Screen {
                 h('div', { class: 'tournament-card__eyebrow' }, this._statusBadge(t.status, t.registrationOpen)),
                 h('h2', { class: 'tournament-card__title' }, t.name),
                 h('div', { class: 'tournament-card__meta' },
-                    h('span', {}, `${t.rounds} rounds`), h('span', {}, `${this._minutes(t.timeBase)}+${t.timeInc}`),
+                    h('span', {}, t.format === 'winners_advance' ? 'Winners advance · automatic rounds' : `${t.rounds} Swiss rounds`), h('span', {}, formatTimeControl(t.timeBase, t.timeInc)),
                     h('span', {}, t.currentRound ? `Round ${t.currentRound}` : 'Before round 1')),
                 h('div', { class: 'tournament-card__time' }, this._listTimeText(t))),
             h('div', { class: 'tournament-card__actions' },
@@ -164,11 +212,6 @@ export class TournamentScreen extends Screen {
         return 'Tournament completed';
     }
 
-    _minutes(seconds) {
-        const value = Number(seconds || 0);
-        return value % 60 === 0 ? String(value / 60) : `${value}s`;
-    }
-
     _statusBadge(status, registrationOpen = false) {
         const map = {
             registration: { cls: 'badge badge--info', label: registrationOpen ? 'Registration open' : 'Registration' },
@@ -181,16 +224,34 @@ export class TournamentScreen extends Screen {
     }
 
     async _tokenOrLogin() {
-        if (!this.ctx.session || !this.ctx.session.isAuthenticated) {
+        if (!this.ctx.session) {
             this.ctx.postAuthPath = this._detailTournamentId ? tournamentPath(this._detailTournamentId) : '/tournaments';
             this.ctx.router.go('/login'); return null;
         }
         const token = await this.ctx.session.accessTokenForRequest();
         if (!token) {
+            if (this.ctx.session.hasRefreshToken) {
+                this.ctx.toast.warning('Your session is temporarily reconnecting. Please try again.');
+                return null;
+            }
+            this.ctx.postAuthPath = this._detailTournamentId ? tournamentPath(this._detailTournamentId) : '/tournaments';
             this.ctx.toast.warning('Session expired — please sign in again.');
-            this.ctx.router.go('/login'); return null;
+            this.ctx.router.go('/login');
+            return null;
         }
         return token;
+    }
+
+    async _readRequest(message, options) {
+        let result = await this.ctx.capability.request(message, options);
+        if (result.live || !this.root) return result;
+        // The first attempt already waited for its full timeout. Yield once so
+        // teardown can win, then retry without installing a timer that could
+        // be cancelled while this promise is awaiting it.
+        await Promise.resolve();
+        if (!this.root) return result;
+        result = await this.ctx.capability.request(message, options);
+        return result;
     }
 
     _field(id, label, type, value, attrs = {}) {
@@ -202,6 +263,11 @@ export class TournamentScreen extends Screen {
 
     _openCreate() {
         const now = Date.now();
+        const formatInput = h('select', { class: 'input', id: 't-format' },
+            h('option', { value: 'swiss' }, 'Swiss — fixed rounds'),
+            h('option', { value: 'winners_advance' }, 'Winners advance — automatic rounds'));
+        const formatField = h('div', { class: 'field' }, h('label', { class: 'field__label', htmlFor: 't-format' }, 'Tournament format'), formatInput,
+            h('div', { class: 'field__help' }, 'Winners advance: replay the first draw; after two draws both advance. Final ranking uses game wins, excluding byes. Equal wins share a rank.'));
         const fields = {
             name: this._field('t-name', 'Name', 'text', '', { maxlength: 128, autocomplete: 'off' }),
             rounds: this._field('t-rounds', 'Swiss rounds', 'number', '5', { min: 1, max: 30, step: 1 }),
@@ -216,7 +282,7 @@ export class TournamentScreen extends Screen {
             h('div', { class: 'form-error-summary__title' }, 'Check the highlighted settings.'), summaryMessages);
         const preview = h('div', { class: 'schedule-preview', role: 'status', 'aria-live': 'polite' });
         const values = () => ({
-            name: fields.name.input.value, rounds: fields.rounds.input.value,
+            name: fields.name.input.value, format: formatInput.value, rounds: fields.rounds.input.value,
             base: fields.base.input.value, inc: fields.inc.input.value,
             registrationDeadline: fields.registrationDeadline.input.value,
             firstRoundStartsAt: fields.firstRoundStartsAt.input.value,
@@ -244,6 +310,12 @@ export class TournamentScreen extends Screen {
         for (const field of Object.values(fields)) field.input.addEventListener('blur', () => validate(false));
         fields.registrationDeadline.input.addEventListener('input', () => validate(false));
         fields.firstRoundStartsAt.input.addEventListener('input', () => validate(false));
+        const syncFormatFields = () => {
+            fields.rounds.node.hidden = formatInput.value === 'winners_advance';
+            fields.rounds.input.disabled = fields.rounds.node.hidden;
+            validate(false);
+        };
+        formatInput.addEventListener('change', syncFormatFields);
         let dlg;
         const createButton = h('button', { class: 'btn btn--primary', onclick: async () => {
             const result = validate(true); if (!result.valid) return;
@@ -255,6 +327,7 @@ export class TournamentScreen extends Screen {
         const body = h('div', { class: 'tournament-create' }, summary,
             h('div', { class: 'tournament-form-grid' },
                 h('div', { class: 'tournament-form-grid__wide' }, fields.name.node),
+                h('div', { class: 'tournament-form-grid__wide' }, formatField),
                 fields.rounds.node, fields.base.node, fields.inc.node, fields.roundMinutes.node,
                 fields.registrationDeadline.node, fields.firstRoundStartsAt.node), preview);
         dlg = this.ctx.modal.open({
@@ -264,7 +337,7 @@ export class TournamentScreen extends Screen {
                 h('button', { class: 'btn btn--ghost', onclick: () => dlg.close() }, 'Cancel'), createButton),
             initialFocus: fields.name.input, dismissible: true,
         });
-        validate(false);
+        syncFormatFields();
     }
 
     async _create(value) {
@@ -294,11 +367,15 @@ export class TournamentScreen extends Screen {
         if (!this._detailTournamentId || this._detailLoading) return;
         this._detailLoading = true;
         const requestedId = Number(this._detailTournamentId);
-        const result = await this.ctx.capability.request(this.ctx.Outbound.tournamentState(requestedId),
+        const result = await this._readRequest(this.ctx.Outbound.tournamentState(requestedId),
             { expect: 'tournament_state', timeout: 5000, demo: () => ({}), failOnError: true });
         this._detailLoading = false;
         if (!this.root || Number(this._detailTournamentId) !== requestedId) return;
         if (!result.live) { if (!silent) this._renderDetailError(result.error); return; }
+        if (this._joiningTournamentId === requestedId && this._identity(result.data).joined) {
+            this._joiningTournamentId = null;
+            this.ctx.toast.success('Tournament registration confirmed.');
+        }
         if (silent && this._detailState
             && JSON.stringify(this._detailState) === JSON.stringify(result.data)) {
             this._updateCountdown();
@@ -347,17 +424,22 @@ export class TournamentScreen extends Screen {
         if (t.status === 'registration' && t.registrationOpen && who.joined) {
             this._detailFooter.appendChild(h('button', { class: 'btn btn--danger', onclick: () => this._leave(t) }, 'Unregister'));
         } else if (t.status === 'registration' && t.registrationOpen && who.signedIn && !who.joined) {
-            this._detailFooter.appendChild(h('button', { class: 'btn btn--primary', onclick: () => this._join(t) }, 'Register'));
+            const joining = this._joiningTournamentId === Number(t.id);
+            this._detailFooter.appendChild(h('button', { class: 'btn btn--primary', disabled: joining,
+                'aria-busy': joining ? 'true' : 'false', onclick: () => this._join(t) }, joining ? 'Confirming registration…' : 'Register'));
         } else if (!who.signedIn && t.status === 'registration' && t.registrationOpen) {
             this._detailFooter.appendChild(h('button', { class: 'btn btn--primary', onclick: () => {
                 this.ctx.postAuthPath = tournamentPath(t.id); this._detailDialog.close(); this.ctx.router.go('/login');
             } }, 'Sign in to register'));
         }
-        if (who.isCreator && (t.status === 'registration' || t.status === 'scheduled')) {
+        const deadlineHasNotPassed = Date.now() / 1000 < Number(t.registrationDeadline || 0);
+        if (who.isCreator && (t.status === 'registration' || t.status === 'scheduled')
+            && (t.registrationOpen || deadlineHasNotPassed)) {
             this._detailFooter.appendChild(h('button', { class: 'btn', onclick: () => this._setRegistration(t, !t.registrationOpen) },
                 t.registrationOpen ? 'Close registration' : 'Reopen registration'));
         }
-        if (who.joined && round && Date.now() / 1000 <= round.checkInClosesAt && t.status !== 'completed') {
+        if (who.joined && canJoinTournamentRound(state, who.standing, round)
+            && Date.now() / 1000 <= round.checkInClosesAt) {
             const checked = this._isCheckedIn(state, round.round, who.username);
             this._detailFooter.appendChild(h('button', { class: 'btn btn--primary',
                 onclick: event => this._checkIn(state, round, event.currentTarget) }, checked ? 'Rejoin round' : 'Join round'));
@@ -391,18 +473,22 @@ export class TournamentScreen extends Screen {
 
     _overview(state, who, round) {
         const t = state.tournament;
-        const checked = round && who.joined && this._isCheckedIn(state, round.round, who.username);
         return h('div', { class: 'tournament-overview' },
             h('div', { class: 'tournament-summary-grid' },
-                this._summary('Time control', `${this._minutes(t.timeBase)}+${t.timeInc}`),
-                this._summary('Rounds', `${t.currentRound}/${t.rounds}`),
+                this._summary('Time control', formatTimeControl(t.timeBase, t.timeInc)),
+                this._summary('Format', t.format === 'winners_advance' ? 'Winners advance' : 'Swiss'),
+                this._summary('Rounds', t.format === 'winners_advance' ? `Stage ${t.currentRound || 1} · automatic` : `${t.currentRound}/${t.rounds}`),
                 this._summary('Registration deadline', this._formatDate(t.registrationDeadline)),
                 this._summary('First round', this._formatDate(t.firstRoundStartsAt)),
                 this._summary('Round spacing', this._duration(t.roundDurationSeconds)),
-                this._summary('Your round status', !who.joined ? 'Not registered' : checked ? 'Checked in' : round ? 'Check-in required' : 'Waiting')),
+                this._summary('Your round', !who.joined ? 'Not registered' : tournamentRoundStatus(state, who.standing, round))),
             this._sharePanel(t),
             h('div', { class: 'tournament-note' },
-                'Games update standings automatically. A round waits for every live game to finish before the next scheduled round can open.'));
+                (t.format === 'winners_advance'
+                    ? 'Losers are eliminated; winners and bye recipients advance. A first draw replays the same pair with colors reversed; after two draws both advance and cannot meet again. When no legal game remains, play ends. Final ranking is by game wins only, excluding byes; equal wins share a rank. Other pairs minimize rating distance. '
+                    : 'Pairings avoid rematches and minimize the total rating difference across the round. Scores break ties. ')
+                + 'With an odd player count, the lowest-ranked player who has not had a bye sits out and receives one point. '
+                + 'Games update standings automatically; the next round waits for all games to finish.'));
     }
 
     _summary(label, value) {
@@ -413,18 +499,18 @@ export class TournamentScreen extends Screen {
 
     _standingsTable(state, round) {
         const rows = state.standings || [];
+        const elimination = state.tournament.format === 'winners_advance';
         if (!rows.length) return h('div', { class: 'empty' }, 'No registered players yet.');
-        const current = round && round.round;
         const bodyRows = rows.map((row, index) => {
-            const checked = current && this._isCheckedIn(state, current, row.username);
-            return h('tr', {}, h('td', { class: 'mono' }, String(index + 1)), h('td', {}, row.username || 'Unknown player'),
-                h('td', { class: 'mono' }, String(row.elo)), h('td', { class: 'mono' }, String(row.score)),
-                h('td', { class: 'mono' }, String(row.buchholz)),
-                h('td', {}, current ? this._smallStatus(checked ? 'Checked in' : 'Not checked in', checked ? 'success' : 'muted') : '—'));
+            const status = tournamentRoundStatus(state, row, round);
+            return h('tr', {}, h('td', { class: 'mono' }, String(elimination ? row.rank : index + 1)), h('td', {}, row.username || 'Unknown player'),
+                h('td', { class: 'mono' }, String(row.elo)), h('td', { class: 'mono' }, String(elimination ? row.roundWins : row.score)),
+                h('td', { class: 'mono' }, String(elimination ? row.roundDraws : row.buchholz)),
+                h('td', {}, this._smallStatus(status, ['Won', 'Checked in', 'Game assigned'].includes(status) ? 'success' : 'muted')));
         });
         return h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
             h('thead', {}, h('tr', {}, h('th', {}, '#'), h('th', {}, 'Player'), h('th', {}, 'Rating'),
-                h('th', {}, 'Score'), h('th', {}, 'Buchholz'), h('th', {}, 'Round status'))), h('tbody', {}, ...bodyRows)));
+                h('th', {}, elimination ? 'Wins' : 'Score'), h('th', {}, elimination ? 'Draws' : 'Buchholz'), h('th', {}, 'Current round'))), h('tbody', {}, ...bodyRows)));
     }
 
     _smallStatus(label, kind) {
@@ -437,13 +523,17 @@ export class TournamentScreen extends Screen {
         const bodyRows = rows.map(row => {
             const isMine = who.username && [row.whiteUsername, row.blackUsername]
                 .some(name => String(name || '').toLocaleLowerCase() === who.username);
-            const action = row.gameId == null ? '—' : row.result === 'pending'
+            const action = row.result === 'pending' && row.gameId != null
                 ? isMine ? h('button', { class: 'btn btn--sm btn--primary', onclick: event => {
                     const round = (state.rounds || []).find(r => r.round === row.round);
                     if (round) void this._checkIn(state, round, event.currentTarget);
                 } }, 'Open game') : h('a', { class: 'btn btn--sm', href: `#/spectate/${row.gameId}` }, 'Spectate')
-                : h('a', { class: 'btn btn--sm', href: `#/replay/${row.gameId}` }, 'Replay');
-            const correction = who.isCreator && row.blackPlayerId != null
+                : row.result !== 'pending' && row.replayGameId != null
+                    ? h('a', { class: 'btn btn--sm', href: `#/replay/${row.replayGameId}` }, 'Replay')
+                    : '—';
+            const correctionLocked = state.tournament.format === 'winners_advance'
+                && (state.tournament.status === 'completed' || row.round < state.tournament.currentRound);
+            const correction = who.isCreator && row.blackPlayerId != null && !correctionLocked
                 ? h('button', { class: 'btn btn--sm btn--ghost', onclick: () => this._openOverride(state.tournament, row) }, 'Correct result') : null;
             return h('tr', {}, h('td', { class: 'mono' }, String(row.round)),
                 h('td', {}, row.whiteUsername || 'Unknown player'),
@@ -463,11 +553,31 @@ export class TournamentScreen extends Screen {
     }
 
     async _join(tournament) {
+        if (this._joiningTournamentId) return;
         const token = await this._tokenOrLogin(); if (!token) return;
-        const result = await this.ctx.capability.request(this.ctx.Outbound.joinTournament(token, tournament.id),
-            { expect: 'tournament_joined', timeout: 5000, demo: () => ({}), failOnError: true });
-        if (!result.live) { this._showError(result.error, 'Could not register.'); return; }
-        this.ctx.toast.success(`Registered for “${tournament.name}”.`); await this._refreshDetail(false);
+        if (this._joiningTournamentId) return;
+        this._joiningTournamentId = Number(tournament.id);
+        this._renderDetail();
+        let result;
+        try {
+            result = await this.ctx.capability.request(this.ctx.Outbound.joinTournament(token, tournament.id),
+                { expect: 'tournament_joined', timeout: 15000, demo: () => ({}), failOnError: true });
+        } catch (_) { result = { live: false }; }
+        if (!this.root) return;
+        if (!this._joiningTournamentId && this._detailState && this._identity(this._detailState).joined) return;
+        if (result.live) {
+            // A concurrent authoritative poll may already have confirmed it.
+            if (this._joiningTournamentId) this.ctx.toast.success(`Registered for “${tournament.name}”.`);
+            this._joiningTournamentId = null;
+        } else if (result.error) {
+            this._joiningTournamentId = null;
+            this._showError(result.error, 'Could not register.');
+        } else {
+            // Timeout/disconnect is an unknown outcome, not a rejected write.
+            this.ctx.toast.warning('Registration is still being confirmed. Please wait; do not submit again.');
+        }
+        this._renderDetail();
+        await this._refreshDetail(true);
     }
 
     async _leave(tournament) {

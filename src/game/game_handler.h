@@ -115,6 +115,12 @@ public:
         connection_lookup_ = std::move(lookup);
     }
     void set_database(storage::Database* db) { db_ = db; }
+    void set_background_executor(application::GameCompletionService::Executor executor) {
+        background_executor_ = std::move(executor);
+    }
+    void set_foreign_sender(std::function<void(int, const std::string&)> sender) {
+        foreign_sender_ = std::move(sender);
+    }
     /// Set the GameStore port (LLD-3.2). Must be non-null before
     /// `register_handlers` — in capability-disabled mode pass a
     /// `NullGameStore`; the port's `capable()` method distinguishes.
@@ -125,6 +131,8 @@ public:
     void set_player_queries(application::ports::PlayerQueries* q) { player_queries_ = q; }
 
 private:
+    application::GameCompletionService::Executor background_executor_;
+    std::function<void(int, const std::string&)> foreign_sender_;
     // ── Un-migrated family handlers (LLD-2.2 / 2.3 / 2.4 targets) ──
 
     // ── Helpers used by the injected fan-out callables ──

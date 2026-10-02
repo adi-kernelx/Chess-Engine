@@ -1,5 +1,23 @@
 # Live Tournament Play — Implementation Plan
 
+Release-candidate extension (2026-10-03): creator format choice now includes
+fixed-round Swiss and custom winners-advance with automatic stages. First draw
+replays the pair with reversed colors; after two draws both advance and that
+pair cannot meet again. Odd/unmatchable survivors receive fair byes, not bots.
+No eligible remaining games ends play. Standings in the custom format rank
+by decisive game wins only; byes/draws do not count as wins and equal totals
+share ranks. Swiss scoring remains unchanged. Migration 0013 enables the new
+format. Both modes share the existing game/runtime/completion/replay stack.
+Non-UI verification is recorded in the log; manual checks remain pending.
+
+Release-candidate correction (2026-10-03): ordinary and tournament play share
+GameRoom, GameplayService, and GameScreen. Maintenance now runs off the socket
+event loop; the shared completion observer queues immutable snapshots for
+persistence and tournament progression. The shared state contract restores
+player names and waiting-to-playing controls. Automated regressions pass;
+manual latency, controls, round-status, and replay-label checks remain pending
+in Section 14 of MANUAL_VERIFICATION_CHECKLIST.md.
+
 ## 1. Objective and current gap
 
 Replace the Phase-9.4 creator-reported-result scaffold with real scheduled
@@ -24,6 +42,7 @@ microservice.
 Creation collects:
 
 - name;
+- format (Swiss or winners-advance);
 - number of Swiss rounds;
 - game base time and increment;
 - registration deadline;
@@ -35,7 +54,7 @@ Validation:
 - `registration_deadline < first_round_starts_at`;
 - the deadline-to-first-round gap is at least 30 seconds;
 - every timestamp is stored in UTC and displayed in the browser's local time;
-- rounds remain within `1..30`;
+- Swiss rounds remain within `1..30`; custom stages are allocated dynamically;
 - base time is positive; increment is non-negative; and
 - round duration is at least 60 seconds. It is a scheduling/check-in window,
   not a forced chess-game adjudication deadline.
@@ -58,6 +77,15 @@ arrived and all preceding pairings have terminal results.
 
 All non-withdrawn registered players are paired. Check-in does not change the
 Swiss pool:
+
+Pairing policy updated on 2026-10-03 at the user's request: minimize rematches,
+then the sum of absolute initial-rating differences across the whole round,
+then score differences. This is a custom rating-first policy rather than
+standard score-group-first Swiss. Exact memoized branch-and-bound targets small
+local fields and has exponential worst-case cost. An odd field awards one bye
+point to the lowest-ranked player who has not had a bye while eligible players
+remain; no bot game or fabricated rating record is created. Resolved byes do
+not offer check-in and do not block round progression.
 
 - early check-in places the player in a waiting state;
 - when the round opens, one reserved room is created per non-bye pairing;
@@ -227,11 +255,13 @@ idempotent duplicate is confirmed), notify a tournament-completion port with
 `pairing_id + immutable game result`. That observer resolves the pairing and
 recomputes standings. It must never infer results from frontend messages.
 
-The mapping `pairing.game_id` is persisted before clients are sent to a room.
-Scheduled/unstarted reserved rooms can be recreated from Postgres after a
-server restart. Recovery of an already-moving in-memory game remains the
-platform-wide room-durability limitation and must be called out before cloud
-deployment rather than hidden as a tournament feature.
+The runtime mapping `pairing.game_id` is persisted before clients are sent to
+a room. It must not be used as a replay identifier: after normal game
+persistence, `pairing.replay_game_id` stores the assigned `games.id` used by
+replay links. Scheduled/unstarted reserved rooms can be recreated from Postgres
+after a server restart. Recovery of an already-moving in-memory game remains
+the platform-wide room-durability limitation and must be called out before
+cloud deployment rather than hidden as a tournament feature.
 
 #### Tests and exit criteria
 

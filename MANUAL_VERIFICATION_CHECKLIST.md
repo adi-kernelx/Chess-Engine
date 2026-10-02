@@ -193,7 +193,7 @@ OC9DOU673AWa9T/Gttb7Ogz/cUmXE0HLc5rAKTzLC5bH0BBPyxCN3axlGTZZzSf8
 - [x] Wrong password returns `invalid_credentials` without an indefinite wait or a local session.
 - [ ] Unknown username also returns `invalid_credentials`.
 - [x] Reload preserves an authenticated session.
-- [ ] After applying migration `0011`, repeatedly hard-refresh Profile,
+- [x] After applying migration `0011`, repeatedly hard-refresh Profile,
       Replays, Tournaments, and Leaderboard while the connection indicator is
       still **Connecting**, and switch routes between refreshes. The account
       remains signed in once connectivity settles; no stale refresh response,
@@ -546,24 +546,35 @@ Player B, and Player C.
       open for one minute. The backend shows no `SSL SYSCALL`, `packet length
       too long`, `another command is already in progress`, or repeated
       `maintenance failed` errors.
-- [ ] Creator opens **Create tournament**. The dialog contains name, rounds,
+- [x] Creator opens **Create tournament**. The dialog contains name, rounds,
       base time, increment, registration deadline, first-round start, and
       round spacing/check-in window.
-- [ ] Invalid or past dates show inline errors and a focusable error summary;
+- [x] Invalid or past dates show inline errors and a focusable error summary;
       the request is not sent. Round one must be at least 30 seconds after the
       registration deadline.
-- [ ] Valid dates are previewed in the browser's local timezone. After
+- [x] Valid dates are previewed in the browser's local timezone. After
       creation, the detail view and a copied `#/tournaments/<id>` link show the
       same schedule after refresh and in another browser.
-- [ ] Player B and Player C register. The real usernames and participant count
+- [x] Player B and Player C register. The real usernames and participant count
       update without fabricated rows or a Preview badge.
-- [ ] Player C unregisters and can register again while registration is open.
+- [x] Player C unregisters and can register again while registration is open.
       After the creator closes registration, unregister/register is no longer
       offered and a stale request is rejected.
 - [ ] Creator can reopen registration before the deadline. It closes
       automatically at the deadline and cannot be reopened afterwards.
+      **FAILED; FIX APPLIED, RETEST PENDING:** the creator could reopen after
+      the deadline while round one was still several minutes away. Reopening
+      now has an atomic repository deadline predicate and the expired control
+      is hidden by the frontend.
 - [ ] A signed-out deep-link visitor can inspect the schedule, is asked to sign
       in before registering, and returns to the same tournament after sign-in.
+
+Release-candidate observation, retest pending: tournament directory/detail
+requests intermittently rendered **Tournaments are unavailable**, and one user
+appeared signed out. Tournament PostgreSQL maintenance is now limited to one
+durable pass per second, idempotent tournament reads retry once/reload after
+reconnect, and a transient refresh gap no longer redirects a recoverable
+session to sign-in.
 
 ### 14.2 Round check-in and reserved games
 
@@ -576,6 +587,19 @@ Player B, and Player C.
 - [ ] Both paired players check in. At the scheduled start both automatically
       enter the same new `#/game/<id>`; assigned colors match the pairing and
       clocks start once, not before both players are present.
+      **FAILED; FIX APPLIED, RETEST PENDING:** both players reached the game but
+      the board initially remained inert. Durable maintenance is now throttled
+      to avoid starving game-state requests, and the game screen retries its
+      authoritative initial snapshot until received.
+- [ ] Shared gameplay regression: the first checked-in player transitions from
+      waiting to playing when the second joins; both see the real opponent
+      name, **Resign**, and **Offer draw**. Moves and checkmate arrive promptly
+      while another browser keeps the tournament detail open.
+      **FAILED; FIX APPLIED, RETEST PENDING (2026-10-03):** slow SQL maintenance
+      blocked the event loop; terminal moves waited for persistence and round
+      updates. Maintenance now runs off the event loop and immutable game
+      completion snapshots persist asynchronously. The shared game screen
+      handles tournament-ready transitions and authoritative player names.
 - [ ] The game screen names the tournament and round and provides **Tournament**.
       A tournament game never offers **Rematch**.
 - [ ] One paired player checks in late but before the check-in window closes.
@@ -590,8 +614,12 @@ Player B, and Player C.
 - [ ] Finish separate tournament games by checkmate/resignation and timeout or
       draw. Each game appears once in Replay and normal profile/rating history;
       its pairing resolves automatically without creator result entry.
-- [ ] After game over, **Back to tournament** opens current standings and
-      **Open replay** opens the saved game. No invite/rematch control appears.
+- [ ] After game over, **Back to tournament** opens current standings and the
+      completed pairing's **Replay** opens the saved game once persistence
+      finishes. No invite/rematch control appears.
+      **FAILED; FIX APPLIED, RETEST PENDING:** the pairing exposed its runtime
+      room id as a replay id and could open an unrelated game. Migration 0012
+      adds a distinct persisted replay identity used by completed pairings.
 - [ ] A later round is generated only after every prior pairing is terminal
       and its scheduled start has arrived. Players are never rematched when a
       valid fresh Swiss opponent exists.
@@ -623,5 +651,66 @@ Player B, and Player C.
       cards, tables, dialog, controls, countdown, focus order, and keyboard
       Escape/Tab behavior remain usable without horizontal page overflow.
 
+- [ ] Current round shows a meaningful upcoming/check-in/game-assigned status
+      during play and Won/Lost/Draw/Bye after resolution, rather than stale
+      Not checked in. Replay time controls format exact durations: a 200-second
+      base with 3-second increment reads **3m 20s+3**, without repeating decimals.
+
 Do not mark live tournament play complete or begin cloud deployment testing
 until every applicable item above is checked or its failure is recorded.
+
+### 14.5 Restoration, spectator entry, and rating-distance pairing retest
+
+- [ ] Hard-refresh a tournament deep link and immediately select another tab
+      while Connecting/Restoring is visible. The latest selected route waits
+      for the saved login to restore; it never renders a signed-out state or
+      sends the user to Login solely because restoration is slow.
+      **FAILED; FIX APPLIED, RETEST PENDING (2026-10-03):** hashchange navigation
+      bypassed main's authentication startup gate; refresh timeout also released
+      that gate prematurely. Shared router/session fixes cover every route.
+- [ ] An authenticated unregistered account can open a tournament pairing's
+      Spectate link before both seats join. It shows a waiting message, then
+      opens the board automatically when play starts. Hard-refresh that view
+      and confirm the same account and live board recover.
+      **FAILED; FIX APPLIED, RETEST PENDING:** a reserved room's Spectate link
+      appeared before it was live. Spectator entry now obtains a fresh token,
+      retries waiting/transient failures, and exposes actual terminal errors.
+- [ ] With three registered players, round one has one real game and one Bye.
+      The bye recipient immediately gets one point, has no Join round control
+      for that resolved round, and can spectate the other game. In a later
+      round, another eligible player receives the bye.
+- [ ] Future rounds use the smallest total absolute initial-rating gap within
+      the minimum-rematch constraint; score gaps break ties. Existing generated
+      pairings are unchanged. The Overview explains this policy and the bye.
+
+### 14.6 Concurrent refresh, registration acknowledgement, and custom format
+
+- [ ] With the rebuilt backend running, repeatedly refresh Tournament and
+      Replay deep links while other accounts remain connected. Select another
+      tab immediately while Connecting. The backend remains running and the
+      saved login/latest route recover. **REPORTED FAILED; NEW FIXES APPLIED,
+      RETEST PENDING:** SIGPIPE-safe writes, per-connection dispatch/write locks,
+      owned queued connections, and retained bounded refresh-successor recovery.
+- [ ] Register during live registration. The button disables and says
+      Confirming registration; success is confirmed by acknowledgement or
+      authoritative membership. A delayed/disconnected response says pending,
+      not Could not register. A genuine deadline/closed error remains explicit.
+- [ ] After applying migration 0013, Create offers Swiss and Winners advance.
+      Swiss shows the rounds input; Winners advance hides it. All schedule and
+      time-control validation still works. Existing Swiss events are unchanged.
+      **REPORTED FAILED; FIX APPLIED, RETEST PENDING (2026-10-03):** shared
+      display:flex styling overrode the rounds wrapper's hidden attribute.
+      The shared hidden rule now takes precedence, and format-field state is
+      synchronized when opening the form as well as on selection changes.
+- [ ] Create a three-player Winners advance event. One game and one bye appear;
+      the loser is eliminated and cannot check in again but can spectate. The
+      winner and bye recipient receive a new automatically scheduled stage.
+- [ ] Agree to a draw using the ordinary game controls. The next stage replays
+      the same pair with reversed colors. Agree to a second draw: both advance,
+      that pair cannot meet again, and the event finishes if no legal game
+      remains. Both individual games have distinct correct replay links.
+- [ ] Custom standings show Rank, Wins, and Draws. Actual decisive wins count;
+      byes do not. Equal win totals share ranks (1, 1, 3); rating does not break
+      these ties. Final rank-one players show Champion. Swiss still shows
+      Score/Buchholz. Creator corrections for already advanced custom stages
+      are unavailable and rejected server-side.

@@ -575,6 +575,8 @@ void GameplayService::game_state(const RequestContext&                    ctx,
 
     chess::protocol::GameStateResponse resp;
     resp.game_id       = room->get_id();
+    resp.white_username = room->get_username(chess::Color::WHITE);
+    resp.black_username = room->get_username(chess::Color::BLACK);
     resp.fen           = room->get_board().to_fen();
     resp.white_time_ms = white_ms;
     resp.black_time_ms = black_ms;

@@ -10,10 +10,22 @@ namespace chess::application {
 
 GameCompletionService::GameCompletionService(
         chess::application::ports::GameStore& store,
-        chess::application::ports::TournamentCompletionSink* tournament_sink)
-    : store_(store), tournament_sink_(tournament_sink) {}
+        chess::application::ports::TournamentCompletionSink* tournament_sink,
+        Executor executor)
+    : executor_(std::move(executor)), store_(store), tournament_sink_(tournament_sink) {}
 
 void GameCompletionService::on_game_completed(
+        const chess::game::GameCompleted& ev) {
+    // Copy the immutable terminal snapshot, never the caller's connection or
+    // a live room. Production drains this executor before destroying services.
+    if (executor_) {
+        executor_([this, ev] { persist_completed(ev); });
+    } else {
+        persist_completed(ev);
+    }
+}
+
+void GameCompletionService::persist_completed(
         const chess::game::GameCompleted& ev) {
     const auto& s = ev.snapshot;
 

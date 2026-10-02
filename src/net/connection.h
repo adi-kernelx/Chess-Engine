@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <chrono>
+#include <mutex>
 #include <unistd.h>
 
 #include "net/connection_handle.h"
@@ -22,6 +23,10 @@ public:
     // Disable copy
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
+
+    // Serialize inbound handlers per socket, not across the entire server.
+    std::recursive_mutex processing_mutex;
+    bool retired = false; // guarded by processing_mutex
 
     int get_fd() const { return fd_; }
     const std::string& get_ip() const { return ip_; }
@@ -57,8 +62,8 @@ public:
     // Consume bytes from read buffer after processing
     void consume_read_buffer(size_t bytes);
 
-    bool has_data_to_write() const { return !write_buffer_.empty(); }
-    size_t write_buffer_bytes() const { return write_buffer_.size(); }
+    bool has_data_to_write() const { std::lock_guard<std::recursive_mutex> lock(write_mutex_); return !write_buffer_.empty(); }
+    size_t write_buffer_bytes() const { std::lock_guard<std::recursive_mutex> lock(write_mutex_); return write_buffer_.size(); }
 
     /// LLD-6.4: cap the pending-write buffer at 4 MB. Every response
     /// frame this server emits is well under 64 KB (`WebSocket::
@@ -70,14 +75,14 @@ public:
     /// Set by `append_to_write_buffer` when the cap would be exceeded.
     /// Sticky: once true, stays true until the connection is destroyed.
     /// Callers must close the connection promptly on true.
-    bool write_buffer_overflowed() const { return write_buffer_overflowed_; }
+    bool write_buffer_overflowed() const { std::lock_guard<std::recursive_mutex> lock(write_mutex_); return write_buffer_overflowed_; }
 
     // WebSocket state
     bool is_upgraded() const { return upgraded_; }
     void set_upgraded(bool val);
 
     // Server-driven WebSocket heartbeat. TcpServer serialises these methods
-    // through connections_mutex_, so the timestamps do not need their own
+    // through processing_mutex, so the timestamps do not need their own
     // atomic/mutex overhead.
     bool heartbeat_due(HeartbeatTimePoint now,
                        HeartbeatClock::duration interval) const;
@@ -91,6 +96,7 @@ public:
     bool awaiting_pong() const { return awaiting_pong_; }
 
 private:
+    mutable std::recursive_mutex write_mutex_;
     int fd_;
     std::string ip_;
     uint64_t generation_ = 0;  // LLD-1: bumped by TcpServer on accept()

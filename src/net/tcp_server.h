@@ -9,6 +9,8 @@
 #include <functional>
 #include <unordered_map>
 #include <chrono>
+#include <future>
+#include <atomic>
 #include <sys/epoll.h>
 
 namespace chess {
@@ -35,13 +37,18 @@ public:
     /// Look up a connection by fd. Returns nullptr if not found.
     /// Caller must be aware this holds the connections mutex briefly.
     Connection* get_connection(int fd);
+    /// Atomically look up, enqueue, and flush a foreign frame. Safe for
+    /// background maintenance; keeps shared ownership through the send and
+    /// takes only the write-buffer lock, never another socket's handler lock.
+    void send_text(int fd, const std::string& frame);
 
     /// Set a callback that fires when a connection disconnects.
     /// Used by the game layer to handle player disconnections.
     using DisconnectCallback = std::function<void(int fd)>;
     void set_disconnect_callback(DisconnectCallback cb) { disconnect_cb_ = std::move(cb); }
 
-    /// Lightweight periodic callback executed by the event-loop thread.
+    /// Periodic callback offloaded from the socket event loop. Only one pass
+    /// may be in flight; run() drains it before returning on shutdown.
     using MaintenanceCallback = std::function<void()>;
     void set_maintenance_callback(MaintenanceCallback cb) { maintenance_cb_ = std::move(cb); }
 
@@ -49,19 +56,20 @@ private:
     bool setup_socket();
     bool set_non_blocking(int fd);
     void handle_new_connection();
-    void handle_client_data(int client_fd);
-    void close_connection(int client_fd);
+    void handle_client_data(const std::shared_ptr<Connection>& connection);
+    void close_connection(const std::shared_ptr<Connection>& connection);
+    std::shared_ptr<Connection> acquire_connection(int fd);
     void run_connection_maintenance();
 
     uint16_t port_;
     int server_fd_;
     int epoll_fd_;
-    bool running_;
+    std::atomic<bool> running_;
 
     concurrent::ThreadPool& pool_;
     MessageRouter router_;
     std::recursive_mutex connections_mutex_;
-    std::unordered_map<int, std::unique_ptr<Connection>> connections_;
+    std::unordered_map<int, std::shared_ptr<Connection>> connections_;
     /// LLD-1: monotonic counter incremented every time we accept() and
     /// stamped onto the new Connection's generation. Combined with fd,
     /// this gives ConnectionHandle a value stable across the whole
@@ -69,6 +77,7 @@ private:
     uint64_t next_generation_ = 1;
     DisconnectCallback disconnect_cb_;
     MaintenanceCallback maintenance_cb_;
+    std::future<void> maintenance_task_;
     static const int MAX_EVENTS = 64;
     // Browser control-frame replies should be immediate, but background tabs,
     // proxies, and a busy worker pool can delay delivery. A 30+30 window avoids

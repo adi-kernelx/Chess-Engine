@@ -72,7 +72,9 @@ export class Session {
         // upgrade it into a fresh access token on the next connect.
         socket.onState((state) => {
             if (state === 'connected' && this._refresh && !this._access) {
-                this._refreshNow().catch(() => {}).finally(() => this._markReady());
+                // A timeout is not a signed-out decision. Keep the startup
+                // gate closed until refresh succeeds or is definitively revoked.
+                this._refreshNow().catch(() => {});
             } else if (state === 'connected') {
                 this._markReady();
             }
@@ -99,6 +101,10 @@ export class Session {
      * google_auth. Persists refresh + identity, schedules the next refresh.
      */
     adopt(authOk) {
+        if (this._refreshRetryTimer) {
+            clearTimeout(this._refreshRetryTimer);
+            this._refreshRetryTimer = null;
+        }
         this._access = authOk.access_token || null;
         this._refresh = authOk.refresh_token || null;
         this._accessExpiresAt = authOk.access_expires_in
@@ -142,9 +148,21 @@ export class Session {
      * NOW (link_google, logout_all).
      */
     async accessTokenForRequest() {
+        // A transient startup refresh may have released the router so the UI
+        // stays usable while a retry is scheduled. An authenticated action
+        // should make one immediate recovery attempt instead of treating that
+        // temporary no-access-token state as a sign-out.
+        if (!this._access && this._refresh) {
+            try { await this._refreshNow(); } catch (_) { return null; }
+        }
         if (!this._access) return null;
         if (Date.now() >= this._accessExpiresAt - 5_000) {
-            try { await this._refreshNow(); } catch (_) { return null; }
+            try { await this._refreshNow(); }
+            catch (_) {
+                // A transport hiccup is not session expiry. The current access
+                // token remains usable until its actual expiry.
+                if (!this._access || Date.now() >= this._accessExpiresAt) return null;
+            }
         }
         return this._access;
     }
@@ -171,6 +189,7 @@ export class Session {
         }
         storage.remove(REFRESH_KEY);
         storage.remove(IDENTITY_KEY);
+        this._markReady();
         this.bus.emit('change', this._snapshot());
     }
 
@@ -217,12 +236,22 @@ export class Session {
 
     async _performRefreshNow() {
         if (!this._refresh) throw new Error('no refresh token');
+        const attemptedRefresh = this._refresh;
         const result = await this._requestOnceDetailed(
-            { type: 'refresh', refresh_token: this._refresh },
+            { type: 'refresh', refresh_token: attemptedRefresh },
             'auth_ok',
             new Set(['invalid_refresh'])
         );
         if (result.status === 'error') {
+            // Another tab may have rotated the shared token after this request
+            // was sent (including browsers without Web Locks). If storage now
+            // contains its successor, retry that credential before concluding
+            // that the login family is invalid.
+            const latest = storage.get(REFRESH_KEY);
+            if (latest && latest !== attemptedRefresh) {
+                this._refresh = latest;
+                return this._performRefreshNow();
+            }
             // Only the refresh handler's definitive invalid_refresh response
             // proves this credential is unusable. An unrelated auth_error,
             // database hiccup, disconnect, or timeout must not erase a valid
@@ -248,7 +277,7 @@ export class Session {
         if (this._refreshRetryTimer || !this._refresh) return;
         this._refreshRetryTimer = setTimeout(() => {
             this._refreshRetryTimer = null;
-            if (!this._access && this.socket.isConnected()) {
+            if (this._refresh && this.socket.isConnected()) {
                 this._refreshNow().catch(() => {});
             }
         }, REFRESH_RETRY_MS);
@@ -285,6 +314,9 @@ export class Session {
                 const code = m && m.code;
                 if (definitiveErrorCodes && !definitiveErrorCodes.has(code)) return;
                 finish({ status: 'error', code: code || 'unknown' });
+            }));
+            cleanup.push(this.socket.onState(state => {
+                if (state !== 'connected') finish({ status: 'disconnected' });
             }));
             const t = setTimeout(() => finish({ status: 'timeout' }), REQUEST_TIMEOUT_MS);
             cleanup.push(() => clearTimeout(t));

@@ -133,6 +133,8 @@ std::string encode_game_state(const GameStateResponse& r) {
     out.push_back('{');
     append_field(out, "type",       json("game_state"),      true);
     append_field(out, "game_id",    json(r.game_id),         false);
+    append_field(out, "white_username", json(r.white_username), false);
+    append_field(out, "black_username", json(r.black_username), false);
     append_field(out, "fen",        json(r.fen),             false);
     append_field(out, "white_time", json(r.white_time_ms),   false);
     append_field(out, "black_time", json(r.black_time_ms),   false);

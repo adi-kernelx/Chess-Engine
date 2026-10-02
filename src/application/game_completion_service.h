@@ -45,6 +45,7 @@
  */
 
 #pragma once
+#include <functional>
 
 #include "application/ports/game_store.h"
 #include "application/ports/tournament_completion_sink.h"
@@ -54,21 +55,26 @@ namespace chess::application {
 
 class GameCompletionService final : public chess::game::GameEventListener {
 public:
+    using Executor = std::function<void(std::function<void()>)>;
     /// `store` must outlive the service and every room it is attached
     /// to. In capability-disabled composition the injected store is a
     /// `NullGameStore` whose `capable()` returns false; the callback
     /// short-circuits before touching it.
     explicit GameCompletionService(
         chess::application::ports::GameStore& store,
-        chess::application::ports::TournamentCompletionSink* tournament_sink = nullptr);
+        chess::application::ports::TournamentCompletionSink* tournament_sink = nullptr,
+        Executor executor = {});
 
-    /// GameRoom's terminal-transition callback. Runs on the worker
-    /// thread that observed the transition, outside the room mutex.
+    /// GameRoom's terminal-transition callback copies the snapshot into the
+    /// injected executor. Without an executor (deterministic unit tests), it
+    /// persists inline. The executor must drain before service destruction.
     /// Never throws (bubbles nothing back into `GameRoom`'s LockAndDrain);
     /// storage errors are logged with the typed `StorageError` code.
     void on_game_completed(const chess::game::GameCompleted& ev) override;
 
 private:
+    void persist_completed(const chess::game::GameCompleted& ev);
+    Executor executor_;
     chess::application::ports::GameStore& store_;
     chess::application::ports::TournamentCompletionSink* tournament_sink_;
 };

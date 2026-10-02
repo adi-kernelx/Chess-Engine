@@ -87,15 +87,16 @@ StoredPairing row_to_pairing(const Row& r) {
     p.white_player_id = std::stoll(r.at(3));
     if (!r.is_null(4)) p.black_player_id = std::stoll(r.at(4));
     if (!r.is_null(5)) p.game_id         = std::stoll(r.at(5));
-    p.result          = r.at(6);
-    p.result_source   = r.at(7);
-    p.result_recorded_at_unix = std::stoll(r.at(8));
-    p.created_at      = r.at(9);
+    if (!r.is_null(6)) p.replay_game_id  = std::stoll(r.at(6));
+    p.result          = r.at(7);
+    p.result_source   = r.at(8);
+    p.result_recorded_at_unix = std::stoll(r.at(9));
+    p.created_at      = r.at(10);
     return p;
 }
 
 constexpr const char* PAIRING_COLUMNS =
-    "id, tournament_id, round, white_player_id, black_player_id, game_id, result, "
+    "id, tournament_id, round, white_player_id, black_player_id, game_id, replay_game_id, result, "
     "COALESCE(result_source, ''), "
     "COALESCE(EXTRACT(EPOCH FROM result_recorded_at)::bigint, 0), "
     "to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')";
@@ -126,8 +127,11 @@ CreateTournamentResult create_tournament(Database& db,
                                          int64_t created_by,
                                          int64_t registration_deadline_unix,
                                          int64_t first_round_starts_at_unix,
-                                         int round_duration_seconds) {
+                                         int round_duration_seconds,
+                                         const std::string& format) {
     CreateTournamentResult out;
+    if (format != "swiss" && format != "winners_advance") { out.error = "invalid_format"; return out; }
+    if (format == "winners_advance") rounds = 1; // allocate subsequent rounds only as needed
     if (rounds <= 0)      { out.error = "rounds must be positive";       return out; }
     if (tc_initial <= 0)  { out.error = "time_base must be positive";    return out; }
     if (tc_increment < 0) { out.error = "time_inc must be non-negative"; return out; }
@@ -148,7 +152,7 @@ CreateTournamentResult create_tournament(Database& db,
         " time_control_initial_ms, time_control_increment_ms, "
         " status, created_by, registration_deadline, first_round_starts_at, "
         " round_duration_seconds, registration_open) "
-        "VALUES ($1, 'swiss', $2, 0, $3, $4, 'registration', $5, "
+        "VALUES ($1, $9, $2, 0, $3, $4, 'registration', $5, "
         " to_timestamp($6), to_timestamp($7), $8, TRUE) RETURNING id) "
         "INSERT INTO tournament_rounds "
         " (tournament_id, round, earliest_start_at, check_in_closes_at) "
@@ -163,7 +167,7 @@ CreateTournamentResult create_tournament(Database& db,
          Param::int64(created_by),
          Param::int64(registration_deadline_unix),
          Param::int64(first_round_starts_at_unix),
-         Param::int64(round_duration_seconds)});
+         Param::int64(round_duration_seconds), Param::text(format)});
     if (!r.ok)        { out.error = r.error;                            return out; }
     if (r.rows.empty()) { out.error = "INSERT ... RETURNING no row";    return out; }
 
@@ -295,7 +299,8 @@ bool set_registration_open(Database& db, int64_t tournament_id,
         " registration_closed_at=CASE WHEN $1 THEN NULL ELSE to_timestamp($2) END, "
         " status=CASE WHEN $1 THEN 'registration' ELSE 'scheduled' END "
         "WHERE id=$3 AND status IN ('registration','scheduled') "
-        "  AND ($1 OR registration_open)",
+        "  AND ($1 OR registration_open) "
+        "  AND (NOT $1 OR registration_deadline > to_timestamp($2))",
         {Param::boolean(open), Param::int64(now_unix), Param::int64(tournament_id)});
     return r.ok && r.rows_affected > 0;
 }
@@ -470,7 +475,7 @@ std::vector<StoredPairing> get_live_pending_pairings(Database& db) {
     QueryResult r = db.exec(
         std::string("SELECT p.") +
         "id, p.tournament_id, p.round, p.white_player_id, p.black_player_id, "
-        "p.game_id, p.result, COALESCE(p.result_source,''), "
+        "p.game_id, p.replay_game_id, p.result, COALESCE(p.result_source,''), "
         "COALESCE(EXTRACT(EPOCH FROM p.result_recorded_at)::bigint,0), "
         "to_char(p.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') "
         "FROM tournament_pairings p JOIN tournament_rounds tr "
@@ -491,6 +496,16 @@ bool set_pairing_game_id(Database& db, int64_t pairing_id, int64_t game_id) {
     auto r = db.exec(
         "UPDATE tournament_pairings SET game_id=$1 WHERE id=$2 AND result='pending'",
         {Param::int64(game_id), Param::int64(pairing_id)});
+    return r.ok && r.rows_affected > 0;
+}
+
+bool set_pairing_replay_game_id(Database& db, int64_t pairing_id,
+                                int64_t replay_game_id) {
+    if (replay_game_id <= 0) return false;
+    auto r = db.exec(
+        "UPDATE tournament_pairings SET replay_game_id=$1 "
+        "WHERE id=$2 AND (replay_game_id IS NULL OR replay_game_id=$1)",
+        {Param::int64(replay_game_id), Param::int64(pairing_id)});
     return r.ok && r.rows_affected > 0;
 }
 

@@ -25,10 +25,15 @@
 #include <functional>
 #include <iostream>
 #include <set>
+#include <map>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
+#include <random>
+#include <tuple>
+#include <limits>
+#include <cmath>
 
 #include "tournament/swiss.h"
 #include "tournament/tournament_manager.h"
@@ -182,6 +187,66 @@ void run_algorithm_tests() {
         return top == std::set<int64_t>{1, 2};
     });
 
+    run_test("rating distance takes priority over score grouping", [] {
+        auto out = pair_swiss_round({P(1, 1000, 2), P(2, 2000, 2),
+                                     P(3, 1010, 0), P(4, 1990, 0)}, {});
+        std::set<PlayerPair> pairs;
+        for (const auto& p : out) pairs.insert({p.white_id, p.black_id});
+        return pairs == std::set<PlayerPair>{{1, 3}, {2, 4}};
+    });
+
+    run_test("whole-round optimum beats greedy nearest opponent", [] {
+        auto out = pair_swiss_round({P(1, 1000), P(2, 1004),
+                                     P(3, 1005, 2), P(4, 1009)}, {});
+        std::set<PlayerPair> pairs;
+        for (const auto& p : out) pairs.insert({p.white_id, p.black_id});
+        return pairs == std::set<PlayerPair>{{1, 2}, {3, 4}};
+    });
+
+    run_test("minimum matching agrees with exhaustive independent oracle", [] {
+        using Cost = std::tuple<int64_t, int64_t, int64_t>;
+        std::mt19937 random(42);
+        for (int example = 0; example < 40; ++example) {
+            std::vector<PlayerStanding> players;
+            std::set<PlayerPair> played;
+            for (int i = 0; i < 8; ++i) players.push_back(P(i + 1, 800 + random() % 1200, (random() % 5) * 0.5));
+            for (int i = 0; i < 8; ++i) for (int j = i + 1; j < 8; ++j)
+                if (random() % 3 == 0) played.insert({i + 1, j + 1});
+            auto edge = [&](int a, int b) -> Cost {
+                return {have_played(played, a + 1, b + 1),
+                    std::abs(players[a].elo - players[b].elo),
+                    std::llround(2 * std::abs(players[a].score - players[b].score))};
+            };
+            auto sum = [](Cost a, Cost b) -> Cost {
+                return {std::get<0>(a) + std::get<0>(b), std::get<1>(a) + std::get<1>(b),
+                        std::get<2>(a) + std::get<2>(b)};
+            };
+            Cost best{100, 1000000, 1000000};
+            std::function<void(unsigned, Cost)> enumerate = [&](unsigned mask, Cost cost) {
+                if (mask == 255) { best = std::min(best, cost); return; }
+                int a = 0; while (mask & (1u << a)) ++a;
+                for (int b = a + 1; b < 8; ++b) if (!(mask & (1u << b)))
+                    enumerate(mask | (1u << a) | (1u << b), sum(cost, edge(a, b)));
+            };
+            enumerate(0, {0, 0, 0});
+            Cost actual{0, 0, 0};
+            auto out = pair_swiss_round(players, played);
+            if (out.size() != 4) return false;
+            for (const auto& p : out) actual = sum(actual, edge(p.white_id - 1, p.black_id - 1));
+            if (actual != best) return false;
+        }
+        return true;
+    });
+
+    run_test("24-player first round attains adjacent-rating minimum", [] {
+        std::vector<PlayerStanding> players;
+        for (int i = 0; i < 24; ++i) players.push_back(P(i + 1, 800 + 10 * i));
+        auto out = pair_swiss_round(players, {});
+        int64_t gap = 0;
+        for (const auto& p : out) gap += 10 * std::abs(p.white_id - p.black_id);
+        return out.size() == 12 && gap == 120;
+    });
+
     run_test("withdrawn players are dropped from pairings", [] {
         std::vector<PlayerStanding> s = {
             P(1, 1600, 1.0),
@@ -309,6 +374,12 @@ bool prepare_schema(Database& db) {
             applied, err)) return false;
     if (!db.apply_migration("0010_live_tournament_runtime",
             read_file(source_path("src/storage/migrations/0010_live_tournament_runtime.sql")),
+            applied, err)) return false;
+    if (!db.apply_migration("0012_tournament_replay_identity",
+            read_file(source_path("src/storage/migrations/0012_tournament_replay_identity.sql")),
+            applied, err)) return false;
+    if (!db.apply_migration("0013_winners_advance_tournaments",
+            read_file(source_path("src/storage/migrations/0013_winners_advance_tournaments.sql")),
             applied, err)) return false;
     return true;
 }
@@ -597,6 +668,43 @@ int main() {
     application::ports::FakeClock lifecycle_clock;
     TournamentManager lifecycle(db, lifecycle_clock);
 
+    run_test("odd live rounds award one bye point and rotate the bye fairly", [&] {
+        application::ports::FakeClock clock;
+        TournamentManager manager(db, clock);
+        auto created = create_tournament(db, "Odd Cup", 2, 60000, 0, creator, 100, 200, 60);
+        if (!created.ok || !manager.join(created.id, creator, 1500).ok
+            || !manager.join(created.id, players[1], 1400).ok
+            || !manager.join(created.id, players[2], 1300).ok
+            || !manager.start(created.id, creator).ok) return false;
+        clock.advance(std::chrono::seconds(200));
+        if (!manager.maintenance_tick().ok) return false;
+        auto first = get_pairings_for_round(db, created.id, 1);
+        if (first.size() != 2) return false;
+        int64_t bye_player = 0, game_pairing = 0;
+        for (const auto& p : first) {
+            if (p.result == "bye" && !p.black_player_id) bye_player = p.white_player_id;
+            else if (p.result == "pending" && p.black_player_id) game_pairing = p.id;
+        }
+        if (bye_player != players[2] || game_pairing == 0) return false;
+        const auto state = manager.get_state(created.id);
+        if (!state) return false;
+        bool point = false;
+        for (const auto& p : state->standings) if (p.player_id == bye_player)
+            point = p.score == 1 && p.received_bye;
+        auto checkin = manager.check_in(created.id, 1, bye_player);
+        if (!point || checkin.ok || checkin.error != "round_already_resolved_for_player") return false;
+        if (!manager.record_game_result(game_pairing, "1-0").ok) return false;
+        clock.advance(std::chrono::seconds(60));
+        if (!manager.maintenance_tick().ok) return false;
+        auto second = get_pairings_for_round(db, created.id, 2);
+        int byes = 0;
+        for (const auto& p : second) if (p.result == "bye") {
+            if (p.white_player_id == bye_player) return false;
+            ++byes;
+        }
+        return second.size() == 2 && byes == 1;
+    });
+
     run_test("player can unregister and re-register while registration is open", [&] {
         auto cr = create_tournament(db, "Leave Cup", 1, 60000, 0, creator,
                                     100, 200, 60);
@@ -620,7 +728,13 @@ int main() {
         if (!lifecycle.set_registration(cr.id, creator, true).ok) return false;
         lifecycle_clock.advance(std::chrono::seconds(101));
         auto late = lifecycle.join(cr.id, players[1], 1500);
-        return !late.ok && late.error == "registration_closed";
+        if (late.ok || late.error != "registration_closed") return false;
+        if (!lifecycle.set_registration(cr.id, creator, false).ok) return false;
+        // Repository predicate is the final authority even if a caller raced
+        // the deadline after reading a previously-open tournament row.
+        if (set_registration_open(db, cr.id, true, 101)) return false;
+        auto reopen = lifecycle.set_registration(cr.id, creator, true);
+        return !reopen.ok && reopen.error == "registration_deadline_passed";
     });
 
     run_test("scheduled round starts once and single arrival wins by forfeit", [&] {
@@ -711,6 +825,133 @@ int main() {
         a.join(); b.join();
         return first_ok && second_ok
             && get_pairings_for_round(db, cr.id, 1).size() == 1;
+    });
+
+    run_test("winners advance: dynamic stages, elimination, bye and replay colors", [&] {
+        application::ports::FakeClock clock(application::ports::Clock::SteadyPoint{},
+            application::ports::Clock::SystemPoint(std::chrono::seconds(1000)));
+        TournamentManager manager(db, clock);
+        const auto cr = create_tournament(db, "Elimination", 0, 60000, 0, creator,
+                                         1100, 1200, 60, "winners_advance");
+        if (!cr.ok) return false;
+        for (int i = 0; i < 3; ++i) if (!manager.join(cr.id, players[i], 1600 - i * 100).ok) return false;
+        if (!manager.start(cr.id, creator).ok) return false;
+        clock.advance(std::chrono::seconds(200));
+        if (!manager.maintenance_tick().ok) return false;
+        auto first = get_pairings_for_round(db, cr.id, 1);
+        const auto game = std::find_if(first.begin(), first.end(), [](const auto& p) { return p.black_player_id.has_value(); });
+        const auto bye = std::find_if(first.begin(), first.end(), [](const auto& p) { return p.result == "bye"; });
+        if (game == first.end() || bye == first.end()) return false;
+        const int64_t loser = *game->black_player_id;
+        if (!manager.record_game_result(game->id, "1-0").ok) return false;
+        if (manager.check_in(cr.id, 2, loser).error != "player_eliminated") return false;
+        clock.advance(std::chrono::seconds(60));
+        if (!manager.maintenance_tick().ok) return false;
+        const auto second = get_pairings_for_round(db, cr.id, 2);
+        if (second.size() != 1 || !second[0].black_player_id
+            || (second[0].white_player_id != bye->white_player_id && *second[0].black_player_id != bye->white_player_id)) return false;
+        if (!manager.record_game_result(second[0].id, "1/2-1/2").ok) return false;
+        // A restart reconstructs everything from durable pairing results.
+        TournamentManager restarted(db, clock);
+        clock.advance(std::chrono::seconds(60));
+        if (!restarted.maintenance_tick().ok) return false;
+        const auto third = get_pairings_for_round(db, cr.id, 3);
+        if (third.size() != 1 || third[0].white_player_id != *second[0].black_player_id
+            || !third[0].black_player_id || *third[0].black_player_id != second[0].white_player_id) return false;
+        if (!restarted.record_game_result(third[0].id, "1/2-1/2").ok) return false;
+        const auto final = find_tournament(db, cr.id);
+        const auto ranked = restarted.get_state(cr.id);
+        if (!ranked || ranked->standings.size() != 3 || ranked->standings[0].round_wins != 1
+            || ranked->standings[0].rank != 1 || ranked->standings[1].round_wins != 0
+            || ranked->standings[1].rank != 2 || ranked->standings[2].rank != 2) return false;
+        return final && final->status == "completed" && final->rounds == 3
+            && get_rounds(db, cr.id).size() == 3
+            && restarted.override_result(third[0].id, creator, "1-0", "too late").error == "advancement_already_locked";
+    });
+
+    run_test("winners advance: two drawn games advance both outside the final", [&] {
+        application::ports::FakeClock clock(application::ports::Clock::SteadyPoint{},
+            application::ports::Clock::SystemPoint(std::chrono::seconds(2000)));
+        TournamentManager manager(db, clock);
+        auto cr = create_tournament(db, "Draw cap", 0, 60000, 0, creator, 2100, 2200, 60, "winners_advance");
+        if (!cr.ok) return false;
+        for (int i = 0; i < 4; ++i) if (!manager.join(cr.id, players[i], 1600 - i * 100).ok) return false;
+        if (!manager.start(cr.id, creator).ok) return false;
+        clock.advance(std::chrono::seconds(200));
+        if (!manager.maintenance_tick().ok) return false;
+        auto first = get_pairings_for_round(db, cr.id, 1);
+        if (first.size() != 2) return false;
+        for (const auto& p : first) if (!manager.record_game_result(p.id, "1/2-1/2").ok) return false;
+        clock.advance(std::chrono::seconds(60));
+        if (!manager.maintenance_tick().ok) return false;
+        auto second = get_pairings_for_round(db, cr.id, 2);
+        if (second.size() != 2) return false;
+        for (const auto& p : second) if (!manager.record_game_result(p.id, "1/2-1/2").ok) return false;
+        clock.advance(std::chrono::seconds(60));
+        if (!manager.maintenance_tick().ok) return false;
+        auto third = get_pairings_for_round(db, cr.id, 3);
+        if (third.size() != 2 || find_tournament(db, cr.id)->status != "in_progress") return false;
+        for (const auto& p : third) {
+            for (const auto& old : first) if (PlayerPair(p.white_player_id, *p.black_player_id)
+                == PlayerPair(old.white_player_id, *old.black_player_id)) return false;
+            if (!manager.record_game_result(p.id, "1-0").ok) return false;
+        }
+        if (find_tournament(db, cr.id)->status == "completed") {
+            // The two winners may already be a draw-capped pair: never
+            // generate a forbidden fourth game merely to find a sole winner.
+            const PlayerPair survivors(third[0].white_player_id, third[1].white_player_id);
+            return std::any_of(first.begin(), first.end(), [&](const auto& p) {
+                return survivors == PlayerPair(p.white_player_id, *p.black_player_id);
+            });
+        }
+        clock.advance(std::chrono::seconds(60));
+        if (!manager.maintenance_tick().ok) return false;
+        auto final = get_pairings_for_round(db, cr.id, 4);
+        if (final.size() != 1 || !manager.record_game_result(final[0].id, "0-1").ok) return false;
+        return find_tournament(db, cr.id)->status == "completed";
+    });
+
+    run_test("hard draw-cap matching maximizes games and never re-pairs capped opponents", [&] {
+        const std::vector<PlayerStanding> pool = {P(1,1600), P(2,1500), P(3,1400), P(4,1300)};
+        const std::set<PlayerPair> capped = {PlayerPair(1,2), PlayerPair(1,3), PlayerPair(1,4)};
+        const auto pairs = pair_swiss_round(pool, {}, capped);
+        int games = 0, byes = 0;
+        std::set<int64_t> seen;
+        for (const auto& p : pairs) {
+            if (!seen.insert(p.white_id).second) return false;
+            if (p.is_bye) ++byes;
+            else {
+                ++games;
+                if (!seen.insert(p.black_id).second || capped.count(PlayerPair(p.white_id,p.black_id))) return false;
+            }
+        }
+        return games == 1 && byes == 2 && seen.size() == 4;
+    });
+
+    run_test("all surviving pairs reaching two draws finish as joint winners", [&] {
+        application::ports::FakeClock clock(application::ports::Clock::SteadyPoint{},
+            application::ports::Clock::SystemPoint(std::chrono::seconds(3000)));
+        TournamentManager manager(db, clock);
+        auto cr = create_tournament(db, "All Draws", 0, 60000, 0, creator, 3100, 3200, 60, "winners_advance");
+        if (!cr.ok) return false;
+        for (int i = 0; i < 4; ++i) if (!manager.join(cr.id, players[i], 1600 - i * 100).ok) return false;
+        if (!manager.start(cr.id, creator).ok) return false;
+        std::map<PlayerPair,int> draws;
+        for (int round = 1; round <= 6; ++round) {
+            clock.advance(std::chrono::seconds(round == 1 ? 200 : 60));
+            if (!manager.maintenance_tick().ok) return false;
+            const auto pairs = get_pairings_for_round(db, cr.id, round);
+            if (pairs.size() != 2) return false;
+            for (const auto& p : pairs) {
+                if (!p.black_player_id || ++draws[PlayerPair(p.white_player_id,*p.black_player_id)] > 2) return false;
+                if (!manager.record_game_result(p.id,"1/2-1/2").ok) return false;
+            }
+        }
+        const auto state = manager.get_state(cr.id);
+        return state && state->tournament.status == "completed" && get_rounds(db,cr.id).size() == 6
+            && std::all_of(state->standings.begin(), state->standings.end(), [](const auto& p) {
+                return p.rank == 1 && p.round_wins == 0 && p.round_draws == 6;
+            });
     });
 
     std::cout << "\n========================================\n";

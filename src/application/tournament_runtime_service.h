@@ -56,6 +56,7 @@ private:
                       int64_t tournament_id, int round,
                       int64_t white_id, int64_t black_id);
     void notify_room(const std::shared_ptr<game::GameRoom>& room);
+    void run_maintenance_locked();
 
     storage::Database* db_;
     game::RoomManager& rooms_;
@@ -64,6 +65,9 @@ private:
     std::mutex pending_mutex_;
     std::map<CheckInKey, PendingSeat> pending_seats_;
     std::map<std::pair<int64_t,int>, std::string> notified_states_;
+    std::mutex maintenance_mutex_;
+    ports::Clock::SteadyPoint next_maintenance_at_{};
+    bool maintenance_scheduled_ = false;
     std::atomic<bool> maintenance_error_logged_{false};
 };
 

@@ -200,6 +200,8 @@ int main() {
     run_test("game_state: fen and moves round-trip", []() {
         GameStateResponse r;
         r.game_id       = 7;
+        r.white_username = "Alice";
+        r.black_username = "Bob";
         r.fen           = "startpos";
         r.state         = "in_progress";
         r.white_time_ms = 12345;
@@ -212,6 +214,8 @@ int main() {
         json j = json::parse(s);
         return j["type"]     == "game_state"
             && j["game_id"]  == 7
+            && j["white_username"] == "Alice"
+            && j["black_username"] == "Bob"
             && j["state"]    == "in_progress"
             && j["moves"].is_array()
             && j["moves"].size() == 2

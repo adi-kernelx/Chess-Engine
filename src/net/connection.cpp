@@ -33,9 +33,12 @@ int Connection::read_from_socket() {
 }
 
 int Connection::write_to_socket() {
+    std::lock_guard<std::recursive_mutex> lock(write_mutex_);
     if (write_buffer_.empty()) return 0;
 
-    int bytes_written = send(fd_, write_buffer_.data(), write_buffer_.size(), 0);
+    // A peer closing during hard refresh is a normal transport failure, not
+    // permission to terminate the entire process with SIGPIPE.
+    int bytes_written = send(fd_, write_buffer_.data(), write_buffer_.size(), MSG_NOSIGNAL);
     
     if (bytes_written > 0) {
         // Remove written bytes from buffer
@@ -46,6 +49,7 @@ int Connection::write_to_socket() {
 }
 
 void Connection::append_to_write_buffer(const uint8_t* data, size_t length) {
+    std::lock_guard<std::recursive_mutex> lock(write_mutex_);
     // LLD-6.4: drop-on-overflow. Once we've overflowed we drop every
     // subsequent write — the transport is expected to close the
     // connection soon after checking the flag, and continuing to

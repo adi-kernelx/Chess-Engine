@@ -21,6 +21,7 @@ export class Router {
         this.ctx = ctx;
         this.routes = [];    // [{ pattern, keys, factory, meta }]
         this.current = null; // { screen, path, factory }
+        this._started = false;
         this._listeners = new Set();
 
         window.addEventListener('hashchange', () => this._resolve());
@@ -43,6 +44,7 @@ export class Router {
     }
 
     start(defaultPath = '/') {
+        this._started = true;
         if (!location.hash || location.hash === '#') {
             history.replaceState(null, '', '#' + defaultPath);
         }
@@ -62,6 +64,10 @@ export class Router {
     }
 
     _resolve() {
+        // Hash changes can happen while main is still restoring a saved
+        // session. Keep the latest URL, but never mount a signed-out screen
+        // before the startup authentication decision has settled.
+        if (!this._started) return;
         const path = (location.hash || '#/').slice(1) || '/';
 
         for (const route of this.routes) {

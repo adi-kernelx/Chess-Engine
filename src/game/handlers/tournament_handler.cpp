@@ -86,7 +86,7 @@ void TournamentHandler::handle_create_tournament(RequestContext& ctx,
     service_.create_tournament(ctx, ctx.identity->player_id,
                                name, rounds, time_base, time_inc,
                                registration_deadline, first_round_starts_at,
-                               round_duration, sink);
+                               round_duration, sink, msg.value("format", std::string("swiss")));
 }
 
 void TournamentHandler::handle_join_tournament(RequestContext& ctx,

@@ -66,7 +66,8 @@ struct StoredPairing {
     int                    round             = 0;
     int64_t                white_player_id   = 0;
     std::optional<int64_t> black_player_id;              ///< empty ⇔ bye
-    std::optional<int64_t> game_id;                      ///< empty until wired
+    std::optional<int64_t> game_id;                      ///< live runtime room id
+    std::optional<int64_t> replay_game_id;               ///< durable games.id after save
     std::string            result;                       ///< "pending" | "1-0" | "0-1" | "1/2-1/2" | "bye"
     std::string            result_source;
     int64_t                result_recorded_at_unix = 0;
@@ -102,7 +103,8 @@ CreateTournamentResult create_tournament(storage::Database& db,
                                          int64_t created_by,
                                          int64_t registration_deadline_unix = 0,
                                          int64_t first_round_starts_at_unix = 0,
-                                         int round_duration_seconds = 3600);
+                                         int round_duration_seconds = 3600,
+                                         const std::string& format = "swiss");
 
 /// Load a tournament by id. Returns nullopt if missing.
 std::optional<StoredTournament> find_tournament(storage::Database& db, int64_t id);
@@ -204,6 +206,8 @@ std::optional<StoredPairing> find_pairing(storage::Database& db, int64_t pairing
 std::vector<StoredPairing> get_live_pending_pairings(storage::Database& db);
 int64_t max_pairing_game_id(storage::Database& db);
 bool set_pairing_game_id(storage::Database& db, int64_t pairing_id, int64_t game_id);
+bool set_pairing_replay_game_id(storage::Database& db, int64_t pairing_id,
+                                int64_t replay_game_id);
 
 /// Set the result column on one pairing row (identified by id).
 /// The allowed values are the schema's CHECK set. Returns false if the

@@ -148,6 +148,7 @@ export const Outbound = {
             access_token: accessToken,
             name,
             rounds,
+            format: schedule?.format || 'swiss',
             time_base: timeBaseSec,
             time_inc:  timeIncSec,
         };
@@ -255,6 +256,8 @@ const normMoveMade = (raw) => ({
 const normGameState = (raw) => ({
     type: 'game_state',
     gameId:  raw.game_id,
+    whiteUsername: String(raw.white_username || ''),
+    blackUsername: String(raw.black_username || ''),
     fen:     raw.fen,
     state:   raw.state,               // 'waiting' | 'in_progress' | 'finished'
     whiteMs: Number(raw.white_time),
@@ -546,6 +549,9 @@ const normStanding = (s) => ({
     username:     String(s.username || 'Unknown player'),
     elo:          Number(s.elo || 0),
     score:        Number(s.score || 0),
+    roundWins:    Number(s.round_wins || 0),
+    roundDraws:   Number(s.round_draws || 0),
+    rank:         Number(s.rank || 0),
     buchholz:     Number(s.buchholz || 0),
     withdrawn:    !!s.withdrawn,
     whitesPlayed: Number(s.whites_played || 0),
@@ -560,6 +566,7 @@ const normPairing = (p) => ({
     blackPlayerId:  p.black_player_id == null ? null : p.black_player_id,
     blackUsername:  p.black_username == null ? null : String(p.black_username),
     gameId:         p.game_id         == null ? null : p.game_id,
+    replayGameId:   p.replay_game_id  == null ? null : p.replay_game_id,
     result:         String(p.result || 'pending'),
     resultSource:   String(p.result_source || ''),
 });

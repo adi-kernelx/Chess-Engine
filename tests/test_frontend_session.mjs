@@ -126,7 +126,107 @@ function persistSession(refreshToken = 'refresh-1') {
     assert.equal(session.refreshToken, 'refresh-3');
 }
 
+// If another tab rotates the token after this tab sent its request, a delayed
+// invalid_refresh for the predecessor must retry the newer shared token rather
+// than signing the account out.
+{
+    localStorage.clear();
+    persistSession('predecessor');
+    const socket = new FakeSocket();
+    const session = new Session(socket);
+    socket.emitState('connected');
+    assert.equal(socket.sent.at(-1).refresh_token, 'predecessor');
+
+    localStorage.setItem('chess:refreshToken', JSON.stringify('successor'));
+    socket.emit('auth_error', { code: 'invalid_refresh' });
+    await Promise.resolve();
+    assert.equal(socket.sent.at(-1).refresh_token, 'successor');
+    assert.equal(session.hasRefreshToken, true);
+
+    socket.emit('auth_ok', {
+        access_token: 'access-new', refresh_token: 'successor-2',
+        username: 'adi', elo: 800,
+    });
+    await session.whenReady();
+    assert.equal(session.isAuthenticated, true);
+    assert.equal(session.refreshToken, 'successor-2');
+}
+
+// An authenticated action can actively finish restoration when the first
+// startup attempt has not produced an access token yet.
+{
+    localStorage.clear();
+    persistSession('action-refresh');
+    const socket = new FakeSocket();
+    const session = new Session(socket);
+    const tokenPromise = session.accessTokenForRequest();
+    await Promise.resolve();
+    assert.equal(socket.sent.at(-1).refresh_token, 'action-refresh');
+    socket.emit('auth_ok', {
+        access_token: 'action-access', refresh_token: 'action-successor',
+        username: 'adi', elo: 800, access_expires_in: 900,
+    });
+    assert.equal(await tokenPromise, 'action-access');
+    assert.equal(session.isAuthenticated, true);
+    await session.logout();
+}
+
 assert.ok(navigator.locks.requests >= 2,
           'session restoration should use the cross-tab refresh lock');
 
 console.log('frontend session restoration tests passed');
+
+// A slow startup refresh must not release signed-out screens. Retry remains
+// gated, and a successful retry preserves the requested route/account.
+{
+    const savedSetTimeout = globalThis.setTimeout;
+    const savedClearTimeout = globalThis.clearTimeout;
+    const timers = new Map();
+    let timerId = 0;
+    globalThis.setTimeout = (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; };
+    globalThis.clearTimeout = id => timers.delete(id);
+    try {
+        localStorage.clear(); persistSession('slow-refresh');
+        const socket = new FakeSocket();
+        const session = new Session(socket);
+        let ready = false;
+        session.whenReady().then(() => { ready = true; });
+        socket.emitState('connected');
+        const timeout = [...timers.values()].find(t => t.delay === 4000);
+        assert.ok(timeout); timeout.fn();
+        for (let i = 0; i < 10; ++i) await Promise.resolve();
+        assert.equal(ready, false);
+        assert.equal(session.isRestoring, true);
+        assert.equal(session.hasRefreshToken, true);
+        const retry = [...timers.values()].find(t => t.delay === 1500);
+        assert.ok(retry); retry.fn();
+        for (let i = 0; i < 10; ++i) await Promise.resolve();
+        assert.equal(socket.sent.length, 2);
+        socket.emit('auth_ok', { access_token: 'restored', refresh_token: 'next', username: 'adi', elo: 800 });
+        await session.whenReady();
+        assert.equal(session.isAuthenticated, true);
+        assert.equal(session.isRestoring, false);
+    } finally {
+        globalThis.setTimeout = savedSetTimeout;
+        globalThis.clearTimeout = savedClearTimeout;
+    }
+}
+
+// Navigating during Connecting/restoration must not bypass main's startup gate.
+{
+    const handlers = new Map();
+    globalThis.window = { addEventListener: (name, fn) => handlers.set(name, fn) };
+    globalThis.location = { hash: '#/tournaments/42' };
+    globalThis.document = { title: '' };
+    const { Router } = await import('../frontend/js/ui/router.js');
+    const router = new Router({ firstChild: null }, {});
+    let mounts = 0;
+    router.add('/spectate/:id', () => ({ mount() { mounts++; }, unmount() {} }));
+    location.hash = '#/spectate/77';
+    handlers.get('hashchange')();
+    assert.equal(mounts, 0);
+    router.start();
+    assert.equal(mounts, 1);
+    assert.equal(router.current.path, '/spectate/77');
+}
+console.log('frontend delayed-restoration and early-navigation tests passed');

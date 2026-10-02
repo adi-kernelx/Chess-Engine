@@ -298,13 +298,17 @@ export class SpectateWatchScreen extends Screen {
             else this._beginSpectating();
         }));
         this._beginSpectating();
+        this.interval(() => {
+            if (!this._liveJoined && !this._spectateTerminalError) void this._beginSpectating();
+        }, 2000);
     }
 
     async _beginSpectating() {
         if (this._liveJoined || this._spectateStarting || this._ended || !this.root) return;
 
         const session = this.ctx.session;
-        const token = session && session.accessToken;
+        const token = session && await session.accessTokenForRequest();
+        if (!this.root || this._ended || this._liveJoined || this._spectateStarting) return;
         if (!token) {
             if (session && session.hasRefreshToken) {
                 this._status.textContent = 'Restoring your session…';
@@ -324,15 +328,29 @@ export class SpectateWatchScreen extends Screen {
         this._spectateStarting = true;
         this._status.textContent = 'Joining live view…';
 
-        const { data, live } = await this.ctx.capability.request(
-            this.ctx.Outbound.spectate(token, this._gameId),
-            { expect: 'spectate_start', timeout: 5000, demo: () => null, failOnError: true },
-        );
-        this._spectateStarting = false;
+        let response;
+        try {
+            response = await this.ctx.capability.request(
+                this.ctx.Outbound.spectate(token, this._gameId),
+                { expect: 'spectate_start', timeout: 5000, demo: () => null, failOnError: true });
+        } catch (_) {
+            response = { live: false };
+        } finally {
+            this._spectateStarting = false;
+        }
+        const { data, live, error } = response;
         if (!this.root) return;
         if (!live || !data) {
-            this._status.textContent = 'Unable to spectate this game.';
-            this.ctx.toast.error('The live spectator request failed.', { duration: 3200 });
+            const message = error && error.message;
+            if (message === 'Game is not live') {
+                this._status.textContent = 'Waiting for both players to join. The live view will open automatically.';
+            } else if (!message) {
+                this._status.textContent = 'Reconnecting to the live view…';
+            } else {
+                this._spectateTerminalError = true;
+                this._status.textContent = message;
+                this.ctx.toast.error(message, { duration: 3200 });
+            }
             return;
         }
 

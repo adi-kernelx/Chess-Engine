@@ -28,12 +28,11 @@
  *
  * CONNECTION POOLING — deliberately absent.
  *
- * Supabase's session-mode pooler already gives us one; adding a client-side
- * pool on top would race against it and complicate exactly the shutdown
- * behaviour we want to stay boring. The single-instance Cloud Run policy
- * (`--max-instances=1`) means one server process holds one connection, and
- * that's fine — Phase 7's traffic is dominated by Argon2id CPU, not by
- * database round trips.
+ * This wrapper owns one PGconn and serializes its operations/transactions.
+ * A remote pooler does not make that single session execute SQL concurrently.
+ * Socket workers can now progress independently, but DB-heavy requests still
+ * contend here. A bounded client-side pool with transaction-pinned leases is
+ * a separate scaling step; removing this mutex would corrupt libpq traffic.
  *
  * ENVIRONMENT NOT ARGUMENTS
  *

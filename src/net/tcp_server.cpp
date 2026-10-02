@@ -140,7 +140,7 @@ void TcpServer::handle_new_connection() {
 
         {
             std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
-            auto conn = std::make_unique<Connection>(client_fd, std::string(ip_str));
+            auto conn = std::make_shared<Connection>(client_fd, std::string(ip_str));
             // LLD-1: stamp a fresh, never-reused generation on this
             // connection. A stale ConnectionHandle for the same fd but
             // an earlier generation now compares unequal to the current
@@ -156,17 +156,16 @@ void TcpServer::handle_new_connection() {
 
         if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_fd, &event) < 0) {
             core::Logger::error("net", "TcpServer", "epoll_ctl failed for client_fd");
-            close_connection(client_fd);
+            close_connection(acquire_connection(client_fd));
         }
     }
 }
 
-void TcpServer::handle_client_data(int client_fd) {
-    std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
-    auto it = connections_.find(client_fd);
-    if (it == connections_.end()) return;
-    
-    Connection* conn = it->second.get();
+void TcpServer::handle_client_data(const std::shared_ptr<Connection>& connection) {
+    if (!connection) return;
+    std::lock_guard<std::recursive_mutex> lock(connection->processing_mutex);
+    if (connection->retired) return;
+    Connection* conn = connection.get();
     
     // Read all available data from the socket
     while (true) {
@@ -176,11 +175,11 @@ void TcpServer::handle_client_data(int client_fd) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
             } else {
-                close_connection(client_fd);
+                close_connection(connection);
                 return;
             }
         } else if (bytes == 0) {
-            close_connection(client_fd);
+            close_connection(connection);
             return;
         }
     }
@@ -209,7 +208,7 @@ void TcpServer::handle_client_data(int client_fd) {
             if (r == ReadFrameResult::TooLarge) {
                 core::Logger::warn("net", "WebSocket",
                     "Oversized frame from " + conn->get_ip() + " — closing");
-                close_connection(client_fd);
+                close_connection(connection);
                 return;
             }
             // A valid complete frame of any opcode proves liveness. This also
@@ -247,7 +246,7 @@ void TcpServer::handle_client_data(int client_fd) {
                         int written = conn->write_to_socket();
                         if (written <= 0) break;
                     }
-                    close_connection(client_fd);
+                    close_connection(connection);
                     return;
                 case WsOpcode::PONG:
                     conn->mark_pong_received(Connection::HeartbeatClock::now());
@@ -267,7 +266,7 @@ void TcpServer::handle_client_data(int client_fd) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
             } else {
-                close_connection(client_fd);
+                close_connection(connection);
                 return;
             }
         }
@@ -281,16 +280,32 @@ void TcpServer::handle_client_data(int client_fd) {
     if (conn->write_buffer_overflowed()) {
         core::Logger::warn("net", "TcpServer",
             "Closing " + conn->get_ip() + " — write buffer overflow");
-        close_connection(client_fd);
+        close_connection(connection);
     }
 }
 
-void TcpServer::close_connection(int client_fd) {
-    // Note: caller must already hold connections_mutex_
+void TcpServer::close_connection(const std::shared_ptr<Connection>& connection) {
+    if (!connection) return;
+    std::lock_guard<std::recursive_mutex> processing(connection->processing_mutex);
+    if (connection->retired) return;
+    connection->retired = true;
+    const int client_fd = connection->get_fd();
+    {
+        std::lock_guard<std::recursive_mutex> registry(connections_mutex_);
+        const auto it = connections_.find(client_fd);
+        if (it == connections_.end() || it->second != connection) return;
+        connections_.erase(it);
+        epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, nullptr);
+    }
     if (disconnect_cb_) {
         disconnect_cb_(client_fd);
     }
-    connections_.erase(client_fd);
+}
+
+std::shared_ptr<Connection> TcpServer::acquire_connection(int fd) {
+    std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
+    const auto it = connections_.find(fd);
+    return it == connections_.end() ? nullptr : it->second;
 }
 
 Connection* TcpServer::get_connection(int fd) {
@@ -301,16 +316,23 @@ Connection* TcpServer::get_connection(int fd) {
 }
 
 void TcpServer::run_connection_maintenance() {
-    std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
+    std::vector<std::shared_ptr<Connection>> snapshot;
+    {
+        std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
+        for (const auto& entry : connections_) snapshot.push_back(entry.second);
+    }
     const auto now = Connection::HeartbeatClock::now();
-    std::vector<int> stale_fds;
+    std::vector<std::shared_ptr<Connection>> stale_connections;
 
-    for (auto& [fd, owned] : connections_) {
+    for (auto& owned : snapshot) {
+        // A busy application's SQL must not stall accept/epoll/other sockets.
+        std::unique_lock<std::recursive_mutex> processing(owned->processing_mutex, std::try_to_lock);
+        if (!processing.owns_lock() || owned->retired) continue;
         Connection& conn = *owned;
         if (!conn.is_upgraded()) continue;
 
         if (conn.heartbeat_expired(now, HEARTBEAT_TIMEOUT)) {
-            stale_fds.push_back(fd);
+            stale_connections.push_back(owned);
             continue;
         }
 
@@ -323,18 +345,27 @@ void TcpServer::run_connection_maintenance() {
             const int written = conn.write_to_socket();
             if (written > 0) continue;
             if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
-            stale_fds.push_back(fd);
+            stale_connections.push_back(owned);
             break;
         }
 
-        if (conn.write_buffer_overflowed()) stale_fds.push_back(fd);
+        if (conn.write_buffer_overflowed()) stale_connections.push_back(owned);
     }
 
-    for (const int fd : stale_fds) {
-        if (connections_.find(fd) == connections_.end()) continue;
+    for (const auto& connection : stale_connections) {
         core::Logger::warn("net", "TcpServer",
             "Closing unresponsive WebSocket connection (heartbeat timeout)");
-        close_connection(fd);
+        close_connection(connection);
+    }
+}
+
+void TcpServer::send_text(int fd, const std::string& frame) {
+    const auto owned = acquire_connection(fd);
+    if (!owned) return;
+    auto& conn = *owned;
+    WebSocket::write_frame(conn, WsOpcode::TEXT, frame);
+    while (conn.has_data_to_write()) {
+        if (conn.write_to_socket() <= 0) break;
     }
 }
 
@@ -359,27 +390,45 @@ void TcpServer::run() {
             } else {
                 int client_fd = events[i].data.fd;
                 uint32_t ev = events[i].events;
+                const auto connection = acquire_connection(client_fd);
+                if (!connection) continue;
 
                 if (ev & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
-                    std::lock_guard<std::recursive_mutex> lock(connections_mutex_);
-                    close_connection(client_fd);
+                    pool_.submit([this, connection] { close_connection(connection); });
                 } else if (ev & EPOLLIN) {
                     // Offload data processing to the thread pool.
                     // The epoll loop stays free to handle other events.
-                    pool_.submit([this, client_fd]() {
-                        handle_client_data(client_fd);
+                    pool_.submit([this, connection]() {
+                        handle_client_data(connection);
                     });
                 } else if (ev & EPOLLOUT) {
-                    pool_.submit([this, client_fd]() {
-                        handle_client_data(client_fd);
+                    pool_.submit([this, connection]() {
+                        handle_client_data(connection);
                     });
                 }
             }
         }
 
         if (running_) run_connection_maintenance();
-        if (running_ && maintenance_cb_) maintenance_cb_();
+        if (running_ && maintenance_cb_) {
+            if (maintenance_task_.valid()
+                && maintenance_task_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                maintenance_task_.get();
+            }
+            if (!maintenance_task_.valid()) {
+                maintenance_task_ = std::async(std::launch::async, [this] {
+                    try { maintenance_cb_(); }
+                    catch (const std::exception& e) {
+                        core::Logger::error("net", "TcpServer", "Maintenance failed: " + std::string(e.what()));
+                    }
+                    catch (...) {
+                        core::Logger::error("net", "TcpServer", "Maintenance failed with an unknown exception");
+                    }
+                });
+            }
+        }
     }
+    if (maintenance_task_.valid()) maintenance_task_.get();
 }
 
 } // namespace net

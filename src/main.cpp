@@ -137,6 +137,12 @@ int main() {
     game::RoomManager  room_mgr;
     game::Matchmaker   matchmaker(room_mgr);
     game::GameHandler  game_handler(room_mgr, matchmaker);
+    game_handler.set_background_executor([&pool](std::function<void()> task) {
+        pool.submit(std::move(task));
+    });
+    game_handler.set_foreign_sender([&server](int fd, const std::string& frame) {
+        server.send_text(fd, frame);
+    });
 
     game_handler.set_connection_lookup([&server](int fd) -> net::Connection* {
         return server.get_connection(fd);

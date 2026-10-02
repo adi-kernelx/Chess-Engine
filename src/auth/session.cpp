@@ -107,12 +107,16 @@ SessionTokens refresh_session(Database& db, const TokenSigner& signer,
         }
 
         // The previous response was probably lost during navigation/reload.
-        // Replace (rather than branch from) the active successor so the family
-        // still has exactly one usable refresh token.
-        auto del = db.exec(
-            "DELETE FROM sessions WHERE family_id=$1::uuid AND rotated=FALSE",
-            {Param::text(family)});
-        if (!del.ok) { outcome = RefreshOutcome::DatabaseError; return t; }
+        // Retain the superseded successor as a bounded recovery tripwire.
+        // Deleting it makes a delayed, legitimately delivered auth_ok carry
+        // an unknown token, causing the very next reload to sign the user out.
+        // There is still one unrotated token; all predecessors keep the same
+        // narrow retry/reuse-revocation policy.
+        auto supersede = db.exec(
+            "UPDATE sessions SET rotated=TRUE, rotated_at=to_timestamp($2::bigint)"
+            " WHERE family_id=$1::uuid AND rotated=FALSE",
+            {Param::text(family), Param::int64(now_unix)});
+        if (!supersede.ok) { outcome = RefreshOutcome::DatabaseError; return t; }
     }
     if (expires_at <= now_unix) {
         auto del = db.exec("DELETE FROM sessions WHERE token_hash=$1", {Param::text(hash)});

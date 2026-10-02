@@ -48,6 +48,7 @@ export class GameScreen extends Screen {
         this._fen = START_FEN;
         this._moves = [];               // [{ san, thinkMs }]
         this._state = 'in_progress';    // waiting | in_progress | finished
+        this._stateReady = false;
         this._result = null;
         this._reason = null;
         this._sideToMove = 'w';         // derived from fen
@@ -161,9 +162,9 @@ export class GameScreen extends Screen {
         // We always show OPPONENT at the top of the screen (which is
         // the top of the board when whiteOnBottom matches myColor='w').
         return h('div', { class: 'player-bar' },
-            h('div', { class: 'avatar' }, initials(displayName)),
+            h('div', { class: 'avatar', ref: el => { if (!isMe) this._oppAvatarEl = el; } }, initials(displayName)),
             h('div', { class: 'player-bar__name-block' },
-                h('div', { class: 'player-bar__name' }, displayName + (this._isAI && !isMe ? ' (AI)' : '')),
+                h('div', { class: 'player-bar__name', ref: el => { if (!isMe) this._oppNameEl = el; } }, displayName + (this._isAI && !isMe ? ' (AI)' : '')),
                 h('div', { class: 'player-bar__captured', ref: el => isMe ? (this._myCaptured = el) : (this._oppCaptured = el) })
             ),
             h('div', { class: 'clock', ref: el => isMe ? (this._myClockEl = el) : (this._oppClockEl = el) },
@@ -225,6 +226,7 @@ export class GameScreen extends Screen {
         this.sub(socket.on('move_made',   raw => this._onMoveMade(Inbound.normalize(raw))));
         this.sub(socket.on('move_rejected', raw => this._onMoveRejected(Inbound.normalize(raw))));
         this.sub(socket.on('game_state', raw => this._onGameState(Inbound.normalize(raw))));
+        this.sub(socket.on('tournament_game_ready', raw => this._onTournamentReady(Inbound.normalize(raw))));
         this.sub(socket.on('active_game', raw => this._onActiveGame(Inbound.normalize(raw))));
         this.sub(socket.on('game_over',  raw => this._onGameOver(Inbound.normalize(raw))));
         this.sub(socket.on('opponent_disconnected', raw => this._onOpponentDisconnected(raw)));
@@ -253,6 +255,13 @@ export class GameScreen extends Screen {
 
         // Clock ticker.
         this._tickHandle = this.interval(() => this._tickClocks(), 100);
+        // A newly materialized tournament room may reach the game route while
+        // auth/database work is briefly busy. Retry the idempotent snapshot
+        // until the first authoritative state arrives instead of leaving the
+        // board inert after one lost or delayed request.
+        this.interval(() => {
+            if (!this._stateReady && this._state !== 'finished') this._requestState();
+        }, 1000);
 
         // G2: make this game's URL shareable. If the route was #/game (no id)
         // but we have a real gameId in the store, rewrite the hash silently
@@ -362,8 +371,23 @@ export class GameScreen extends Screen {
         this._requestState();
     }
 
+    _onTournamentReady(msg) {
+        if (Number(msg.gameId) !== Number(this._gameId)) return;
+        this._requestState();
+    }
+
     _onGameState(msg) {
+        if (Number(msg.gameId) !== Number(this._gameId)) return;
         if (this._state === 'finished' && msg.state !== 'finished') return;
+        this._stateReady = true;
+        const opponent = this._myColor === 'w' ? msg.blackUsername : msg.whiteUsername;
+        if (opponent) {
+            this._opponent = opponent;
+            if (this._oppNameEl) this._oppNameEl.textContent = opponent + (this._isAI ? ' (AI)' : '');
+            if (this._oppAvatarEl) this._oppAvatarEl.textContent = initials(opponent);
+            this._game = { ...this._game, opponent };
+            if (this.ctx.store.game) this.ctx.store.setGame({ ...this.ctx.store.game, opponent });
+        }
         // The authoritative snapshot. Rebuilds everything.
         this._fen = msg.fen;
         this._state = msg.state;
@@ -727,15 +751,13 @@ export class GameScreen extends Screen {
                 class: 'btn btn--ghost',
                 onclick: () => this.renderer.flip(),
             }, 'Flip board'));
+        } else if (this._state === 'waiting') {
+            this._actionsEl.appendChild(h('div', { role: 'status' }, 'Waiting for both players to join. Game controls appear when play starts.'));
         } else if (this._tournamentId) {
             this._actionsEl.appendChild(h('button', {
                 class: 'btn btn--primary',
                 onclick: () => this.ctx.router.go(`/tournaments/${this._tournamentId}`),
             }, 'Back to tournament'));
-            this._actionsEl.appendChild(h('button', {
-                class: 'btn',
-                onclick: () => this.ctx.router.go(`/replay/${this._gameId}`),
-            }, 'Open replay'));
         } else {
             if (this._incomingRematchOffer) {
                 this._actionsEl.appendChild(h('div', {

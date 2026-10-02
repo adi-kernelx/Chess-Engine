@@ -5,27 +5,17 @@
  * no engine, no I/O. Callers hand in the current standings plus history,
  * and get back one round's pairings.
  *
- * WHY MONRAD RATHER THAN "TEXTBOOK DUTCH"
+ * PROJECT PAIRING POLICY (RATING-FIRST, NOT FIDE DUTCH)
  *
- * Two pairing families are common under the Swiss umbrella. The Dutch
- * system (used by FIDE) splits each score group into two halves and pairs
- * top-of-half against bottom-of-half; when a group has odd size, the
- * lowest-scoring player is "floated" down and re-paired against the top
- * of the next group. That produces a specific, replicable seating chart
- * but is fiddly to get right: floaters can cascade, and colour
- * enforcement adds another layer of exception cases.
+ * Requested policy: minimize the sum of absolute rating differences over
+ * the whole round, after minimizing rematches. Score differences are the
+ * next tiebreak. This intentionally differs from standard score-first Swiss
+ * grouping. Ratings are frozen at registration, so results changing global
+ * ELO do not change the event's seeds mid-tournament.
  *
- * The Monrad system takes the same score-first sort and pairs greedily
- * from the top: the highest-scoring unpaired player meets the next
- * eligible opponent (skipping rematches). It is provably a valid Swiss —
- * score-monotone, rematch-avoiding when possible — and is what USCF and
- * many amateur tournaments actually use. It is also short enough to
- * read in one sitting and to test exhaustively for small N.
- *
- * The plan's acceptance test is an 8-player, 4-round Swiss with a
- * no-rematch invariant. 4 rounds × 4 pairings = 16 pairing slots; the
- * unique-pair count is C(8,2) = 28. Any correct Swiss variant satisfies
- * the invariant with slack to spare. Monrad is enough.
+ * An exact memoized branch-and-bound search is appropriate for the small
+ * local fields this project targets. Its worst case is exponential; larger
+ * events should use a polynomial minimum-weight general matching solver.
  *
  * COLOUR BALANCE
  *
@@ -62,7 +52,7 @@ namespace tournament {
 /// algorithm reads live here — no name, no db metadata, no timestamps.
 struct PlayerStanding {
     int64_t player_id      = 0;   ///< Postgres players.id — pass-through identity
-    int     elo            = 1200;///< Initial rating at tournament start (tiebreak)
+    int     elo            = 1200;///< Initial tournament rating (matching cost)
     double  score          = 0.0; ///< Current running score (1 win, 0.5 draw, 0 loss/bye counts as 1)
     int     whites_played  = 0;   ///< How many times this player held White so far
     bool    received_bye   = false;///< True if this player has already had a bye
@@ -99,14 +89,17 @@ struct PlayerPair {
 /// `standings` should hold every registered player (withdrawn ones will
 /// be filtered inside). `played` is the set of unordered pairs that
 /// have already met in this tournament — the algorithm avoids them
-/// where possible, and only reuses one when every remaining opponent
-/// has already been faced.
+/// where possible. If a full fresh round is impossible, the fewest repeated
+/// pairings are used. Within that constraint the total rating gap is minimal.
 ///
 /// The returned vector may include one bye pairing (last, by
-/// convention). Ordering of non-bye pairings is deterministic given
-/// the inputs: the top-scoring pair comes first.
+/// convention). Ordering and colour assignment are deterministic given the
+/// inputs; the highest-seeded remaining player is emitted first.
 std::vector<Pairing> pair_swiss_round(const std::vector<PlayerStanding>& standings,
-                                      const std::set<PlayerPair>& played);
+                                      const std::set<PlayerPair>& played,
+                                      const std::set<PlayerPair>& forbidden = {});
+// With hard forbidden edges (custom draw cap), maximize playable pairs first;
+// unmatched players advance by bye. Swiss callers pass no forbidden edges.
 
 /// True if `a` and `b` have already met (helper for tests).
 inline bool have_played(const std::set<PlayerPair>& played,

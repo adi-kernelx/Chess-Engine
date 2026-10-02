@@ -995,6 +995,12 @@ Total: ~12 weeks at 4-5 hours/day
 
 ## Verification Plan
 
+Local RC extension (2026-10-03): tournaments now offer fixed-round Swiss or
+custom winners-advance with dynamic stages, a two-draw same-pair cap and
+win-count ranking. This reuses the live-game stack; see
+`tournament_live_play_implementation_plan.md` and manual checklist Section 14.6.
+Local verification remains required before deployment.
+
 ### Automated Tests (run on every commit)
 ```bash
 cd build && ctest --output-on-failure

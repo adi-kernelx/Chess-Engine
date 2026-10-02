@@ -74,7 +74,7 @@ void GameHandler::register_handlers(protocol::RequestPipeline& pipeline) {
     //   the (idempotent) persist path. Unauthenticated human seats
     //   short-circuit; AI completions are stored as unrated replays.
     completion_service_ = std::make_shared<application::GameCompletionService>(
-        *game_store_, tournament_runtime_service_.get());
+        *game_store_, tournament_runtime_service_.get(), background_executor_);
     room_mgr_.set_default_listener(completion_service_);
 
     // ── LLD-2.2 · 5.2: query / spectator / replay family on pipeline ──
@@ -127,6 +127,7 @@ void GameHandler::expire_disconnected_games() {
 // ============================================================
 
 void GameHandler::send_json_to_fd(int fd, const std::string& json_str) {
+    if (foreign_sender_) { foreign_sender_(fd, json_str); return; }
     if (!connection_lookup_) return;
     net::Connection* conn = connection_lookup_(fd);
     if (conn) {

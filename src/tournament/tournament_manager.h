@@ -62,6 +62,9 @@ namespace tournament {
 /// One row of the standings view. Fields are what a scoreboard consumer
 /// (WebSocket or UI) needs, no more.
 struct StandingRow {
+    int     round_wins = 0;
+    int     round_draws = 0;
+    int     rank = 0;
     int64_t player_id      = 0;
     int     initial_elo    = 0;
     double  score          = 0.0;

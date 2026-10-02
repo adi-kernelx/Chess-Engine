@@ -109,7 +109,8 @@ code, pre, .mono {
     border: 0;
 }
 
-.hidden { display: none !important; }
+/* Author display:flex/grid rules must not override semantic hidden states. */
+.hidden, [hidden] { display: none !important; }
 
 /* ── App frame ── */
 .app {

@@ -35,10 +35,32 @@ void test(const std::string& name, const std::function<bool()>& fn) {
 }
 
 struct RecordingStore final : ports::GameStore {
+    explicit RecordingStore(Database* database = nullptr) : db(database) {}
+    Database* db = nullptr;
     int calls = 0;
     bool capable() const override { return true; }
-    ports::SaveGameOutcome save_completed_game(const CompletedGame&) override {
-        ports::SaveGameOutcome out; out.game_id = ++calls; return out;
+    ports::SaveGameOutcome save_completed_game(const CompletedGame& game) override {
+        ++calls;
+        ports::SaveGameOutcome out;
+        if (!db) { out.game_id = calls; return out; }
+        auto inserted = db->exec(
+            "INSERT INTO games(white_id,black_id,moves,result,termination,white_elo,black_elo,"
+            "time_control,started_at,ended_at,move_count,completion_uuid,rated) "
+            "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::timestamptz,$10::timestamptz,$11,$12,TRUE) "
+            "RETURNING id",
+            {Param::int64(game.white_id), Param::int64(game.black_id),
+             Param::text(game.moves), Param::text(game.result), Param::text(game.termination),
+             Param::int64(game.white_elo), Param::int64(game.black_elo),
+             Param::text(game.time_control), Param::text(game.started_at),
+             Param::text(game.ended_at), Param::int64(game.move_count),
+             Param::text(game.completion_uuid)});
+        if (!inserted.ok || inserted.empty()) {
+            out.code = classify(inserted);
+            out.error = inserted.error;
+            return out;
+        }
+        out.game_id = std::stoll(inserted.first().at(0));
+        return out;
     }
     ports::SaveCheatReportOutcome save_cheat_report(
         int64_t, int64_t, const std::string&,
@@ -96,6 +118,8 @@ bool prepare_schema(Database& db) {
         {"0004_lld4_completion_uuid", "0004_lld4_completion_uuid.sql"},
         {"0009_persist_unrated_ai_games", "0009_persist_unrated_ai_games.sql"},
         {"0010_live_tournament_runtime", "0010_live_tournament_runtime.sql"},
+        {"0012_tournament_replay_identity", "0012_tournament_replay_identity.sql"},
+        {"0013_winners_advance_tournaments", "0013_winners_advance_tournaments.sql"},
     };
     for (const auto& [version,file] : migrations) {
         if (!db.apply_migration(version,
@@ -128,6 +152,12 @@ int main() {
         if (!room->open_reserved() || room->get_state() != game::RoomState::WAITING) return false;
         auto black = room->bind_reserved_player(202, 2, 20);
         if (!black.ok || black.color != Color::BLACK || !black.started) return false;
+        if (!room->add_spectator(30) || room->spectator_count() != 1) return false;
+        auto spectator_move = room->submit_move(
+            30, chess::Squares::E2, chess::make_square(3, 4));
+        if (spectator_move.success || spectator_move.error != "You are not a player in this game") {
+            return false;
+        }
         return room->get_state() == game::RoomState::IN_PROGRESS
             && room->open_reserved() && room->get_state() == game::RoomState::IN_PROGRESS;
     });
@@ -177,6 +207,30 @@ int main() {
             && sink.results.back().second=="0-1";
     });
 
+    test("tournament checkmate returns before queued persistence and round updates", [] {
+        RecordingStore store;
+        RecordingTournamentSink sink;
+        std::vector<std::function<void()>> tasks;
+        auto completion = std::make_shared<GameCompletionService>(store, &sink,
+            [&](std::function<void()> task) { tasks.push_back(std::move(task)); });
+        game::RoomManager rooms;
+        rooms.set_default_listener(completion);
+        auto room = rooms.create_reserved_tournament_room(
+            7, 9, 101, "White", 1500, 202, "Black", 1450, game::TimeControl(60000, 0));
+        room->allow_reserved_player(101); room->allow_reserved_player(202);
+        room->bind_reserved_player(101, 1, 10); room->bind_reserved_player(202, 2, 20);
+        room->open_reserved();
+        // Fool's mate through precisely the same submit_move used in normal play.
+        if (!room->submit_move(10, make_square(1, 5), make_square(2, 5)).success
+            || !room->submit_move(20, make_square(6, 4), make_square(4, 4)).success
+            || !room->submit_move(10, make_square(1, 6), make_square(3, 6)).success) return false;
+        const auto mate = room->submit_move(20, make_square(7, 3), make_square(3, 7));
+        if (!mate.success || mate.game_status != GameStatus::CHECKMATE
+            || store.calls != 0 || !sink.results.empty() || tasks.size() != 1) return false;
+        tasks.front()();
+        return store.calls == 1 && sink.results.size() == 1 && sink.results[0].second == "0-1";
+    });
+
     if (!std::getenv("DATABASE_URL")) {
         std::cout << "DATABASE_URL not set — DB runtime integration skipped\n";
         std::cout << "Results: " << passed << " passed, " << failed << " failed\n";
@@ -196,8 +250,10 @@ int main() {
         std::vector<std::pair<int,std::string>> notifications;
         TournamentRuntimeService runtime(&db, rooms,
             [&](int fd, const std::string& frame) { notifications.push_back({fd,frame}); }, clock);
-        RecordingStore store;
-        auto completion = std::make_shared<GameCompletionService>(store, &runtime);
+        RecordingStore store(&db);
+        std::vector<std::function<void()>> tasks;
+        auto completion = std::make_shared<GameCompletionService>(store, &runtime,
+            [&](std::function<void()> task) { tasks.push_back(std::move(task)); });
         rooms.set_default_listener(completion);
 
         auto created = create_tournament(db, "Runtime Cup", 1, 60000, 0, white,
@@ -219,11 +275,16 @@ int main() {
         if (!room || room->get_state()!=game::RoomState::IN_PROGRESS
             || room->get_player_fd(Color::WHITE)!=10
             || room->get_player_fd(Color::BLACK)!=20) return false;
-        if (!room->resign(10) || store.calls != 1) return false;
+        if (!room->resign(10) || store.calls != 0 || tasks.size() != 1) return false;
+        auto before_save = find_pairing(db, pairings[0].id);
+        if (!before_save || before_save->result != "pending") return false;
+        tasks.front()();
+        if (store.calls != 1) return false;
         auto state = manager.get_state(created.id);
         if (!state || state->tournament.status!="completed"
             || state->all_pairings[0].result!="0-1"
-            || state->all_pairings[0].result_source!="game") return false;
+            || state->all_pairings[0].result_source!="game"
+            || state->all_pairings[0].replay_game_id != 1) return false;
         runtime.on_tournament_game_persisted(pairings[0].id,"0-1",1);
         state = manager.get_state(created.id);
         return state && state->standings[0].player_id==black
@@ -269,7 +330,7 @@ int main() {
         ports::FakeClock clock;
         game::RoomManager rooms;
         TournamentRuntimeService runtime(&db,rooms,[](int,const std::string&){},clock);
-        RecordingStore store;
+        RecordingStore store(&db);
         auto completion=std::make_shared<GameCompletionService>(store,&runtime);
         rooms.set_default_listener(completion);
         auto created=create_tournament(db,"Two Round Cup",2,60000,0,white,100,200,60);
@@ -338,6 +399,36 @@ int main() {
             && !rooms.is_tournament_player_reserved(white)
             && !rooms.is_tournament_player_reserved(black);
         return ok;
+    });
+
+    test("winners advance: shared draw controls persist two replays and joint final", [&] {
+        ports::FakeClock clock;
+        game::RoomManager rooms;
+        TournamentRuntimeService runtime(&db, rooms, [](int, const std::string&) {}, clock);
+        RecordingStore store(&db);
+        auto completion = std::make_shared<GameCompletionService>(store, &runtime);
+        rooms.set_default_listener(completion);
+        auto created = create_tournament(db, "Draw Final", 0, 60000, 0, white, 100, 200, 60, "winners_advance");
+        TournamentManager manager(db, clock);
+        if (!created.ok || !manager.join(created.id, white, 1500).ok
+            || !manager.join(created.id, black, 1450).ok || !manager.start(created.id, white).ok) return false;
+        for (int round = 1; round <= 2; ++round) {
+            AuthenticatedIdentity w{white, "RuntimeWhite", 1500}, b{black, "RuntimeBlack", 1450};
+            if (!runtime.check_in_and_bind(created.id, round, w, 70 + round * 2).ok
+                || !runtime.check_in_and_bind(created.id, round, b, 71 + round * 2).ok) return false;
+            clock.advance(std::chrono::seconds(round == 1 ? 200 : 60));
+            runtime.maintenance_tick();
+            const auto pairings = get_pairings_for_round(db, created.id, round);
+            if (pairings.size() != 1) return false;
+            auto room = rooms.find_room_by_pairing(pairings[0].id);
+            std::string draw_error;
+            if (!room || room->get_state() != game::RoomState::IN_PROGRESS
+                || !room->offer_draw(room->get_player_fd(Color::WHITE), draw_error)
+                || !room->respond_to_draw(room->get_player_fd(Color::BLACK), true, draw_error)) return false;
+            const auto stored = find_pairing(db, pairings[0].id);
+            if (!stored || stored->result != "1/2-1/2" || !stored->replay_game_id) return false;
+        }
+        return store.calls == 2 && find_tournament(db, created.id)->status == "completed";
     });
 
     std::cout << "Results: " << passed << " passed, " << failed << " failed\n";

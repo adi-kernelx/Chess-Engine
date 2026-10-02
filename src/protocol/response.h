@@ -65,6 +65,8 @@ struct MoveHistoryEntry {
 /// `result` and `reason` are emitted only when `state == "finished"`.
 struct GameStateResponse {
     int64_t                       game_id = 0;
+    std::string                   white_username;
+    std::string                   black_username;
     std::string                   fen;
     int                           white_time_ms = 0;
     int                           black_time_ms = 0;

@@ -19,8 +19,9 @@ export function formatClock(ms) {
 
 /** Seconds → "10+5" style time control label. */
 export function formatTimeControl(baseSec, incSec) {
-    const mins = baseSec >= 60 ? baseSec / 60 : baseSec;
-    const label = baseSec >= 60 ? mins.toString() : `${baseSec}s`;
+    const label = baseSec < 60 ? `${baseSec}s`
+        : baseSec % 60 === 0 ? String(baseSec / 60)
+            : `${Math.floor(baseSec / 60)}m ${baseSec % 60}s`;
     return `${label}+${incSec}`;
 }
 

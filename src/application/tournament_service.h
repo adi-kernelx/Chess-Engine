@@ -75,7 +75,8 @@ public:
                                   int64_t               registration_deadline_unix,
                                   int64_t               first_round_starts_at_unix,
                                   int                   round_duration_seconds,
-                                  MessageSink&          caller_sink);
+                                  MessageSink&          caller_sink,
+                                  const std::string&    format = "swiss");
 
     void join_tournament         (const RequestContext& ctx,
                                   int64_t               actor_db_player_id,

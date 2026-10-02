@@ -1098,3 +1098,10 @@ target_compile_definitions(test_game_completion PRIVATE
     CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_include_directories(test_game_completion PRIVATE src third_party)
 target_link_libraries(test_game_completion PRIVATE Threads::Threads OpenSSL::Crypto PostgreSQL::PostgreSQL)
+
+add_executable(test_transport_maintenance
+    tests/test_transport_maintenance.cpp
+    src/net/tcp_server.cpp src/net/connection.cpp src/net/websocket.cpp
+    src/core/logger.cpp src/concurrent/thread_pool.cpp)
+target_include_directories(test_transport_maintenance PRIVATE src third_party)
+target_link_libraries(test_transport_maintenance PRIVATE Threads::Threads OpenSSL::Crypto)

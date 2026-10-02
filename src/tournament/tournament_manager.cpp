@@ -200,7 +200,19 @@ ManagerResult TournamentManager::set_registration(int64_t tournament_id,
     if (open && clock_.unix_seconds() >= t->registration_deadline_unix) {
         out.error = "registration_deadline_passed"; return out;
     }
-    if (!set_registration_open(db_, tournament_id, open, clock_.unix_seconds())) {
+    const int64_t now = clock_.unix_seconds();
+    if (!set_registration_open(db_, tournament_id, open, now)) {
+        // The repository repeats the deadline predicate in the UPDATE so a
+        // close/reopen request racing the deadline cannot pass a stale read.
+        // Preserve the specific public error when that authoritative guard
+        // rejects the reopen.
+        if (open) {
+            auto latest = find_tournament(db_, tournament_id);
+            if (latest && now >= latest->registration_deadline_unix) {
+                out.error = "registration_deadline_passed";
+                return out;
+            }
+        }
         out.error = "set_registration_failed"; return out;
     }
     out.ok = true;
@@ -212,6 +224,25 @@ ManagerResult TournamentManager::check_in(int64_t tournament_id, int round,
     ManagerResult out;
     std::string error;
     if (round <= 0) { out.error = "invalid_round"; return out; }
+    const auto tournament = find_tournament(db_, tournament_id);
+    if (tournament && tournament->format == "winners_advance" && round > 1) {
+        bool eligible = false;
+        for (const auto& p : get_pairings_for_round(db_, tournament_id, round - 1)) {
+            const bool white = p.white_player_id == player_id;
+            const bool black = p.black_player_id && *p.black_player_id == player_id;
+            if ((white && (p.result == "1-0" || p.result == "bye" || p.result == "1/2-1/2"))
+                || (black && (p.result == "0-1" || p.result == "1/2-1/2"))) eligible = true;
+        }
+        if (!eligible) { out.error = "player_eliminated"; return out; }
+    }
+    for (const auto& pairing : get_pairings_for_round(db_, tournament_id, round)) {
+        if (pairing.white_player_id != player_id
+            && (!pairing.black_player_id || *pairing.black_player_id != player_id)) continue;
+        if (pairing.result == "bye") {
+            out.error = "round_already_resolved_for_player";
+            return out;
+        }
+    }
     if (!check_in_player(db_, tournament_id, round, player_id,
                          clock_.unix_seconds(), error)) {
         out.error = error; return out;
@@ -285,6 +316,8 @@ ManagerResult TournamentManager::report_result(int64_t pairing_id,
 ManagerResult TournamentManager::generate_round_pairings(int64_t tournament_id,
                                                          int round) {
     ManagerResult out;
+    const auto t = find_tournament(db_, tournament_id);
+    if (!t) { out.error = "tournament_not_found"; return out; }
 
     auto participants = get_participants(db_, tournament_id);
     if (participants.empty()) { out.error = "no_participants"; return out; }
@@ -295,8 +328,47 @@ ManagerResult TournamentManager::generate_round_pairings(int64_t tournament_id,
 
     auto all_pairings = get_pairings(db_, tournament_id);
     auto played = gather_played(all_pairings);
-
-    auto pairings = pair_swiss_round(pool, played);
+    std::vector<Pairing> forced;
+    std::set<PlayerPair> draw_capped;
+    if (t->format == "winners_advance" && round > 1) {
+        std::set<int64_t> advancing;
+        std::set<int64_t> replaying;
+        for (const auto& pr : all_pairings) {
+            if (pr.round != round - 1) continue;
+            if (pr.result == "bye" || pr.result == "1-0") advancing.insert(pr.white_player_id);
+            else if (pr.result == "0-1" && pr.black_player_id) advancing.insert(*pr.black_player_id);
+            else if (pr.result == "1/2-1/2" && pr.black_player_id) {
+                advancing.insert(pr.white_player_id);
+                advancing.insert(*pr.black_player_id);
+                int draws = 0;
+                for (const auto& past : all_pairings) {
+                    if (past.round >= round || past.result != "1/2-1/2" || !past.black_player_id) continue;
+                    if (PlayerPair(past.white_player_id, *past.black_player_id)
+                        == PlayerPair(pr.white_player_id, *pr.black_player_id)) ++draws;
+                }
+                if (draws < 2) {
+                    // Replay the same pair with colors reversed; other winners
+                    // may continue in parallel. No alternate gameplay stack.
+                    forced.push_back({*pr.black_player_id, pr.white_player_id, false});
+                    replaying.insert(pr.white_player_id);
+                    replaying.insert(*pr.black_player_id);
+                }
+            }
+        }
+        pool.erase(std::remove_if(pool.begin(), pool.end(), [&](const auto& p) {
+            return !advancing.count(p.player_id) || replaying.count(p.player_id);
+        }), pool.end());
+    }
+    if (t->format == "winners_advance") {
+        std::map<PlayerPair, int> draws;
+        for (const auto& p : all_pairings) {
+            if (p.result == "1/2-1/2" && p.black_player_id
+                && ++draws[PlayerPair(p.white_player_id, *p.black_player_id)] >= 2)
+                draw_capped.insert(PlayerPair(p.white_player_id, *p.black_player_id));
+        }
+    }
+    auto pairings = pair_swiss_round(pool, played, draw_capped);
+    pairings.insert(pairings.begin(), forced.begin(), forced.end());
     if (pairings.empty()) { out.error = "pair_swiss_round_failed"; return out; }
 
     for (const auto& pr : pairings) {
@@ -327,6 +399,7 @@ ManagerResult TournamentManager::generate_round_pairings(int64_t tournament_id,
 ManagerResult TournamentManager::maybe_advance_after_result(
         int64_t tournament_id, int round) {
     ManagerResult out;
+    [[maybe_unused]] auto operation = db_.acquire_operation();
 
     auto t = find_tournament(db_, tournament_id);
     if (!t) { out.error = "tournament_not_found"; return out; }
@@ -345,7 +418,45 @@ ManagerResult TournamentManager::maybe_advance_after_result(
         {storage::Param::int64(tournament_id), storage::Param::int64(round)});
     if (!completed_round.ok) { out.error = "complete_round_failed"; return out; }
 
-    if (round >= t->rounds) {
+    bool elimination_complete = false;
+    if (t->format == "winners_advance") {
+        // Ignore historical games: only the latest stage determines survivors.
+        std::set<int64_t> survivors;
+        for (const auto& p : pairings) {
+            if (p.round != round) continue;
+            if (p.result == "bye" || p.result == "1-0") survivors.insert(p.white_player_id);
+            if (p.result == "0-1" && p.black_player_id) survivors.insert(*p.black_player_id);
+            if (p.result == "1/2-1/2" && p.black_player_id) {
+                survivors.insert(p.white_player_id); survivors.insert(*p.black_player_id);
+            }
+        }
+        elimination_complete = survivors.size() <= 1;
+        if (!elimination_complete) {
+            std::map<PlayerPair, int> draws;
+            for (const auto& p : pairings) {
+                if (p.round <= round && p.result == "1/2-1/2" && p.black_player_id)
+                    ++draws[PlayerPair(p.white_player_id, *p.black_player_id)];
+            }
+            bool any_legal_game = false;
+            for (const auto a : survivors) for (const auto b : survivors) {
+                if (a < b && draws[PlayerPair(a, b)] < 2) any_legal_game = true;
+            }
+            elimination_complete = !any_legal_game;
+        }
+        if (!elimination_complete) {
+            const int next = round + 1;
+            const int64_t earliest = std::max(clock_.unix_seconds(), earliest_round_start(
+                t->first_round_starts_at_unix, t->round_duration_seconds, next));
+            auto allocated = db_.exec(
+                "WITH extended AS (UPDATE tournaments SET rounds=GREATEST(rounds,$2) WHERE id=$1 RETURNING id) "
+                "INSERT INTO tournament_rounds(tournament_id,round,earliest_start_at,check_in_closes_at) "
+                "SELECT id,$2,to_timestamp($3),to_timestamp($4) FROM extended ON CONFLICT DO NOTHING",
+                {storage::Param::int64(tournament_id), storage::Param::int64(next),
+                 storage::Param::int64(earliest), storage::Param::int64(earliest + t->round_duration_seconds)});
+            if (!allocated.ok) { out.error = "allocate_round_failed"; return out; }
+        }
+    }
+    if (elimination_complete || (t->format == "swiss" && round >= t->rounds)) {
         // Final round done — mark completed.
         if (!set_tournament_status(db_, tournament_id, "completed")) {
             out.error = "set_status_completed_failed"; return out;
@@ -383,6 +494,11 @@ ManagerResult TournamentManager::override_result(int64_t pairing_id,
     const int round = std::stoi(q.first().at(1));
     if (std::stoll(q.first().at(2)) != initiator_id) {
         out.error = "not_creator"; return out;
+    }
+    const auto tournament = find_tournament(db_, tid);
+    if (tournament && tournament->format == "winners_advance"
+        && (tournament->current_round > round || tournament->status == "completed")) {
+        out.error = "advancement_already_locked"; return out;
     }
     if (!audit_and_override_result(db_, pairing_id, initiator_id, result, reason)) {
         out.error = "override_failed"; return out;
@@ -505,6 +621,13 @@ std::optional<TournamentState> TournamentManager::get_state(int64_t tournament_i
 
     auto participants = get_participants(db_, tournament_id);
     auto buchholz     = compute_buchholz(participants, st.all_pairings);
+    std::map<int64_t, int> wins, draws;
+    for (const auto& p : st.all_pairings) {
+        if (!p.black_player_id) continue; // a bye is advancement, not a won game
+        if (p.result == "1-0") ++wins[p.white_player_id];
+        else if (p.result == "0-1") ++wins[*p.black_player_id];
+        else if (p.result == "1/2-1/2") { ++draws[p.white_player_id]; ++draws[*p.black_player_id]; }
+    }
 
     st.standings.reserve(participants.size());
     for (const auto& p : participants) {
@@ -516,17 +639,29 @@ std::optional<TournamentState> TournamentManager::get_state(int64_t tournament_i
         r.whites_played = p.whites_played;
         r.received_bye  = p.received_bye;
         r.withdrawn     = p.withdrawn;
+        r.round_wins = wins[p.player_id];
+        r.round_draws = draws[p.player_id];
         st.standings.push_back(r);
     }
 
     // Sort standings: score desc, Buchholz desc, elo desc, id asc.
     std::sort(st.standings.begin(), st.standings.end(),
-              [](const StandingRow& a, const StandingRow& b) {
+              [&](const StandingRow& a, const StandingRow& b) {
+                  if (t->format == "winners_advance") {
+                      if (a.round_wins != b.round_wins) return a.round_wins > b.round_wins;
+                      return a.player_id < b.player_id; // stable display, not a rank tiebreak
+                  }
                   if (a.score       != b.score)       return a.score       > b.score;
                   if (a.buchholz    != b.buchholz)    return a.buchholz    > b.buchholz;
                   if (a.initial_elo != b.initial_elo) return a.initial_elo > b.initial_elo;
                   return a.player_id < b.player_id;
               });
+    for (size_t i = 0; i < st.standings.size(); ++i) {
+        st.standings[i].rank = static_cast<int>(i + 1);
+        if (t->format == "winners_advance" && i > 0
+            && st.standings[i].round_wins == st.standings[i - 1].round_wins)
+            st.standings[i].rank = st.standings[i - 1].rank;
+    }
     return st;
 }
 

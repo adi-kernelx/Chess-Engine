@@ -1,5 +1,6 @@
 #include "application/tournament_runtime_service.h"
 
+#include <chrono>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -116,6 +117,9 @@ void TournamentRuntimeService::ensure_live_rooms() {
     rooms_.ensure_next_id_above(tournament::max_pairing_game_id(*db_));
     for (const auto& pairing : tournament::get_live_pending_pairings(*db_)) {
         auto room = rooms_.find_room_by_pairing(pairing.id);
+        // Seats/names/check-in eligibility are already in memory once play
+        // starts. Do not poll SQL or rebind a live game on every scheduler pass.
+        if (room && room->get_state() == game::RoomState::IN_PROGRESS) continue;
         if (!room) {
             auto tournament_row = tournament::find_tournament(*db_, pairing.tournament_id);
             if (!tournament_row || !pairing.black_player_id) continue;
@@ -153,6 +157,22 @@ void TournamentRuntimeService::ensure_live_rooms() {
 
 void TournamentRuntimeService::maintenance_tick() {
     if (!db_) return;
+    // TcpServer invokes its lightweight maintenance callback after every
+    // epoll cycle (as often as every packet, not merely every 250 ms timeout).
+    // Durable tournament maintenance performs several SQL queries, so running
+    // it on every callback can monopolize the one serialized PG connection and
+    // starve auth, directory, and game-state requests. One durable pass per
+    // second is precise enough for human-visible tournament deadlines.
+    std::unique_lock<std::mutex> lock(maintenance_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) return;
+    const auto now = clock_.steady_now();
+    if (maintenance_scheduled_ && now < next_maintenance_at_) return;
+    next_maintenance_at_ = now + std::chrono::seconds(1);
+    maintenance_scheduled_ = true;
+    run_maintenance_locked();
+}
+
+void TournamentRuntimeService::run_maintenance_locked() {
     tournament::TournamentManager manager(*db_, clock_);
     auto result = manager.maintenance_tick();
     if (!result.ok) {
@@ -229,8 +249,14 @@ void TournamentRuntimeService::on_disconnect(int connection_fd) {
 }
 
 void TournamentRuntimeService::on_tournament_game_persisted(
-        int64_t pairing_id, const std::string& result, int64_t /*persisted_game_id*/) {
+        int64_t pairing_id, const std::string& result, int64_t persisted_game_id) {
     if (!db_ || pairing_id <= 0) return;
+    if (!tournament::set_pairing_replay_game_id(*db_, pairing_id, persisted_game_id)) {
+        core::Logger::error("tournament", "TournamentRuntimeService",
+            "could not link pairing " + std::to_string(pairing_id)
+            + " to persisted replay " + std::to_string(persisted_game_id));
+        return;
+    }
     tournament::TournamentManager manager(*db_, clock_);
     auto recorded = manager.record_game_result(pairing_id, result);
     if (!recorded.ok) {
@@ -244,7 +270,12 @@ void TournamentRuntimeService::on_tournament_game_persisted(
         if (pairing->black_player_id)
             rooms_.release_tournament_player(*pairing->black_player_id);
     }
-    maintenance_tick();
+    // Completion must advance standings/rounds immediately rather than wait
+    // for the next throttled transport tick.
+    std::lock_guard<std::mutex> lock(maintenance_mutex_);
+    next_maintenance_at_ = clock_.steady_now() + std::chrono::seconds(1);
+    maintenance_scheduled_ = true;
+    run_maintenance_locked();
 }
 
 } // namespace chess::application
