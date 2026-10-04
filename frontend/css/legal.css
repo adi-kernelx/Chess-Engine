@@ -1,5 +1,8 @@
 /* Public documents share the app palette without requiring its runtime. */
 .site-footer {
+    flex: none;
+    grid-column: 1 / -1;
+    width: 100%;
     padding: var(--sp-6);
     border-top: 1px solid var(--border-subtle);
     text-align: center;

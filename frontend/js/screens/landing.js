@@ -50,7 +50,19 @@ export class LandingScreen extends Screen {
             this._renderHero(),
             this._renderModes(),
             this._renderPuzzleStrip(),
-            this._renderHow()
+            this._renderHow(),
+            this._renderFooter()
+        );
+    }
+
+    _renderFooter() {
+        return h('footer', { class: 'site-footer' },
+            h('p', {}, 'Multiplayer Chess — online games, puzzles and tournaments.'),
+            h('nav', { 'aria-label': 'Legal and support' },
+                h('a', { href: 'privacy.html' }, 'Privacy policy'),
+                h('a', { href: 'terms.html' }, 'Terms of service'),
+                h('a', { href: 'mailto:aditya.gupta.cloud.1@gmail.com' }, 'Contact')
+            )
         );
     }
 
