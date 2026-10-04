@@ -71,15 +71,21 @@ int main(int argc,char** argv) {
         const int64_t now=1700000000;
         std::vector<std::string> mail;
         EmailRecovery service(db,[&](const std::string&,const std::string&,const std::string& body){mail.push_back(body);return true;},"https://example.invalid");
-        check(service.register_user("Owner","Owner@Example.com","requester-password",now)==EmailStatus::Ok,"registration request accepted");
+        check(service.register_user("Owner","Owner@Example.com",now)==EmailStatus::Ok,"password-free registration request accepted");
         auto first=token_of(mail.back());check(first.size()==43,"opaque email-link token");
         check(db.exec("SELECT count(*) FROM players").first().at(0)=="0","no account created before mailbox verification");
         check(db.exec("SELECT token_hash FROM email_challenges").first().at(0)==email_token_hash(first),"only token digest persisted");
         check(service.confirm_email(first,now+1)==EmailStatus::WeakPassword,"unverified requester password cannot activate account");
-        check(service.reset_password(first,"owner-password",now+1)==EmailStatus::InvalidToken,"verification token cannot reset passwords");
-        check(service.confirm_email(first,now+2,"owner-password")==EmailStatus::Ok,"mailbox owner chooses active password");
-        check(service.confirm_email(first,now+3,"owner-password")==EmailStatus::InvalidToken,"verification token single-use");
-        auto owner=authenticate_password(db,"Owner","owner-password");
+        for(const auto& weak:{"Ab1!xyz","password1!","Password!","Password1","Password1 "})
+            check(service.confirm_email(first,now+1,weak)==EmailStatus::WeakPassword,"activation enforces every password rule without consuming token");
+        check(valid_new_password("Abcdef1!") && valid_new_password("A1!"+std::string(253,'x')) &&
+            !valid_new_password("A1!"+std::string(254,'x')),"new password length boundaries");
+        check(service.reset_password(first,"Owner-password1!",now+1)==EmailStatus::InvalidToken,"verification token cannot reset passwords");
+        std::string activated_username;
+        check(service.confirm_email(first,now+2,"Owner-password1!",&activated_username)==EmailStatus::Ok,"mailbox owner chooses active password");
+        check(activated_username=="Owner","committed activation returns actual sign-in username");
+        check(service.confirm_email(first,now+3,"Owner-password1!")==EmailStatus::InvalidToken,"verification token single-use");
+        auto owner=authenticate_password(db,"Owner","Owner-password1!");
         check(owner.status==LoginResult::Status::Ok && authenticate_password(db,"Owner","requester-password").status!=LoginResult::Status::Ok,
             "only mailbox-confirmed password authenticates");
         SecureBuffer secret(32);std::fill(secret.data(),secret.data()+secret.size(),'s');
@@ -95,30 +101,32 @@ int main(int argc,char** argv) {
         const auto reset=token_of(mail.back());
         auto signer=TokenSigner::generate_random();auto session=issue_session(db,signer,owner.player_id,"Owner",0,now+7);
         check(session.ok,"synthetic session issued");
-        check(service.confirm_email(reset,now+8,"new-password")==EmailStatus::InvalidToken,"reset token cannot confirm email");
+        check(service.confirm_email(reset,now+8,"New-password1!")==EmailStatus::InvalidToken,"reset token cannot confirm email");
         check(service.reset_password(reset,"short",now+8)==EmailStatus::WeakPassword,"weak password does not consume link");
-        check(service.reset_password(reset,"new-owner-password",now+9)==EmailStatus::Ok,"password reset succeeds");
+        for(const auto& weak:{"Ab1!xyz","password1!","Password!","Password1","Password1 "})
+            check(service.reset_password(reset,weak,now+8)==EmailStatus::WeakPassword,"reset enforces every password rule without consuming token");
+        check(service.reset_password(reset,"New-owner-password1!",now+9)==EmailStatus::Ok,"password reset succeeds");
         AccessClaims claims;
         check(authorize_access_token(db,signer,session.access_token,now+10,claims)!=GateOutcome::Ok
             && db.exec("SELECT count(*) FROM sessions").first().at(0)=="0","reset revokes access and refresh sessions");
-        check(service.reset_password(reset,"replay-password",now+10)==EmailStatus::InvalidToken,"reset token single-use");
-        check(authenticate_password(db,"Owner","new-owner-password").status==LoginResult::Status::Ok
-            && authenticate_password(db,"Owner","owner-password").status!=LoginResult::Status::Ok,"old password replaced");
+        check(service.reset_password(reset,"Replay-password1!",now+10)==EmailStatus::InvalidToken,"reset token single-use");
+        check(authenticate_password(db,"Owner","New-owner-password1!").status==LoginResult::Status::Ok
+            && authenticate_password(db,"Owner","Owner-password1!").status!=LoginResult::Status::Ok,"old password replaced");
         check(service.request_reset("owner@example.com",now+11)==EmailStatus::Ok,"second reset issued");
         const auto expired=token_of(mail.back());
-        check(service.reset_password(expired,"expired-password",now+911)==EmailStatus::InvalidToken,"15-minute reset expiry");
+        check(service.reset_password(expired,"Expired-password1!",now+911)==EmailStatus::InvalidToken,"15-minute reset expiry");
         check(service.request_reset("owner@example.com",now+12)==EmailStatus::Ok,"sibling reset one issued");
         const auto sibling1=token_of(mail.back());
         check(service.request_reset("owner@example.com",now+13)==EmailStatus::Ok,"sibling reset two issued");
         const auto sibling2=token_of(mail.back());
-        check(service.reset_password(sibling1,"final-owner-password",now+14)==EmailStatus::Ok &&
-            service.reset_password(sibling2,"stale-sibling-password",now+15)==EmailStatus::InvalidToken,"password reset invalidates sibling challenges");
-        check(service.register_user("Expired","expired@example.com","registration-password",now)==EmailStatus::Ok,"expiring activation issued");
-        check(service.confirm_email(token_of(mail.back()),now+1800,"activation-password")==EmailStatus::InvalidToken,"30-minute activation expiry");
-        check(service.register_user("Collision","collision@example.com","requester-password",now)==EmailStatus::Ok,"pending registration before Google login");
+        check(service.reset_password(sibling1,"Final-owner-password1!",now+14)==EmailStatus::Ok &&
+            service.reset_password(sibling2,"Stale-sibling-password1!",now+15)==EmailStatus::InvalidToken,"password reset invalidates sibling challenges");
+        check(service.register_user("Expired","expired@example.com",now)==EmailStatus::Ok,"expiring activation issued");
+        check(service.confirm_email(token_of(mail.back()),now+1800,"Activation-password1!")==EmailStatus::InvalidToken,"30-minute activation expiry");
+        check(service.register_user("Collision","collision@example.com",now)==EmailStatus::Ok,"pending registration before Google login");
         const auto pending=token_of(mail.back());
         auto firstGoogle=google_sign_in(db,verifier,jwt("collision-google","collision@example.com",now),now+1);
-        check(firstGoogle.status==GoogleSignInStatus::Ok && service.confirm_email(pending,now+2,"pending-password")==EmailStatus::Conflict,
+        check(firstGoogle.status==GoogleSignInStatus::Ok && service.confirm_email(pending,now+2,"Pending-password1!")==EmailStatus::Conflict,
             "pending activation cannot overwrite newly created Google account");
         check(db.exec("SELECT password_hash FROM players WHERE id=$1",{Param::int64(firstGoogle.player_id)}).first().is_null(0),
             "Google account still has no requester-chosen password");
@@ -131,9 +139,9 @@ int main(int argc,char** argv) {
         check(service.request_recovery_email(legacy.player_id,"other@example.com","legacy-password",now)==EmailStatus::Conflict,
             "verified recovery address cannot silently change");
         auto googleOnly=google_sign_in(db,verifier,jwt("google-only","only@example.com",now),now+1);
-        check(service.register_user("NotTheRealName","only@example.com","requester-password",now+2)==EmailStatus::Ok,"registration with Google email sends set-password link");
-        check(service.reset_password(token_of(mail.back()),"google-password",now+3)==EmailStatus::Ok,"Google account can add password via verified mailbox");
-        auto reused=authenticate_password(db,googleOnly.username,"google-password");
+        check(service.register_user("NotTheRealName","only@example.com",now+2)==EmailStatus::Ok,"registration with Google email sends set-password link");
+        check(service.reset_password(token_of(mail.back()),"Google-password1!",now+3)==EmailStatus::Ok,"Google account can add password via verified mailbox");
+        auto reused=authenticate_password(db,googleOnly.username,"Google-password1!");
         check(reused.status==LoginResult::Status::Ok && reused.player_id==googleOnly.player_id,"Google/password share one account");
         // Two independent PostgreSQL connections race the same token.
         check(service.request_reset("legacy@example.com",now+10)==EmailStatus::Ok,"concurrent reset issued");
@@ -141,11 +149,11 @@ int main(int argc,char** argv) {
         Database other;check(other.connect(config,err) && other.exec("SET search_path TO "+schema).ok,"second local connection");
         EmailRecovery concurrent(other,[](const std::string&,const std::string&,const std::string&){return true;},"https://example.invalid");
         EmailStatus a,b;
-        std::thread t1([&]{a=service.reset_password(raceToken,"race-password-one",now+11);});
-        std::thread t2([&]{b=concurrent.reset_password(raceToken,"race-password-two",now+11);});t1.join();t2.join();
+        std::thread t1([&]{a=service.reset_password(raceToken,"Race-password-one1!",now+11);});
+        std::thread t2([&]{b=concurrent.reset_password(raceToken,"Race-password-two1!",now+11);});t1.join();t2.join();
         check((a==EmailStatus::Ok && b==EmailStatus::InvalidToken)||(b==EmailStatus::Ok && a==EmailStatus::InvalidToken),"simultaneous reset consumes token exactly once");
         EmailRecovery offline(db,{},"https://example.invalid");
-        check(offline.register_user("Offline","offline@example.com","some-password",now)==EmailStatus::Unavailable,"SMTP absent fails closed");
+        check(offline.register_user("Offline","offline@example.com",now)==EmailStatus::Unavailable,"SMTP absent fails closed");
         EmailRecovery full(db,[](const std::string&,const std::string&,const std::string&){return false;},"https://example.invalid");
         check(full.request_reset("queue@example.com",now)==EmailStatus::Unavailable &&
             db.exec("SELECT count(*) FROM email_challenges WHERE email='queue@example.com'").first().at(0)=="0","queue rejection removes undeliverable challenge");

@@ -20,7 +20,7 @@ An **inbound size cap** (from Phase 7.9) rejects any frame whose payload exceeds
 
 The server has two identity paths:
 
-- **Password**: register with username/email/password, then activate through the email link and choose the active password. Registration returns email_sent, never a session. Login uses username/password. Sensitive requests travel inside a **sealed envelope** (see [Security](SECURITY.md)) — an ML-KEM-768 + X25519 hybrid KEM sealing the request payload with AES-256-CTR + HMAC-SHA-384. Login produces an **access token** (JWT, HS384) and a **refresh token** (32 random bytes; the server stores its SHA-384).
+- **Password**: register with username/email only, then activate through the email link and choose the password there. Registration returns email_sent, never a session. Login uses username/password. Sensitive requests travel inside a **sealed envelope** (see [Security](SECURITY.md)) — an ML-KEM-768 + X25519 hybrid KEM sealing the request payload with AES-256-CTR + HMAC-SHA-384. Login produces an **access token** (JWT, HS384) and a **refresh token** (32 random bytes; the server stores its SHA-384).
 - **Google Sign-In**: routed through Supabase Auth. The frontend gets a Supabase-signed JWT, sends it to the server as `{"type":"google_auth", ...}`, and the server verifies it and issues its own session tokens. See [SECURITY.md](SECURITY.md) §Google Sign-In.
 
 Every message that starts or joins a game — `create_game`, `join_game`, `quick_play`, `play_ai` — must carry an `access_token` field. Missing, expired, tampered, or "epoch-stale" tokens are answered with `{"type":"error","code":"auth_required"}`. Public directory/query routes such as `list_games`, `list_live_games` and `get_leaderboard` do not require auth. `spectate`, `game_state` and `get_active_game` do require an access token. `make_move` and `resign` are authorised by the fact that the socket's file-descriptor is seated in a specific `GameRoom`; that mapping was established at auth-time by `create_game`/`join_game`/`quick_play`.
@@ -34,7 +34,7 @@ Every message that starts or joins a game — `create_game`, `join_game`, `quick
 | `type`                | Sealed | Description |
 |-----------------------|:------:|-------------|
 | `seal_request`        | –      | Client asks the server for a fresh one-time ML-KEM public key + ML-DSA signature. Reply body is JSON with the key material for the client to encapsulate against. |
-| `register`            | ✓      | Request activation with username, email and password. Replies email_sent; no account/session until mailbox confirmation. |
+| `register`            | ✓      | Request activation with username and email only. Replies email_sent; choose a password through the email link before account activation. |
 | `login`               | ✓      | Password login. Sealed. Returns access + refresh tokens. |
 | `refresh`             | –      | Exchange a refresh token for a new access + rotated refresh token pair. |
 | `logout`              | –      | Revoke the caller's current refresh-token family. |
@@ -42,7 +42,7 @@ Every message that starts or joins a game — `create_game`, `join_game`, `quick
 | `google_auth`         | ✓      | Verify a Supabase Google JWT and issue an application session. Enabled with valid provider configuration; ES256 uses public JWKS, not a shared JWT secret. |
 | `link_google`         | ✓      | Attach a Google identity to an authenticated password account. |
 | `request_password_reset` | ✓   | email → generic email_sent for eligible and unknown addresses. |
-| `verify_email`        | ✓      | email_token, plus password for new-account activation → auth_action_ok. |
+| `verify_email`        | ✓      | email_token, plus password for new-account activation → auth_action_ok with committed username. Browser then sends sealed login for automatic sign-in. Recovery-email confirmation does not log in. |
 | `reset_password`      | ✓      | email_token and new password → auth_action_ok; revokes existing sessions. |
 | `set_recovery_email`  | ✓      | access_token, current password and email; legacy password accounts without an email only. |
 | `unlink_google`       | –      | Detach the Google identity from the authenticated account (only if password login is still viable). |

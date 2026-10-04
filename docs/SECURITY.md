@@ -109,8 +109,13 @@ password checks. Replacing an already-bound email is deliberately unsupported.
 Verification tokens expire in 30 minutes; reset tokens in 15. Only token digests
 are persisted, and locked transactions enforce single-use consumption. Password
 reset changes the password hash and token epoch, deletes refresh sessions and
-invalidates sibling email challenges atomically. Confirmation never auto-signs
-in. Expired challenges older than an hour are swept during later issuance; this
+invalidates sibling email challenges atomically. Registration collects username
+and email only. New activation/reset passwords require 8–256 characters, an ASCII
+uppercase letter, a digit and a special character; existing login passwords remain
+valid. Successful activation returns the committed username, then the browser
+performs a separate sealed login and adopts a session only on auth_ok. Failed login
+does not undo activation or reuse its token. Recovery-email confirmation and
+password reset do not auto-sign in. Expired challenges older than an hour are swept during later issuance; this
 is not a scheduled retention guarantee during idle periods.
 
 Recovery returns the same email_sent response for unknown/unverified addresses.

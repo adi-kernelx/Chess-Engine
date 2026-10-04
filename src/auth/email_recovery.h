@@ -11,6 +11,7 @@ enum class EmailStatus { Ok, InvalidEmail, InvalidUsername, WeakPassword,
     InvalidToken, Unauthorized, Conflict, Unavailable, DatabaseError };
 std::string canonical_email(const std::string& input);
 std::string email_token_hash(const std::string& token);
+bool valid_new_password(const std::string& password);
 
 class EmailRecovery {
 public:
@@ -18,11 +19,12 @@ public:
         : db_(db), send_(std::move(send)), public_url_(std::move(public_url)) {}
     bool enabled() const { return static_cast<bool>(send_); }
     EmailStatus register_user(const std::string& username, const std::string& email,
-                              const std::string& password, int64_t now);
+                              int64_t now);
     EmailStatus request_reset(const std::string& email, int64_t now);
     EmailStatus request_recovery_email(int64_t player_id, const std::string& email,
                                        const std::string& password, int64_t now);
-    EmailStatus confirm_email(const std::string& token, int64_t now, const std::string& password = "");
+    EmailStatus confirm_email(const std::string& token, int64_t now, const std::string& password = "",
+                              std::string* activated_username = nullptr);
     EmailStatus reset_password(const std::string& token, const std::string& password, int64_t now);
 private:
     EmailStatus issue(const std::string& purpose, const std::string& email,

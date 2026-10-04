@@ -36,7 +36,7 @@ try {
     const username = process.env.SEALED_TEST_USERNAME;
     assert.match(username, /^seal_[0-9a-f]{12}$/);
     const password = 'Disposable-Seal-Test-42!';
-    const registered = await client.request({ type: 'register', username, password, email: 'synthetic@example.invalid' });
+    const registered = await client.request({ type: 'register', username, email: 'synthetic@example.invalid' });
     assert.equal(registered.code, 'email_unavailable'); // No real SMTP credentials in this fixture.
     const registeredFrame = frames.at(-1);
     await silent(registeredFrame); // One-time-key replay denial.

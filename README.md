@@ -16,7 +16,7 @@ Built as an educational systems project: networking, concurrency, chess rules, s
 - Scheduled **Swiss** and **Winners Advance** tournaments: registration locks, check-in, start gates, byes, no-shows and automatic results.
 - Advancement-based Winners Advance placement, reversed-color draw replay and a two-draw same-pair cap.
 - Password accounts and Google sign-in through Supabase identity verification.
-- Verified-email activation, single-use password recovery and verified Google/password account reuse; optional Gmail SMTP configuration required for new password registrations.
+- Username/email registration, password setup after email verification and automatic sign-in after activation. New passwords require at least 8 characters, an uppercase letter, a number and a special character. Single-use password recovery and verified Google/password account reuse; Gmail SMTP configuration required for new password registrations.
 - Single-use post-quantum hybrid sealed authentication alongside production TLS.
 - Engine analysis and statistical anti-cheat reports for review, not automatic bans.
 - Invite/result sharing, daily bundled puzzles, local streaks and named bot choices.

@@ -201,17 +201,15 @@ void AuthHandler::handle_register(net::Connection& conn, const std::string& mess
     json j;
     if (!parse_or_fail(conn, message, j)) return;
 
-    std::string username, password, email;
+    std::string username, email;
     if (!require_string(conn, j, "username", username)) return;
-    if (!require_string(conn, j, "password", password)) return;
-
     if (!require_string(conn,j,"email",email)) return;
     if(!email_ || !email_->enabled()) {send_auth_error(conn,"email_unavailable");return;}
     const auto address=canonical_email(email);
     if(!address.empty() && !rl_email_address_.try_take(address)) {
         send_json(conn,serialize_type_first("email_sent",json::object())); return;
     }
-    const auto status=email_->register_user(username,email,password,now_seconds());
+    const auto status=email_->register_user(username,email,now_seconds());
     if(status==EmailStatus::Ok) send_json(conn,serialize_type_first("email_sent",json::object()));
     else send_auth_error(conn,status==EmailStatus::InvalidEmail?"invalid_email":
         status==EmailStatus::InvalidUsername?"invalid_username":status==EmailStatus::WeakPassword?"weak_password":
@@ -223,14 +221,14 @@ void AuthHandler::handle_email(net::Connection& conn,const std::string& message,
     json j; if(!parse_or_fail(conn,message,j)) return;
     if(!email_ || !email_->enabled()) {send_auth_error(conn,"email_unavailable");return;}
     EmailStatus status=EmailStatus::InvalidToken;
-    std::string token,password,email;
+    std::string token,password,email,activated_username;
     if(type=="reset_password") {
         if(!require_string(conn,j,"email_token",token) || !require_string(conn,j,"password",password)) return;
         status=email_->reset_password(token,password,now_seconds());
     } else if(type=="verify_email") {
         if(!require_string(conn,j,"email_token",token)) return;
         if(j.contains("password") && !require_string(conn,j,"password",password)) return;
-        status=email_->confirm_email(token,now_seconds(),password);
+        status=email_->confirm_email(token,now_seconds(),password,&activated_username);
     } else {
         if(!require_string(conn,j,"email",email)) return;
         const auto address=canonical_email(email);
@@ -252,8 +250,12 @@ void AuthHandler::handle_email(net::Connection& conn,const std::string& message,
             status=email_->request_reset(email,now_seconds());
         }
     }
-    if(status==EmailStatus::Ok) send_json(conn,serialize_type_first(
-        type=="reset_password" || type=="verify_email"?"auth_action_ok":"email_sent",json::object()));
+    if(status==EmailStatus::Ok) {
+        json payload=json::object();
+        if(!activated_username.empty()) payload["username"]=activated_username;
+        send_json(conn,serialize_type_first(
+            type=="reset_password" || type=="verify_email"?"auth_action_ok":"email_sent",payload));
+    }
     else send_auth_error(conn,status==EmailStatus::InvalidEmail?"invalid_email":
         status==EmailStatus::WeakPassword?"weak_password":status==EmailStatus::InvalidToken?"invalid_email_token":
         status==EmailStatus::Unauthorized?"invalid_credentials":status==EmailStatus::Conflict?"email_conflict":

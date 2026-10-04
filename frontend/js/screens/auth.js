@@ -2,7 +2,7 @@
  * auth.js — LIVE screen (Phase 7.10).
  *
  * Password auth flow:
- *   1. Sends `login` / `register` and waits for `auth_ok` vs `auth_error`.
+ *   1. Login waits for auth_ok; username/email registration waits for email_sent.
  *      Authentication fails closed on disconnect or timeout; it never creates
  *      a local identity that could be mistaken for a real authenticated user.
  *   2. On auth_ok, Session.adopt() persists the refresh token and
@@ -114,6 +114,8 @@ export class AuthScreen extends Screen {
     }
 
     _formBody(googleUrl) {
+        this._passInput = null;
+        this._emailInput = null;
         return h('div', { class: 'field-stack auth-form' },
             h('div', { class: 'auth-intro' },
                 h('div', { class: 'auth-intro__logo', 'aria-hidden': 'true' }),
@@ -134,26 +136,23 @@ export class AuthScreen extends Screen {
                     onkeydown: (e) => { if (e.key === 'Enter') this._submit(); },
                 })
             ),
-            h('div', { class: 'field' },
+            this._mode === 'login' ? h('div', { class: 'field' },
                 h('label', { class: 'field__label', for: 'auth-password' }, 'Password'),
                 h('input', {
                     id: 'auth-password',
                     class: 'input',
                     type: 'password',
                     maxlength: 256,
-                    autocomplete: this._mode === 'login' ? 'current-password' : 'new-password',
+                    autocomplete: 'current-password',
                     ref: el => this._passInput = el,
                     onkeydown: (e) => { if (e.key === 'Enter') this._submit(); },
-                }),
-                this._mode === 'register'
-                    ? h('div', { class: 'field__hint' }, '8 characters or more.')
-                    : null
-            ),
+                })
+            ) : null,
             this._mode === 'register' ? h('div', { class: 'field' },
                 h('label', { class: 'field__label', for: 'auth-email' }, 'Email'),
                 h('input', { id: 'auth-email', class: 'input', type: 'email', autocomplete: 'email', maxlength: 254, 'aria-describedby':'auth-status',
                     ref: el => this._emailInput = el, onkeydown: e => { if(e.key==='Enter') this._submit(); } }),
-                h('div', { class: 'field__hint' }, 'Open the email link and confirm your password there to activate your account. This address also supports password recovery.')) : null,
+                h('div', { class: 'field__hint' }, 'We’ll email you a verification link. Open it to set your password and activate your account.')) : null,
             h('button', {
                 type: 'button',
                 class: 'btn btn--primary btn--block',
@@ -198,13 +197,9 @@ export class AuthScreen extends Screen {
     async _submit() {
         if (this._busy) return;
         const username = (this._userInput.value || '').trim();
-        const password = this._passInput.value || '';
-        if (!username || !password) {
-            this.ctx.toast.warning('Enter a username and a password.', { duration: 2200 });
-            return;
-        }
-        if (this._mode === 'register' && password.length < 8) {
-            this.ctx.toast.warning('Password should be at least 8 characters.', { duration: 2400 });
+        const password = this._mode === 'login' ? this._passInput.value || '' : '';
+        if (!username || (this._mode === 'login' && !password)) {
+            this.ctx.toast.warning(this._mode === 'login' ? 'Enter a username and a password.' : 'Enter a username.', { duration: 2200 });
             return;
         }
         const email=this._mode==='register'?(this._emailInput.value||'').trim():'';
@@ -222,7 +217,7 @@ export class AuthScreen extends Screen {
         const mode = this._mode;
         const msg = mode === 'login'
             ? this.ctx.Outbound.login(username, password)
-            : this.ctx.Outbound.register(username, password, email);
+            : this.ctx.Outbound.register(username, email);
 
         try {
             const result = await this._requestAuth(msg);
@@ -234,7 +229,6 @@ export class AuthScreen extends Screen {
             }
 
             if(mode==='register') {
-                this._passInput.value='';
                 this._status.textContent='Check your inbox. If this address can be used, you will receive a verification or set-password link. Your account is not signed in yet.';
                 this._status.setAttribute('tabindex','-1'); this._status.focus();
                 return;

@@ -10,7 +10,7 @@
  *   ← { type: "seal_key",     key_id, master_b64, expires_in, offer_sig,
  *                             identity_pk }
  *
- *   → { type: "register",     username, email, password }
+ *   → { type: "register",     username, email }
  *   ← { type: "email_sent" } — pending activation, never a session
  *   ← { type: "auth_error",   code: "invalid_username" | "weak_password" |
  *                                   "username_taken" | "internal" }
@@ -43,7 +43,8 @@
  * Sealed email routes: request_password_reset{email}, verify_email{email_token,
  * password for activation}, reset_password{email_token,password}, and
  * set_recovery_email{access_token,password,email}. Replies are email_sent,
- * auth_action_ok or auth_error. Email confirmation never auto-signs in.
+ * auth_action_ok or auth_error. New-account activation returns its username for
+ * the browser's subsequent sealed login; recovery-email confirmation does not.
  *
  * Deliberate discipline:
  *   - All string values pass through nlohmann::json::dump() — no

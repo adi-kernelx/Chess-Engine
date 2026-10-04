@@ -12,6 +12,16 @@
 
 namespace chess::auth {
 using storage::Param;
+bool valid_new_password(const std::string& password) {
+    if(password.size()<PASSWORD_MIN_LEN || password.size()>PASSWORD_MAX_LEN) return false;
+    bool upper=false,digit=false,special=false;
+    for(unsigned char c:password) {
+        upper=upper || (c>='A' && c<='Z');digit=digit || (c>='0' && c<='9');
+        special=special || (c>=33 && c<=47) || (c>=58 && c<=64) ||
+            (c>=91 && c<=96) || (c>=123 && c<=126);
+    }
+    return upper && digit && special;
+}
 std::string canonical_email(const std::string& input) {
     if (input.empty() || input.size()>254) return {};
     const auto at=input.find('@');
@@ -83,13 +93,10 @@ EmailStatus EmailRecovery::issue(const std::string& purpose, const std::string& 
     return EmailStatus::Ok;
 }
 EmailStatus EmailRecovery::register_user(const std::string& username, const std::string& raw_email,
-    const std::string& password, int64_t now) {
+    int64_t now) {
     if(!enabled()) return EmailStatus::Unavailable;
     const auto email=canonical_email(raw_email); if(email.empty()) return EmailStatus::InvalidEmail;
     if(!valid_username(username)) return EmailStatus::InvalidUsername;
-    if(password.size()<PASSWORD_MIN_LEN || password.size()>PASSWORD_MAX_LEN) return EmailStatus::WeakPassword;
-    // Always pay the KDF cost, even for an existing-email registration.
-    const auto hash=hash_password(password); if(hash.empty()) return EmailStatus::Unavailable;
     auto existing=db_.exec("SELECT id,token_epoch,email_verified FROM players WHERE lower(email)=$1",{Param::text(email)});
     if(!existing.ok) return EmailStatus::DatabaseError;
     if(!existing.empty()) {
@@ -122,13 +129,14 @@ EmailStatus EmailRecovery::request_recovery_email(int64_t player_id,const std::s
     return issue("recovery_email",email,player_id,std::stoi(row.first().at(1)),"",now);
 }
 
-EmailStatus EmailRecovery::confirm_email(const std::string& token,int64_t now,const std::string& password) {
+EmailStatus EmailRecovery::confirm_email(const std::string& token,int64_t now,const std::string& password,
+    std::string* activated_username) {
+    if(activated_username) activated_username->clear();
     const auto hash=email_token_hash(token); if(hash.empty()) return EmailStatus::InvalidToken;
-    // Only the mailbox owner may choose the active password. Do not install
-    // the password supplied by a possibly hostile, unverified registration.
+    // Only the mailbox owner chooses a password, after opening the email link.
     std::string phc;
     if(!password.empty()) {
-        if(password.size()<PASSWORD_MIN_LEN || password.size()>PASSWORD_MAX_LEN) return EmailStatus::WeakPassword;
+        if(!valid_new_password(password)) return EmailStatus::WeakPassword;
         phc=hash_password(password); if(phc.empty()) return EmailStatus::Unavailable;
     }
     storage::Transaction tx(db_); if(!tx.ok()) return EmailStatus::DatabaseError;
@@ -162,13 +170,15 @@ EmailStatus EmailRecovery::confirm_email(const std::string& token,int64_t now,co
         if(!up.ok) return up.sqlstate==storage::pg_errors::UNIQUE_VIOLATION?EmailStatus::Conflict:EmailStatus::DatabaseError;
         if(up.rows_affected!=1) return EmailStatus::InvalidToken;
     }
+    const auto username=r.at(0)=="register" ? r.at(4) : std::string{};
     if(!db_.exec("DELETE FROM email_challenges WHERE token_hash=$1",{Param::text(hash)}).ok || !tx.commit())
         return EmailStatus::DatabaseError;
+    if(activated_username) *activated_username=username;
     return EmailStatus::Ok;
 }
 EmailStatus EmailRecovery::reset_password(const std::string& token,const std::string& password,int64_t now) {
     const auto hash=email_token_hash(token); if(hash.empty()) return EmailStatus::InvalidToken;
-    if(password.size()<PASSWORD_MIN_LEN || password.size()>PASSWORD_MAX_LEN) return EmailStatus::WeakPassword;
+    if(!valid_new_password(password)) return EmailStatus::WeakPassword;
     const auto phc=hash_password(password); if(phc.empty()) return EmailStatus::Unavailable;
     storage::Transaction tx(db_); if(!tx.ok()) return EmailStatus::DatabaseError;
     // Consistent player -> challenge lock order avoids sibling-reset deadlocks.

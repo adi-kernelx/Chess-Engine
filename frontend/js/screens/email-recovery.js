@@ -1,8 +1,9 @@
 import { Screen } from '../ui/screen.js';
 import { h } from '../core/dom.js';
+import { Inbound } from '../net/protocol.js';
 
 const COPY={
-    invalid_email:'Enter a valid email address.', weak_password:'Use a password of 8–256 characters.',
+    invalid_email:'Enter a valid email address.', weak_password:'Use 8–256 characters, including an uppercase letter, a number, and a special character.',
     invalid_email_token:'This link has expired or was already used. Request a new link.',
     email_conflict:'This username or email is already attached to an account. Sign in with Google or use Forgot password.',
     invalid_credentials:'Your current password could not be verified.',
@@ -11,6 +12,8 @@ const COPY={
     email_unavailable:'Email delivery is unavailable. Please try again later.',
     unavailable:'The server did not respond. Reconnect and try again.',
 };
+export const validNewPassword = password => password.length>=8 && password.length<=256 &&
+    /[A-Z]/.test(password) && /[0-9]/.test(password) && /[!-/:-@\[-`{-~]/.test(password);
 export class EmailRecoveryScreen extends Screen {
     constructor(ctx, mode) {
         super(ctx); this.mode=mode; this.busy=false;
@@ -33,6 +36,8 @@ export class EmailRecoveryScreen extends Screen {
                     wantsEmail ? this._field('Email','email','email',el=>this.email=el) : null,
                     wantsPassword ? this._field(this.mode==='recovery-email'?'Current password':'New password','password',
                         this.mode==='recovery-email'?'current-password':'new-password',el=>this.password=el) : null,
+                    ['reset-password','activate-account'].includes(this.mode)
+                        ? h('p',{id:'recovery-password-hint',class:'field__hint'},COPY.weak_password) : null,
                     ['reset-password','activate-account'].includes(this.mode) ? this._field('Confirm new password','password','new-password',el=>this.confirm=el) : null,
                     h('button',{type:'button',class:'btn btn--primary btn--block',ref:el=>this.button=el,
                         onclick:()=>this._submit()},this.mode==='verify-email'?'Confirm email':this.mode==='activate-account'?'Activate account':this.mode==='reset-password'?'Save password':'Send email'),
@@ -43,7 +48,8 @@ export class EmailRecoveryScreen extends Screen {
     _field(label,type,autocomplete,ref) {
         const id='recovery-'+label.toLowerCase().replaceAll(' ','-');
         return h('div',{class:'field'},h('label',{class:'field__label',for:id},label),
-            h('input',{id,class:'input',type,autocomplete,'aria-describedby':'recovery-error',maxlength:type==='email'?254:256,
+            h('input',{id,class:'input',type,autocomplete,'aria-describedby':label==='New password'
+                ? 'recovery-password-hint recovery-error' : 'recovery-error',maxlength:type==='email'?254:256,
                 ref,onkeydown:e=>{if(e.key==='Enter') this._submit();}}));
     }
     onMount() {
@@ -68,7 +74,9 @@ export class EmailRecoveryScreen extends Screen {
         this.error.textContent='';
         for(const field of [this.email,this.password,this.confirm]) field?.removeAttribute('aria-invalid');
         if(this.email && (!this.email.value.trim() || !this.email.checkValidity())) return this._error(COPY.invalid_email,this.email);
-        if(this.password && (this.password.value.length<8 || this.password.value.length>256)) return this._error(COPY.weak_password,this.password);
+        if(this.password && (this.mode==='recovery-email'
+            ? this.password.value.length<8 || this.password.value.length>256 : !validNewPassword(this.password.value)))
+            return this._error(this.mode==='recovery-email'?'Enter your current password.':COPY.weak_password,this.password);
         if(this.confirm && this.password.value!==this.confirm.value) return this._error('Passwords do not match.',this.confirm);
         if(['verify-email','reset-password','activate-account'].includes(this.mode) && !this.token) return this._error(COPY.invalid_email_token);
         const msg=this.mode==='verify-email'?{type:'verify_email',email_token:this.token}:
@@ -89,8 +97,21 @@ export class EmailRecoveryScreen extends Screen {
                 this.token='';complete=true;
                 if(this.mode==='reset-password' && this.ctx.session?.isAuthenticated) await this.ctx.session.logout();
             }
-        } catch {this._error(COPY.unavailable);}
+            if(this.mode==='activate-account') {
+                const username=result.data?.username;
+                this.status.textContent='Account activated. Signing you in…';
+                if(!username) return this._error('Account activated, but this server did not provide the sign-in details. Sign in with your username and the password you just set.');
+                const login=await this.ctx.authClient.request({type:'login',username,password:msg.password});
+                if(!login.ok) return this._error(`Account activated. Automatic sign-in failed. Sign in as ${username} with the password you just set. ${COPY[login.code] || 'Please try again.'}`);
+                const identity=Inbound.normalize(login.data);
+                this.ctx.session.adopt(identity);
+                this.ctx.toast.success(`Welcome, ${identity.username}!`);
+                const next=this.ctx.postAuthPath || '/';this.ctx.postAuthPath=null;
+                this.ctx.router.go(next);
+            }
+        } catch {this._error(complete && this.mode==='activate-account'
+            ? 'Account activated, but sign-in was interrupted. Sign in with your username and the password you just set.' : COPY.unavailable);}
         finally {this.busy=false;this.button.disabled=complete;this.button.removeAttribute('aria-busy');}
     }
-    onUnmount() {this.token='';}
+    onUnmount() {this.token='';if(this.password) this.password.value='';if(this.confirm) this.confirm.value='';}
 }
