@@ -32,6 +32,7 @@ const ERROR_COPY = {
     invalid_email:           'Enter a valid email address.',
     email_unavailable:       'Email delivery is not configured or is busy. Please try again later.',
     username_taken:          'That username is already in use.',
+    email_taken:             'That email is already in use. Sign in or use Forgot password; choose another email for a new account.',
     invalid_credentials:     'Wrong username or password.',
     rate_limited:            'Too many attempts. Please wait a minute and try again.',
     invalid_google:          'Google sign-in failed — please try again.',
@@ -130,6 +131,7 @@ export class AuthScreen extends Screen {
                     id: 'auth-username',
                     class: 'input',
                     autocomplete: 'username',
+                    'aria-describedby': 'auth-status',
                     maxlength: 20,
                     value: this.ctx.store.session.username || '',
                     ref: el => this._userInput = el,
@@ -208,6 +210,7 @@ export class AuthScreen extends Screen {
             this.ctx.toast.warning('Enter a valid email address.'); this._emailInput.focus(); return;
         }
         this._busy = true;
+        this._userInput.removeAttribute('aria-invalid');this._emailInput?.removeAttribute('aria-invalid');
         this._status.textContent='';this._status.setAttribute('role','status');
         this._submitBtn.disabled = true;
         this._googleBtn.disabled = true;
@@ -224,12 +227,14 @@ export class AuthScreen extends Screen {
             if (!result.ok) {
                 const copy = ERROR_COPY[result.code] || 'Sign in failed.';
                 this._status.textContent=copy;this._status.setAttribute('role','alert');
+                const field=result.code==='username_taken'?this._userInput:result.code==='email_taken'?this._emailInput:null;
+                if(field) {field.setAttribute('aria-invalid','true');field.focus();}
                 this.ctx.toast.error(copy, { duration: 3600 });
                 return;
             }
 
             if(mode==='register') {
-                this._status.textContent='Check your inbox. If this address can be used, you will receive a verification or set-password link. Your account is not signed in yet.';
+                this._status.textContent='Check your inbox for the verification link. Open it to set your password and activate this username. Your account is not signed in yet.';
                 this._status.setAttribute('tabindex','-1'); this._status.focus();
                 return;
             }

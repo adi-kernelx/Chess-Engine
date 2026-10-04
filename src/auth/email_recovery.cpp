@@ -65,12 +65,32 @@ EmailStatus EmailRecovery::issue(const std::string& purpose, const std::string& 
         // Serializes issuance across DB connections/instances as well as threads.
         if(!db_.exec("SELECT pg_advisory_xact_lock(hashtext($1))",{Param::text(email)}).ok)
             return EmailStatus::DatabaseError;
+        if(purpose=="register") {
+            // Email -> username lock order; a separate advisory-key namespace
+            // makes different-email/same-name requests serialize safely.
+            const auto username_ci=to_lower_ascii(username);
+            if(!db_.exec("SELECT pg_advisory_xact_lock(15101,hashtext($1))",{Param::text(username_ci)}).ok)
+                return EmailStatus::DatabaseError;
+            auto name=db_.exec("SELECT 1 FROM players WHERE username_ci=$1 UNION ALL"
+                " SELECT 1 FROM email_challenges WHERE purpose='register' AND lower(username)=$1"
+                " AND email<>$2 AND expires_at>to_timestamp($3) LIMIT 1",
+                {Param::text(username_ci),Param::text(email),Param::int64(now)});
+            if(!name.ok) return EmailStatus::DatabaseError;
+            if(!name.empty()) return EmailStatus::UsernameTaken;
+            auto address=db_.exec("SELECT 1 FROM players WHERE lower(email)=$1 UNION ALL"
+                " SELECT 1 FROM email_challenges WHERE purpose='register' AND email=$1"
+                " AND lower(username)<>$2 AND expires_at>to_timestamp($3) LIMIT 1",
+                {Param::text(email),Param::text(username_ci),Param::int64(now)});
+            if(!address.ok) return EmailStatus::DatabaseError;
+            if(!address.empty()) return EmailStatus::EmailTaken;
+        }
         if(!db_.exec("DELETE FROM email_challenges WHERE expires_at<=to_timestamp($1) AND created_at<to_timestamp($1)-interval '1 hour'",
             {Param::int64(now)}).ok) return EmailStatus::DatabaseError;
         auto count=db_.exec("SELECT count(*) FROM email_challenges WHERE email=$1 AND created_at>to_timestamp($2)-interval '1 hour'",
             {Param::text(email),Param::int64(now)});
         if(!count.ok) return EmailStatus::DatabaseError;
-        if(std::stoi(count.first().at(0))>=3) return EmailStatus::Ok; // no enumeration
+        if(std::stoi(count.first().at(0))>=3)
+            return purpose=="register" ? EmailStatus::RateLimited : EmailStatus::Ok;
         auto random=crypto::secure_random_buffer(32);
         token=crypto::encode_base64url(random.data(),random.size()); token_hash=email_token_hash(token);
         auto result=db_.exec("INSERT INTO email_challenges(token_hash,purpose,email,player_id,token_epoch,username,created_at,expires_at)"
@@ -97,13 +117,6 @@ EmailStatus EmailRecovery::register_user(const std::string& username, const std:
     if(!enabled()) return EmailStatus::Unavailable;
     const auto email=canonical_email(raw_email); if(email.empty()) return EmailStatus::InvalidEmail;
     if(!valid_username(username)) return EmailStatus::InvalidUsername;
-    auto existing=db_.exec("SELECT id,token_epoch,email_verified FROM players WHERE lower(email)=$1",{Param::text(email)});
-    if(!existing.ok) return EmailStatus::DatabaseError;
-    if(!existing.empty()) {
-        if(existing.first().at(2)!="t") return send_(email,"","")?EmailStatus::Ok:EmailStatus::Unavailable;
-        // Never overwrite an existing password from a registration request.
-        return issue("reset",email,std::stoll(existing.first().at(0)),std::stoi(existing.first().at(1)),"",now);
-    }
     return issue("register",email,0,0,username,now);
 }
 EmailStatus EmailRecovery::request_reset(const std::string& raw_email, int64_t now) {
@@ -176,13 +189,15 @@ EmailStatus EmailRecovery::confirm_email(const std::string& token,int64_t now,co
     if(activated_username) *activated_username=username;
     return EmailStatus::Ok;
 }
-EmailStatus EmailRecovery::reset_password(const std::string& token,const std::string& password,int64_t now) {
+EmailStatus EmailRecovery::reset_password(const std::string& token,const std::string& password,int64_t now,
+    std::string* account_username) {
+    if(account_username) account_username->clear();
     const auto hash=email_token_hash(token); if(hash.empty()) return EmailStatus::InvalidToken;
     if(!valid_new_password(password)) return EmailStatus::WeakPassword;
     const auto phc=hash_password(password); if(phc.empty()) return EmailStatus::Unavailable;
     storage::Transaction tx(db_); if(!tx.ok()) return EmailStatus::DatabaseError;
     // Consistent player -> challenge lock order avoids sibling-reset deadlocks.
-    auto row=db_.exec("SELECT p.id,p.token_epoch,c.token_epoch FROM players p JOIN email_challenges c ON c.player_id=p.id"
+    auto row=db_.exec("SELECT p.id,p.token_epoch,c.token_epoch,p.username FROM players p JOIN email_challenges c ON c.player_id=p.id"
         " WHERE c.token_hash=$1 AND c.purpose='reset' AND c.expires_at>to_timestamp($2)"
         " AND p.email_verified=TRUE AND lower(p.email)=c.email FOR UPDATE OF p",
         {Param::text(hash),Param::int64(now)});
@@ -192,10 +207,12 @@ EmailStatus EmailRecovery::reset_password(const std::string& token,const std::st
     if(!claimed.ok) return EmailStatus::DatabaseError;
     if(claimed.empty()) return EmailStatus::InvalidToken;
     const auto id=row.first().at(0);
+    const auto username=row.first().at(3);
     if(!db_.exec("UPDATE players SET password_hash=$1,token_epoch=token_epoch+1 WHERE id=$2",{Param::text(phc),Param::text(id)}).ok ||
        !db_.exec("DELETE FROM sessions WHERE player_id=$1",{Param::text(id)}).ok ||
        !db_.exec("DELETE FROM email_challenges WHERE player_id=$1",{Param::text(id)}).ok || !tx.commit())
         return EmailStatus::DatabaseError;
+    if(account_username) *account_username=username;
     return EmailStatus::Ok;
 }
 } // namespace chess::auth

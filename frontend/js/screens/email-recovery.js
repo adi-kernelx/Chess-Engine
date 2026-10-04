@@ -91,26 +91,32 @@ export class EmailRecoveryScreen extends Screen {
             if(!result.ok) return this._error(COPY[result.code] || 'Could not complete this request. Please try again.');
             if(this.password) this.password.value='';if(this.confirm) this.confirm.value='';
             this.status.textContent=['verify-email','activate-account'].includes(this.mode)?'Email confirmed. You can now sign in.':
-                this.mode==='reset-password'?'Password saved. Existing sessions were revoked. Sign in with your new password.':
+                this.mode==='reset-password'?'Password saved. Existing sessions were revoked. Signing you in…':
                 'If this address is eligible, an email will arrive shortly. Check Spam too. You can retry if it does not arrive.';
             if(['verify-email','reset-password','activate-account'].includes(this.mode)) {
                 this.token='';complete=true;
                 if(this.mode==='reset-password' && this.ctx.session?.isAuthenticated) await this.ctx.session.logout();
             }
-            if(this.mode==='activate-account') {
+            if(['activate-account','reset-password'].includes(this.mode)) {
                 const username=result.data?.username;
-                this.status.textContent='Account activated. Signing you in…';
-                if(!username) return this._error('Account activated, but this server did not provide the sign-in details. Sign in with your username and the password you just set.');
+                const saved=this.mode==='activate-account'?'Account activated':'Password saved';
+                this.status.textContent=saved+'. Signing you in…';
+                if(!username) return this._error(saved+', but the backend is missing the updated sign-in response. Sign in manually; the updated backend must be deployed for automatic sign-in.');
                 const login=await this.ctx.authClient.request({type:'login',username,password:msg.password});
-                if(!login.ok) return this._error(`Account activated. Automatic sign-in failed. Sign in as ${username} with the password you just set. ${COPY[login.code] || 'Please try again.'}`);
+                if(!login.ok) {
+                    this.status.textContent=saved+'.';
+                    return this._error(`${saved}. Automatic sign-in failed. Sign in as ${username} with the password you just set. ${COPY[login.code] || 'Please try again.'}`);
+                }
                 const identity=Inbound.normalize(login.data);
+                if(!identity?.access_token || !identity?.refresh_token || identity.username!==username)
+                    return this._error(saved+'. Sign-in returned incomplete account details. Sign in manually; no local session was created.');
                 this.ctx.session.adopt(identity);
                 this.ctx.toast.success(`Welcome, ${identity.username}!`);
                 const next=this.ctx.postAuthPath || '/';this.ctx.postAuthPath=null;
                 this.ctx.router.go(next);
             }
-        } catch {this._error(complete && this.mode==='activate-account'
-            ? 'Account activated, but sign-in was interrupted. Sign in with your username and the password you just set.' : COPY.unavailable);}
+        } catch {this._error(complete && ['activate-account','reset-password'].includes(this.mode)
+            ? 'Password saved, but sign-in was interrupted. Sign in with your username and the password you just set.' : COPY.unavailable);}
         finally {this.busy=false;this.button.disabled=complete;this.button.removeAttribute('aria-busy');}
     }
     onUnmount() {this.token='';if(this.password) this.password.value='';if(this.confirm) this.confirm.value='';}

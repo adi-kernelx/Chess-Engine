@@ -43,7 +43,7 @@
  * Sealed email routes: request_password_reset{email}, verify_email{email_token,
  * password for activation}, reset_password{email_token,password}, and
  * set_recovery_email{access_token,password,email}. Replies are email_sent,
- * auth_action_ok or auth_error. New-account activation returns its username for
+ * auth_action_ok or auth_error. Activation and password reset return the username for
  * the browser's subsequent sealed login; recovery-email confirmation does not.
  *
  * Deliberate discipline:

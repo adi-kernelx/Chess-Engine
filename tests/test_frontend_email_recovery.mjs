@@ -42,7 +42,8 @@ assert.equal(consumeEmailCallback({hash:'#/login'},history),null);
 let calls=[],adoptions=0,response={ok:true,data:{type:'email_sent'}},loggedOut=0,navigated=null;
 const context=()=>({store:{session:{username:''}},emailAction:null,
     session:{isAuthenticated:false,accessToken:'synthetic',adopt(){adoptions++;},async logout(){loggedOut++;}},
-    authClient:{async request(msg){calls.push(msg);return response;}},
+    authClient:{async request(msg){calls.push(msg);return msg.type==='login'
+        ? {ok:true,data:{type:'auth_ok',username:'Fixture',elo:800,access_token:'synthetic',refresh_token:'synthetic',access_expires_in:900}} : response;}},
     toast:Object.fromEntries(['warning','error','success','info'].map(k=>[k,()=>{}])),router:{go(path){navigated=path;}},Outbound});
 const mount=(mode,action)=>{const ctx=context();ctx.emailAction=action;const screen=new EmailRecoveryScreen(ctx,mode);
     screen.root=screen.render();screen.onMount();return screen;};
@@ -58,20 +59,30 @@ for(const weak of ['Ab1!xyz','password1!','Password!','Password1']) {
 }
 screen.password.value='New-password1!';screen.confirm.value='different';const count=calls.length;await screen._submit();assert.equal(calls.length,count);
 screen.confirm.value='New-password1!';response={ok:false,code:'invalid_email_token'};await screen._submit();assert.match(screen.error.textContent,/expired/);
-response={ok:true,data:{type:'auth_action_ok'}};screen.ctx.session.isAuthenticated=true;await screen._submit();
-assert.equal(calls.at(-1).email_token,token);assert.equal(screen.token,'');assert.equal(screen.button.disabled,true);assert.equal(loggedOut,1);
+response={ok:true,data:{type:'auth_action_ok',username:'Fixture'}};screen.ctx.session.isAuthenticated=true;await screen._submit();
+assert.equal(calls.at(-2).email_token,token);assert.equal(screen.token,'');assert.equal(screen.button.disabled,true);assert.equal(loggedOut,1);
+assert.equal(calls.at(-1).type,'login');assert.equal(calls.at(-1).username,'Fixture');assert.equal(adoptions,1);
 screen=mount('activate-account',{mode:'activate-account',token});screen.password.value='Mailbox-password1!';screen.confirm.value='Mailbox-password1!';
 screen.ctx.authClient.request=async msg=>{calls.push(msg);return msg.type==='verify_email'
     ? {ok:true,data:{type:'auth_action_ok',username:'Fixture'}}
     : {ok:true,data:{type:'auth_ok',username:'Fixture',elo:800,access_token:'synthetic',refresh_token:'synthetic',access_expires_in:900}};};
 await screen._submit();assert.equal(calls.at(-2).type,'verify_email');assert.equal(calls.at(-1).type,'login');
 assert.equal(calls.at(-1).password,'Mailbox-password1!');assert.equal(calls.at(-1).username,'Fixture');
-assert.equal(adoptions,1);assert.equal(navigated,'/');assert.equal(screen.token,'');assert.equal(screen.password.value,'');
+assert.equal(adoptions,2);assert.equal(navigated,'/');assert.equal(screen.token,'');assert.equal(screen.password.value,'');
 screen=mount('activate-account',{mode:'activate-account',token});screen.password.value='Mailbox-password1!';screen.confirm.value='Mailbox-password1!';
 screen.ctx.authClient.request=async msg=>{calls.push(msg);return msg.type==='verify_email'
     ? {ok:true,data:{type:'auth_action_ok',username:'Fixture'}} : {ok:false,code:'unavailable'};};
-await screen._submit();assert.equal(adoptions,1);assert.match(screen.error.textContent,/Account activated.*Automatic sign-in failed/);
+await screen._submit();assert.equal(adoptions,2);assert.match(screen.error.textContent,/Account activated.*Automatic sign-in failed/);
 assert.equal(screen.button.disabled,true);assert.equal(screen.password.value,'');assert.equal(screen.token,'');
+screen=mount('reset-password',{mode:'reset-password',token});screen.password.value='Mailbox-password1!';screen.confirm.value='Mailbox-password1!';
+screen.ctx.authClient.request=async msg=>{calls.push(msg);return {ok:true,data:{type:'auth_action_ok'}};};
+const old_backend_calls=calls.length;await screen._submit();assert.equal(calls.length,old_backend_calls+1);
+assert.equal(adoptions,2);assert.match(screen.error.textContent,/updated backend must be deployed/);
+screen=mount('activate-account',{mode:'activate-account',token});screen.password.value='Mailbox-password1!';screen.confirm.value='Mailbox-password1!';
+screen.ctx.authClient.request=async msg=>{calls.push(msg);return msg.type==='verify_email'
+    ? {ok:true,data:{type:'auth_action_ok',username:'Fixture'}} : {ok:true,data:{type:'auth_ok',username:'Fixture'}};};
+await screen._submit();assert.equal(adoptions,2);assert.match(screen.error.textContent,/incomplete account details/);
+assert.equal(screen.token,'');assert.equal(screen.password.value,'');
 screen=mount('verify-email',{mode:'verify-email',token});
 await screen._submit();assert.deepEqual(calls.at(-1),{type:'verify_email',email_token:token});
 screen=mount('recovery-email');assert.equal(screen.button.disabled,true);
@@ -81,6 +92,10 @@ screen.onUnmount();assert.equal(screen.token,'');
 const auth=new AuthScreen(context(),'register');auth.root=auth.render();auth._userInput.value='Fixture';assert.equal(auth._passInput,null);
 auth._emailInput.value='invalid';const before=calls.length;await auth._submit();assert.equal(calls.length,before);
 auth._emailInput.value='fixture@example.com';response={ok:true,data:{type:'email_sent'}};await auth._submit();
-assert.equal(calls.at(-1).email,'fixture@example.com');assert.equal(adoptions,1);assert.match(auth._status.textContent,/not signed in yet/);
+assert.equal(calls.at(-1).email,'fixture@example.com');assert.equal(adoptions,2);assert.match(auth._status.textContent,/not signed in yet/);
+response={ok:false,code:'username_taken'};await auth._submit();assert.match(auth._status.textContent,/username is already in use/);
+assert.equal(auth._userInput.attributes['aria-invalid'],'true');assert.equal(auth._userInput.focused,true);
+response={ok:false,code:'email_taken'};await auth._submit();assert.match(auth._status.textContent,/email is already in use/);
+assert.equal(auth._emailInput.attributes['aria-invalid'],'true');assert.equal(auth._emailInput.focused,true);
 assert.equal(Object.hasOwn(calls.at(-1),'password'),false);
 console.log('PASS email forms: imports, URL scrubbing, activation, reset, registration email, errors, recovery, no implicit login/storage');

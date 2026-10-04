@@ -145,7 +145,7 @@ for (const options of [{ pinnedKeys: ['wrong'] }, { provider: async () => { thro
     const screen = Object.create(AuthScreen.prototype);
     let adopted = 0, navigated = 0, warnings = 0, errors = 0, release;
     screen._mode = 'login'; screen._busy = false;
-    screen._userInput = { value: 'test_user' }; screen._passInput = { value: '' };
+    screen._userInput = { value: 'test_user', removeAttribute() {} }; screen._passInput = { value: '' };
     screen._submitBtn = { disabled: false, textContent: 'Sign in', setAttribute() {}, removeAttribute() {} };
     screen._googleBtn = { disabled: false };
     screen._status = { textContent: '', setAttribute() {} };

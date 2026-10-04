@@ -83,7 +83,7 @@ Route changes must unsubscribe listeners, cancel screen-owned work and release o
 - [x] Real profile, rating, history and leaderboard data.
 - [x] Honest empty states in place of demonstration records.
 - [x] Busy-state prevention of duplicate form submission.
-- [x] Username/email-only registration; password chosen after mailbox verification, then automatic sealed login. Frontend/backend enforce the new-password complexity policy without changing existing login credentials.
+- [x] Username/email-only registration with explicit taken-name/address feedback; password chosen after mailbox verification, then automatic sealed login. Reset also signs in to the original account. Frontend/backend enforce the new-password complexity policy without changing existing login credentials.
 - [x] Forgot-password, activation/reset and legacy recovery-email forms using sealed auth.
 - [x] Single-use link tokens scrubbed from history and kept out of browser storage.
 - [ ] Manual email-delivery/form acceptance after backend migration/configuration rollout.

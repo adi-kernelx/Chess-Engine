@@ -101,8 +101,15 @@ plus aliases. Already-separate accounts/histories are not retrospectively merged
 
 Registration is pending until mailbox activation; it returns email_sent, not a
 session. Activation asks the mailbox owner to choose the active password.
-Registering with an existing verified email sends a password-setting link for
-that existing account instead of overwriting its password or creating a new one.
+Signup rejects a taken username or email before sending mail, including
+case-insensitive conflicts with live pending registrations. The same pending
+username/email pair may resend within limits; another username cannot claim its
+email and another email cannot claim its username until expiry. Database advisory
+locks serialize concurrent signup claims; final unique indexes still protect
+activation against other account creation paths. Signup availability errors reveal
+that a name/address is in use, under request limits; Forgot password retains its
+generic response. Existing Google accounts use Forgot password to add a password
+to the same account, not Register with a new username.
 Legacy password accounts without email can add one after session and current
 password checks. Replacing an already-bound email is deliberately unsupported.
 
@@ -114,8 +121,12 @@ and email only. New activation/reset passwords require 8–256 characters, an AS
 uppercase letter, a digit and a special character; existing login passwords remain
 valid. Successful activation returns the committed username, then the browser
 performs a separate sealed login and adopts a session only on auth_ok. Failed login
-does not undo activation or reuse its token. Recovery-email confirmation and
-password reset do not auto-sign in. Expired challenges older than an hour are swept during later issuance; this
+does not undo activation or reuse its token. Recovery-email confirmation does
+not auto-sign in. Password reset returns the original account
+username and then performs the same sealed login after revoking old sessions.
+Missing backend username or incomplete login tokens never create a local session;
+the UI explains rollout mismatch or manual recovery instead. Expired challenges
+older than an hour are swept during later issuance; this
 is not a scheduled retention guarantee during idle periods.
 
 Recovery returns the same email_sent response for unknown/unverified addresses.

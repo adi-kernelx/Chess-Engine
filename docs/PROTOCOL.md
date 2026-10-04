@@ -34,7 +34,7 @@ Every message that starts or joins a game — `create_game`, `join_game`, `quick
 | `type`                | Sealed | Description |
 |-----------------------|:------:|-------------|
 | `seal_request`        | –      | Client asks the server for a fresh one-time ML-KEM public key + ML-DSA signature. Reply body is JSON with the key material for the client to encapsulate against. |
-| `register`            | ✓      | Request activation with username and email only. Replies email_sent; choose a password through the email link before account activation. |
+| `register`            | ✓      | Request activation with username and email only. Taken names/emails (including conflicting unexpired pending claims) return username_taken/email_taken; capped resends return rate_limited. Successful reply email_sent; choose a password through the email link before account activation. |
 | `login`               | ✓      | Password login. Sealed. Returns access + refresh tokens. |
 | `refresh`             | –      | Exchange a refresh token for a new access + rotated refresh token pair. |
 | `logout`              | –      | Revoke the caller's current refresh-token family. |
@@ -43,7 +43,7 @@ Every message that starts or joins a game — `create_game`, `join_game`, `quick
 | `link_google`         | ✓      | Attach a Google identity to an authenticated password account. |
 | `request_password_reset` | ✓   | email → generic email_sent for eligible and unknown addresses. |
 | `verify_email`        | ✓      | email_token, plus password for new-account activation → auth_action_ok with committed username. Browser then sends sealed login for automatic sign-in. Recovery-email confirmation does not log in. |
-| `reset_password`      | ✓      | email_token and new password → auth_action_ok; revokes existing sessions. |
+| `reset_password`      | ✓      | email_token and new password → auth_action_ok with original username; revokes existing sessions, then browser performs sealed login for automatic sign-in. |
 | `set_recovery_email`  | ✓      | access_token, current password and email; legacy password accounts without an email only. |
 | `unlink_google`       | –      | Detach the Google identity from the authenticated account (only if password login is still viable). |
 
