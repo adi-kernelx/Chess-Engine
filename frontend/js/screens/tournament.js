@@ -11,6 +11,9 @@ const TOURNAMENT_ERROR_COPY = Object.freeze({
     registration_closed: 'Registration is closed.',
     registration_deadline_passed: 'The registration deadline has passed.',
     registration_state_locked: 'Registration can no longer be changed.',
+    pairings_locked: 'Pairings are locked 90 seconds before round one. Registration cannot be reopened.',
+    set_registration_failed: 'The server could not confirm the registration change. Refresh the tournament status before trying again.',
+    connection_replaced: 'Your game is open in a newer connection. Use that window, or refresh this one to reconnect.',
     not_registered: 'You are not registered for this tournament.',
     player_eliminated: 'You have been eliminated. You can still spectate.',
     advancement_already_locked: 'That result cannot be changed after the next stage or final outcome is locked.',
@@ -29,6 +32,14 @@ export function tournamentErrorMessage(message, fallback) {
 export function tournamentPath(id) {
     const value = Number(id);
     return Number.isSafeInteger(value) && value > 0 ? `/tournaments/${value}` : '/tournaments';
+}
+
+export function tournamentRegistrationCutoff(tournament) {
+    return Math.min(Number(tournament.registrationDeadline), Number(tournament.firstRoundStartsAt) - 90);
+}
+
+export function tournamentRoundHasStarted(round, now = Date.now() / 1000) {
+    return !!round && round.status === 'live' && now >= Number(round.earliestStartAt);
 }
 
 /** Round outcome/readiness, rather than a stale check-in flag after play. */
@@ -85,6 +96,7 @@ export function validateTournamentSchedule(values, nowMs = Date.now()) {
     if (!Number.isInteger(inc) || inc < 0) errors.inc = 'Increment cannot be negative.';
     if (!Number.isFinite(deadlineMs) || deadlineMs <= nowMs) errors.registrationDeadline = 'Choose a future registration deadline.';
     if (!Number.isFinite(startMs) || startMs < deadlineMs + 30_000) errors.firstRoundStartsAt = 'Start round one at least 30 seconds after registration closes.';
+    else if (startMs <= nowMs + 90_000) errors.firstRoundStartsAt = 'Start round one more than 90 seconds from now so registration can open before pairings lock.';
     if (!Number.isInteger(roundMinutes) || roundMinutes < 1) errors.roundMinutes = 'Round spacing must be at least 1 minute.';
     return {
         errors,
@@ -143,8 +155,8 @@ export class TournamentScreen extends Screen {
             void this._load();
             if (this._detailTournamentId) void this._refreshDetail(true);
         }));
+        this.interval(() => this._updateCountdown(), 1000);
         this.interval(() => {
-            this._updateCountdown();
             if (this._detailTournamentId) void this._refreshDetail(true);
         }, 3000);
         await this._load();
@@ -243,6 +255,7 @@ export class TournamentScreen extends Screen {
     }
 
     async _readRequest(message, options) {
+        options = { ...options, correlated: true };
         let result = await this.ctx.capability.request(message, options);
         if (result.live || !this.root) return result;
         // The first attempt already waited for its full timeout. Yield once so
@@ -303,7 +316,7 @@ export class TournamentScreen extends Screen {
             const deadline = new Date(fields.registrationDeadline.input.value);
             const start = new Date(fields.firstRoundStartsAt.input.value);
             preview.textContent = Number.isFinite(deadline.getTime()) && Number.isFinite(start.getTime())
-                ? `Local preview: registration closes ${deadline.toLocaleString()}; round one starts ${start.toLocaleString()}. UTC is sent to the server.`
+                ? `Local preview: registration closes ${new Date(Math.min(deadline.getTime(), start.getTime() - 90_000)).toLocaleString()}; pairings lock 90 seconds before round one starts at ${start.toLocaleString()}. UTC is sent to the server.`
                 : 'Choose both schedule times to see the local preview.';
             return result;
         };
@@ -344,7 +357,7 @@ export class TournamentScreen extends Screen {
         const token = await this._tokenOrLogin(); if (!token) return false;
         const result = await this.ctx.capability.request(
             this.ctx.Outbound.createTournament(token, value.name, value.rounds, value.base, value.inc, value),
-            { expect: 'tournament_created', timeout: 5000, demo: () => ({}), failOnError: true });
+            { expect: 'tournament_created', timeout: 15000, demo: () => ({}), failOnError: true, correlated: true });
         if (!result.live) { this._showError(result.error, 'Tournament could not be created.'); return false; }
         this.ctx.toast.success('Tournament created. Registration is open.');
         await this._load();
@@ -375,6 +388,16 @@ export class TournamentScreen extends Screen {
         if (this._joiningTournamentId === requestedId && this._identity(result.data).joined) {
             this._joiningTournamentId = null;
             this.ctx.toast.success('Tournament registration confirmed.');
+        }
+        if (this._registrationPending && this._registrationPending.id === requestedId
+            && result.data.tournament.registrationOpen === this._registrationPending.open) {
+            this._registrationPending = null;
+            this.ctx.toast.success('Registration status confirmed.');
+        }
+        if (this._checkInPending && this._checkInPending.id === requestedId
+            && this._isCheckedIn(result.data, this._checkInPending.round, this.ctx.session.username)) {
+            this._checkInPending = null;
+            this.ctx.toast.success('Round check-in confirmed. Your game opens at the scheduled start.');
         }
         if (silent && this._detailState
             && JSON.stringify(this._detailState) === JSON.stringify(result.data)) {
@@ -409,6 +432,9 @@ export class TournamentScreen extends Screen {
     _renderDetail() {
         const state = this._detailState; if (!state) return;
         const t = state.tournament; const who = this._identity(state); const round = this._activeRound(state);
+        const beforeCutoff = Date.now() / 1000 < tournamentRegistrationCutoff(t);
+        this._registrationBeforeCutoff = beforeCutoff;
+        const registrationAvailable = t.status === 'registration' && t.registrationOpen && beforeCutoff;
         clear(this._detailBody); clear(this._detailFooter);
         const tabs = ['overview', 'standings', 'pairings'].map(key => h('button', {
             class: 'tabs__tab' + (this._detailTab === key ? ' is-active' : ''),
@@ -421,28 +447,29 @@ export class TournamentScreen extends Screen {
             this._detailTab === 'overview' ? this._overview(state, who, round)
                 : this._detailTab === 'standings' ? this._standingsTable(state, round)
                     : this._pairingsTable(state, who)));
-        if (t.status === 'registration' && t.registrationOpen && who.joined) {
+        if (registrationAvailable && who.joined) {
             this._detailFooter.appendChild(h('button', { class: 'btn btn--danger', onclick: () => this._leave(t) }, 'Unregister'));
-        } else if (t.status === 'registration' && t.registrationOpen && who.signedIn && !who.joined) {
+        } else if (registrationAvailable && who.signedIn && !who.joined) {
             const joining = this._joiningTournamentId === Number(t.id);
             this._detailFooter.appendChild(h('button', { class: 'btn btn--primary', disabled: joining,
                 'aria-busy': joining ? 'true' : 'false', onclick: () => this._join(t) }, joining ? 'Confirming registration…' : 'Register'));
-        } else if (!who.signedIn && t.status === 'registration' && t.registrationOpen) {
+        } else if (!who.signedIn && registrationAvailable) {
             this._detailFooter.appendChild(h('button', { class: 'btn btn--primary', onclick: () => {
                 this.ctx.postAuthPath = tournamentPath(t.id); this._detailDialog.close(); this.ctx.router.go('/login');
             } }, 'Sign in to register'));
         }
-        const deadlineHasNotPassed = Date.now() / 1000 < Number(t.registrationDeadline || 0);
         if (who.isCreator && (t.status === 'registration' || t.status === 'scheduled')
-            && (t.registrationOpen || deadlineHasNotPassed)) {
-            this._detailFooter.appendChild(h('button', { class: 'btn', onclick: () => this._setRegistration(t, !t.registrationOpen) },
-                t.registrationOpen ? 'Close registration' : 'Reopen registration'));
+            && beforeCutoff) {
+            this._detailFooter.appendChild(h('button', { class: 'btn', disabled: !!this._registrationPending,
+                onclick: () => this._setRegistration(t, !t.registrationOpen) },
+                this._registrationPending ? 'Confirming change…' : t.registrationOpen ? 'Close registration' : 'Reopen registration'));
         }
         if (who.joined && canJoinTournamentRound(state, who.standing, round)
             && Date.now() / 1000 <= round.checkInClosesAt) {
             const checked = this._isCheckedIn(state, round.round, who.username);
-            this._detailFooter.appendChild(h('button', { class: 'btn btn--primary',
-                onclick: event => this._checkIn(state, round, event.currentTarget) }, checked ? 'Rejoin round' : 'Join round'));
+            this._detailFooter.appendChild(h('button', { class: 'btn btn--primary', disabled: !!this._checkInPending,
+                onclick: event => this._checkIn(state, round, event.currentTarget) }, this._checkInPending ? 'Confirming check-in…'
+                    : checked ? tournamentRoundHasStarted(round) ? 'Rejoin round' : 'Checked in · waiting for start' : 'Join round'));
         }
         this._detailFooter.appendChild(h('button', { class: 'btn btn--ghost', onclick: () => this._openShare(t) }, 'Share'));
         this._detailFooter.appendChild(h('button', { class: 'btn', onclick: () => {
@@ -485,7 +512,7 @@ export class TournamentScreen extends Screen {
             this._sharePanel(t),
             h('div', { class: 'tournament-note' },
                 (t.format === 'winners_advance'
-                    ? 'Losers are eliminated; winners and bye recipients advance. A first draw replays the same pair with colors reversed; after two draws both advance and cannot meet again. When no legal game remains, play ends. Final ranking is by game wins only, excluding byes; equal wins share a rank. Other pairs minimize rating distance. '
+                    ? 'Losers are eliminated; winners and bye recipients advance. A first draw replays the same pair with colors reversed; after two draws both advance and cannot meet again. When no legal game remains, play ends. Placement follows advancement: the champion, then players eliminated in the final, then earlier stages. Only remaining final survivors use game wins to break a tie; byes do not count and equal wins share a rank. Other pairs minimize rating distance. '
                     : 'Pairings avoid rematches and minimize the total rating difference across the round. Scores break ties. ')
                 + 'With an odd player count, the lowest-ranked player who has not had a bye sits out and receives one point. '
                 + 'Games update standings automatically; the next round waits for all games to finish.'));
@@ -519,18 +546,19 @@ export class TournamentScreen extends Screen {
 
     _pairingsTable(state, who) {
         const rows = state.pairings || [];
-        if (!rows.length) return h('div', { class: 'empty' }, 'Pairings appear when the scheduled round opens.');
+        if (!rows.length) return h('div', { class: 'empty' }, 'Round-one pairings appear 90 seconds before the scheduled start.');
         const bodyRows = rows.map(row => {
             const isMine = who.username && [row.whiteUsername, row.blackUsername]
                 .some(name => String(name || '').toLocaleLowerCase() === who.username);
-            const action = row.result === 'pending' && row.gameId != null
+            const round = (state.rounds || []).find(r => r.round === row.round);
+            const action = row.result === 'pending' && row.gameId != null && tournamentRoundHasStarted(round)
                 ? isMine ? h('button', { class: 'btn btn--sm btn--primary', onclick: event => {
                     const round = (state.rounds || []).find(r => r.round === row.round);
                     if (round) void this._checkIn(state, round, event.currentTarget);
                 } }, 'Open game') : h('a', { class: 'btn btn--sm', href: `#/spectate/${row.gameId}` }, 'Spectate')
                 : row.result !== 'pending' && row.replayGameId != null
                     ? h('a', { class: 'btn btn--sm', href: `#/replay/${row.replayGameId}` }, 'Replay')
-                    : '—';
+                    : row.result === 'pending' && round && !tournamentRoundHasStarted(round) ? 'Waiting for scheduled start' : '—';
             const correctionLocked = state.tournament.format === 'winners_advance'
                 && (state.tournament.status === 'completed' || row.round < state.tournament.currentRound);
             const correction = who.isCreator && row.blackPlayerId != null && !correctionLocked
@@ -561,7 +589,7 @@ export class TournamentScreen extends Screen {
         let result;
         try {
             result = await this.ctx.capability.request(this.ctx.Outbound.joinTournament(token, tournament.id),
-                { expect: 'tournament_joined', timeout: 15000, demo: () => ({}), failOnError: true });
+                { expect: 'tournament_joined', timeout: 15000, demo: () => ({}), failOnError: true, correlated: true });
         } catch (_) { result = { live: false }; }
         if (!this.root) return;
         if (!this._joiningTournamentId && this._detailState && this._identity(this._detailState).joined) return;
@@ -589,31 +617,54 @@ export class TournamentScreen extends Screen {
         if (!confirmed) { await this._openState(tournament); return; }
         const token = await this._tokenOrLogin(); if (!token) return;
         const result = await this.ctx.capability.request(this.ctx.Outbound.leaveTournament(token, tournament.id),
-            { expect: 'tournament_left', timeout: 5000, demo: () => ({}), failOnError: true });
+            { expect: 'tournament_left', timeout: 15000, demo: () => ({}), failOnError: true, correlated: true });
         if (!result.live) { this._showError(result.error, 'Could not unregister.'); await this._openState(tournament); return; }
         this.ctx.toast.success('You are no longer registered.'); await this._openState(tournament);
     }
 
     async _setRegistration(tournament, open) {
+        if (this._registrationPending) return;
         const token = await this._tokenOrLogin(); if (!token) return;
-        const result = await this.ctx.capability.request(this.ctx.Outbound.setTournamentRegistration(token, tournament.id, open),
-            { expect: 'tournament_registration_updated', timeout: 5000, demo: () => ({}), failOnError: true });
-        if (!result.live) { this._showError(result.error, 'Registration could not be changed.'); return; }
+        if (this._registrationPending) return;
+        this._registrationPending = { id: Number(tournament.id), open };
+        this._renderDetail();
+        let result;
+        try { result = await this.ctx.capability.request(this.ctx.Outbound.setTournamentRegistration(token, tournament.id, open),
+            { expect: 'tournament_registration_updated', timeout: 15000, demo: () => ({}), failOnError: true, correlated: true });
+        } catch (_) { result = { live: false }; }
+        if (!this.root) return;
+        if (!result.live) {
+            if (result.error) { this._registrationPending = null; this._showError(result.error, 'Registration change was rejected.'); }
+            else this.ctx.toast.warning('The registration change is still being confirmed. Please wait; do not submit again.');
+            await this._refreshDetail(true); return;
+        }
+        this._registrationPending = null;
         this.ctx.toast.success(open ? 'Registration reopened.' : 'Registration closed; the event is scheduled.');
         await this._load(); await this._refreshDetail(false);
     }
 
     async _checkIn(state, round, button) {
+        if (this._checkInPending) return;
         const token = await this._tokenOrLogin(); if (!token) return;
+        if (this._checkInPending) return;
+        this._checkInPending = { id: Number(state.tournament.id), round: round.round };
         if (button) { button.disabled = true; button.textContent = 'Joining…'; }
-        const result = await this.ctx.capability.request(
+        let result;
+        try { result = await this.ctx.capability.request(
             this.ctx.Outbound.checkInTournamentRound(token, state.tournament.id, round.round),
-            { expect: 'tournament_round_checked_in', timeout: 5000, demo: () => ({}), failOnError: true });
+            { expect: 'tournament_round_checked_in', timeout: 15000, demo: () => ({}), failOnError: true, correlated: true });
+        } catch (_) { result = { live: false }; }
+        if (!this.root) return;
         if (!result.live) {
-            if (button) { button.disabled = false; button.textContent = 'Join round'; }
-            this._showError(result.error, 'Could not join this round.'); return;
+            if (result.error) {
+                this._checkInPending = null;
+                if (button) { button.disabled = false; button.textContent = 'Join round'; }
+                this._showError(result.error, 'Round check-in was rejected.');
+            } else this.ctx.toast.warning('Check-in is still being confirmed. Please wait; your game opens at the scheduled start.');
+            await this._refreshDetail(true); return;
         }
-        if (result.data.roomReady && result.data.gameId) { this._enterGame(result.data, state, round.round); return; }
+        this._checkInPending = null;
+        if (result.data.roomReady && result.data.gameId && tournamentRoundHasStarted(round)) { this._enterGame(result.data, state, round.round); return; }
         this.ctx.toast.success('Checked in. Your reserved game will open at the scheduled start.');
         await this._refreshDetail(false);
     }
@@ -628,6 +679,8 @@ export class TournamentScreen extends Screen {
     _enterGame(message, state, roundNumber) {
         const pairing = (state.pairings || []).find(p => Number(p.id) === Number(message.pairingId)
             || Number(p.gameId) === Number(message.gameId));
+        const round = (state.rounds || []).find(r => r.round === (roundNumber || (pairing && pairing.round)));
+        if (round && Date.now() / 1000 < round.earliestStartAt) return;
         const color = message.color === 'black' ? 'b' : 'w';
         const opponent = pairing ? (color === 'w' ? pairing.blackUsername : pairing.whiteUsername) : 'Opponent';
         const t = state.tournament;
@@ -645,7 +698,13 @@ export class TournamentScreen extends Screen {
         let reason = '';
         const reasonError = h('div', { class: 'field__error', hidden: true }, 'Enter a correction reason.');
         const reasonInput = h('textarea', { class: 'input tournament-reason', rows: 3, maxlength: 500,
-            'aria-label': 'Correction reason', oninput: e => { reason = e.target.value; } });
+            'aria-label': 'Correction reason', oninput: e => {
+                reason = e.target.value;
+                if (reason.trim()) {
+                    reasonError.hidden = true;
+                    reasonInput.removeAttribute('aria-invalid');
+                }
+            } });
         let dlg;
         const save = h('button', { class: 'btn btn--danger', onclick: async () => {
             if (!reason.trim()) { reasonError.hidden = false; reasonInput.setAttribute('aria-invalid', 'true'); reasonInput.focus(); return; }
@@ -675,7 +734,7 @@ export class TournamentScreen extends Screen {
         const token = await this._tokenOrLogin(); if (!token) return false;
         const response = await this.ctx.capability.request(
             this.ctx.Outbound.reportTournamentResult(token, pairing.id, result, reason),
-            { expect: 'tournament_result_recorded', timeout: 5000, demo: () => ({}), failOnError: true });
+            { expect: 'tournament_result_recorded', timeout: 15000, demo: () => ({}), failOnError: true, correlated: true });
         if (!response.live) { this._showError(response.error, 'Result correction could not be saved.'); return false; }
         this.ctx.toast.success('Tournament standings corrected; replay and rating were not changed.');
         return true;
@@ -710,6 +769,10 @@ export class TournamentScreen extends Screen {
     }
 
     _updateCountdown() {
+        if (this._detailState && this._registrationBeforeCutoff !== undefined
+            && this._registrationBeforeCutoff !== (Date.now() / 1000 < tournamentRegistrationCutoff(this._detailState.tournament))) {
+            this._renderDetail(); return;
+        }
         const el = this._countdownEl; if (!el || !el.dataset) return;
         const deadline = Number(el.dataset.deadline || 0) * 1000;
         const label = el.dataset.label || '';

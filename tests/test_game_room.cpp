@@ -406,6 +406,16 @@ void test_disconnect() {
             && room.is_connected(Color::BLACK);
     });
 
+    run_test("authenticated reconnect replaces an old live descriptor safely", []() {
+        GameRoom room(1, 100, "Alice", 10, TimeControl(), 1001, 800);
+        room.join(200, "Bob", 20, 1002, 800);
+        if (!room.on_reconnect_db_player(1002, 25, 2) || room.has_player(20)
+            || room.on_reconnect_db_player(1002, 20, 1)) return false;
+        room.on_disconnect(20);
+        return room.has_player(25) && room.is_connected(Color::BLACK)
+            && !room.submit_move(20, make_square(6,4), make_square(4,4)).success;
+    });
+
     run_test("Reconnect within 120 seconds prevents abandonment", []() {
         application::ports::FakeClock clock;
         GameRoom room(1, 100, "Alice", 10, TimeControl(), 1001, 800);

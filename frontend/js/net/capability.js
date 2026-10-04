@@ -17,14 +17,15 @@
  *      - timeout                    →  { data: demo(), live: false }
  *                                     (do NOT cache — slow server may reply later)
  *
- * The backend has no request-id correlation, so if two probes race for
- * the same reply type they might mis-attribute. This is acceptable for
- * preview screens — nothing safety-critical rides on it.
+ * Typed routes support opt-in request-id correlation. Tournament calls enable
+ * it so overlapping polls/writes cannot consume another request's response.
+ * Legacy raw routes retain their existing uncorrelated wire contract.
  */
 
 import { Inbound } from './protocol.js';
 
 const DEFAULT_TIMEOUT = 1500;
+let requestSequence = 0;
 
 export class Capability {
     /**
@@ -44,13 +45,17 @@ export class Capability {
      * @param {boolean} [opts.failOnError=false] Resolve immediately when the
      * server returns a regular error. Use only for an isolated request whose
      * error cannot be confused with another concurrent operation.
+     * @param {boolean} [opts.correlated=false] Require a matching request_id;
+     * supported by the backend's typed routes, not legacy raw auth routes.
      * @returns {Promise<{ data: any, live: boolean, error?: any }>}
      */
-    request(message, { expect, demo, timeout = DEFAULT_TIMEOUT, failOnError = false }) {
+    request(message, { expect, demo, timeout = DEFAULT_TIMEOUT, failOnError = false, correlated = false }) {
         if (!message || !message.type) {
             return Promise.resolve({ data: demo(), live: false });
         }
         const outType = message.type;
+        const requestId = correlated ? `cap-${Date.now()}-${++requestSequence}` : null;
+        if (requestId) message = { ...message, request_id: requestId };
 
         // Fast path: known unsupported.
         if (this._cache.get(outType) === 'preview') {
@@ -74,9 +79,11 @@ export class Capability {
             };
 
             cleanup.push(this.socket.on(expect, (raw) => {
+                if (requestId && raw.request_id !== requestId) return;
                 finish({ data: Inbound.normalize(raw), live: true }, 'live');
             }));
             cleanup.push(this.socket.on('error', (raw) => {
+                if (requestId && raw.request_id !== requestId) return;
                 const norm = Inbound.normalize(raw);
                 if (norm.isUnknownType) {
                     finish({ data: demo(), live: false }, 'preview');

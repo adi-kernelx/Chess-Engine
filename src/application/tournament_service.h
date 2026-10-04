@@ -41,6 +41,9 @@
 #pragma once
 
 #include <cstdint>
+#include <chrono>
+#include <map>
+#include <mutex>
 #include <string>
 
 #include "application/ports/message_sink.h"
@@ -127,6 +130,16 @@ public:
                            MessageSink&          caller_sink);
 
 private:
+    struct CachedState {
+        std::string frame;
+        std::chrono::steady_clock::time_point expires;
+    };
+    std::mutex state_cache_mutex_;
+    std::map<int64_t, CachedState> state_cache_;
+    void invalidate_state_cache() {
+        std::lock_guard<std::mutex> lock(state_cache_mutex_);
+        state_cache_.clear();
+    }
     chess::storage::Database*  db_ = nullptr;
     ports::Clock&              clock_;
     ports::TournamentRuntime* runtime_ = nullptr;

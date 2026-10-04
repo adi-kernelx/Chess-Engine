@@ -12,6 +12,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 namespace chess {
 namespace auth {
@@ -60,6 +61,7 @@ bool get_str(const json& j, const char* key, std::string& out) {
 bool get_i64(const json& j, const char* key, int64_t& out) {
     auto it = j.find(key);
     if (it == j.end() || !it->is_number_integer()) return false;
+    if (it->is_number_unsigned() && it->get<uint64_t>() > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) return false;
     out = it->get<int64_t>();
     return true;
 }
@@ -137,6 +139,21 @@ SupabaseVerifier SupabaseVerifier::make(SecureBuffer hs256_secret,
                             std::move(audience), std::move(provider));
 }
 
+SupabaseVerifier SupabaseVerifier::make_es256(std::string issuer, std::string audience,
+                                             std::string provider,
+                                             Es256JwksVerifier::Fetch fetch,
+                                             Es256JwksVerifier::Clock clock) {
+    SupabaseVerifier verifier;
+    if (audience.empty() || provider.empty()) return verifier;
+    auto jwks = std::make_shared<Es256JwksVerifier>(issuer, std::move(fetch), std::move(clock));
+    if (!jwks->valid()) return verifier;
+    verifier.issuer_ = std::move(issuer);
+    verifier.audience_ = std::move(audience);
+    verifier.provider_ = std::move(provider);
+    verifier.jwks_ = std::move(jwks);
+    return verifier;
+}
+
 SupabaseVerifier SupabaseVerifier::from_env(std::string& out_error) {
     out_error.clear();
     auto get = [](const char* name) -> const char* {
@@ -149,9 +166,19 @@ SupabaseVerifier SupabaseVerifier::from_env(std::string& out_error) {
     const char* provider   = std::getenv("SUPABASE_PROVIDER");
     if (provider == nullptr || provider[0] == '\0') provider = "google";
 
-    if (!secret_str) { out_error = "SUPABASE_JWT_SECRET is not set"; return {}; }
     if (!iss)        { out_error = "SUPABASE_ISSUER is not set";     return {}; }
     if (!aud)        { out_error = "SUPABASE_AUDIENCE is not set";   return {}; }
+    const char* algorithm = get("SUPABASE_JWT_ALGORITHM");
+    // Preserve explicit legacy secret deployments; new secretless projects
+    // default to ES256. A configured algorithm selects exactly one mode.
+    const std::string mode = algorithm ? algorithm : (secret_str ? "HS256" : "ES256");
+    if (mode == "ES256") {
+        auto verifier = make_es256(iss, aud, provider);
+        if (!verifier.valid()) out_error = "ES256 requires an HTTPS Supabase project issuer";
+        return verifier;
+    }
+    if (mode != "HS256") { out_error = "SUPABASE_JWT_ALGORITHM must be ES256 or HS256"; return {}; }
+    if (!secret_str) { out_error = "HS256 requires SUPABASE_JWT_SECRET"; return {}; }
 
     // Supabase's dashboard prints the secret as raw text, not base64. But an
     // operator running us in Docker will often base64-wrap secrets to survive
@@ -172,24 +199,27 @@ SupabaseVerifier SupabaseVerifier::from_env(std::string& out_error) {
 bool SupabaseVerifier::verify(const std::string& jwt, int64_t now_unix,
                               SupabaseIdentity& out) const {
     out = SupabaseIdentity{};
-    if (!valid()) return false;
+    if (!valid() || jwt.size() > 16384) return false;
 
     std::string header_b64, payload_b64, sig_b64;
     if (!split_jwt(jwt, header_b64, payload_b64, sig_b64)) return false;
 
-    // Header: byte-exact HS256 form. Everything else is algorithm confusion.
+    // Select exactly one configured algorithm; never reinterpret a public key
+    // as an HMAC secret. The legacy HS256 mode keeps its byte-exact header.
     std::vector<uint8_t> header_bytes;
     if (!decode_base64url(header_b64, header_bytes)) return false;
     const std::string header_json(reinterpret_cast<const char*>(header_bytes.data()),
                                   header_bytes.size());
-    if (header_json != HS256_HEADER_JSON) return false;
-
-    // Signature next, before any JSON parsing of the payload. Attacker input
-    // must not reach the parser unauthenticated — same discipline as token.cpp.
-    std::vector<uint8_t> sig;
-    if (!decode_base64url(sig_b64, sig, Sha256::DIGEST_SIZE)) return false;
-    const auto expected = sign_hs256(secret_, header_b64, payload_b64);
-    if (!constant_time_equals(expected.data(), sig.data(), sig.size())) return false;
+    if (header_json.size() > 2048) return false;
+    if (jwks_) {
+        if (!jwks_->verify(header_json, header_b64 + "." + payload_b64, sig_b64)) return false;
+    } else {
+        if (header_json != HS256_HEADER_JSON) return false;
+        std::vector<uint8_t> sig;
+        if (!decode_base64url(sig_b64, sig, Sha256::DIGEST_SIZE)) return false;
+        const auto expected = sign_hs256(secret_, header_b64, payload_b64);
+        if (!constant_time_equals(expected.data(), sig.data(), sig.size())) return false;
+    }
 
     // Now the payload.
     std::vector<uint8_t> payload_bytes;
@@ -210,7 +240,10 @@ bool SupabaseVerifier::verify(const std::string& jwt, int64_t now_unix,
     if (!get_i64(payload, "exp", exp) || now_unix >= exp)  return false;
     // iat is only checked for being "not wildly in the future"; a small skew
     // matches token.h's own tolerance.
-    if (get_i64(payload, "iat", iat) && now_unix < iat - 60) return false;
+    if (payload.contains("iat") && (!get_i64(payload, "iat", iat) || iat < 0 ||
+        (iat > now_unix && iat - now_unix > 60))) return false;
+    int64_t nbf = 0;
+    if (payload.contains("nbf") && (!get_i64(payload, "nbf", nbf) || nbf > now_unix)) return false;
 
     if (!get_str(payload, "email", email)) return false;   // required for OAuth
 

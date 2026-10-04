@@ -6,7 +6,8 @@
     <meta name="description" content="Multiplayer chess platform — real-time games, AI opponent, tournaments." />
     <meta name="color-scheme" content="dark" />
     <title>Chess Platform</title>
-    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/logo-180.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -96,9 +97,7 @@
     <div class="app">
         <nav class="nav" role="navigation" aria-label="Primary">
             <a href="#/" class="nav__brand" aria-label="Chess Platform home">
-                <span class="nav__brand-mark" aria-hidden="true">
-                    <svg class="icon icon--sm" style="stroke: var(--on-accent); fill: none;"><use href="#i-king"/></svg>
-                </span>
+                <img class="nav__brand-logo" src="assets/logo.svg" width="28" height="28" alt="" />
                 <span>Chess Platform</span>
             </a>
 
@@ -138,6 +137,6 @@
 
     <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
 
-    <script type="module" src="js/main.js?v=g27"></script>
+    <script type="module" src="js/main.js?v=g29"></script>
 </body>
 </html>

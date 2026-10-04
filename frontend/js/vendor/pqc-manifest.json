@@ -1,0 +1,30 @@
+{
+  "packages": [
+    {
+      "name": "@noble/post-quantum",
+      "version": "0.7.1",
+      "integrity": "sha512-+P9981IiAnVh+rmcubozzVwrEy3XsN/tMhTnvsjV9VDaYpOnNCqWqKo2FLWxbu92YHfjGIlE5XnW175UK+ln+Q=="
+    },
+    {
+      "name": "@noble/hashes",
+      "version": "2.4.0",
+      "integrity": "sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA=="
+    },
+    {
+      "name": "@noble/curves",
+      "version": "2.4.0",
+      "integrity": "sha512-P4/62zrgfH33CneE3Dn4WhJVA22YUU0eR51wKIan4NVRvwsA0YnPTwWGpNbpuacSujmSFLvyzpyuR30+fbq2Ew=="
+    },
+    {
+      "name": "@noble/ciphers",
+      "version": "2.4.0",
+      "integrity": "sha512-AnjFn0Jv92laAkvMrghlFZq4qQCIN/4DxFV/eooqtC2YTjB7kBeLMS2T9KJX4Dn+ZVXLOwK0lSgqDtx9gvxtiw=="
+    },
+    {
+      "name": "@esbuild/win32-x64",
+      "version": "0.25.12",
+      "integrity": "sha512-alJC0uCZpTFrSL0CCDjcgleBXPnCrEAhTBILpeAp7M/OFgoqtAetfBzX0xM00MUsVVPpVjlPuMbREqnZCXaTnA=="
+    }
+  ],
+  "bundleSha256": "11b1cff9234fcaec8190e4e767506824b81c8d3be028405e4620ea57d2e5276d"
+}

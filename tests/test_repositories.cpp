@@ -753,7 +753,13 @@ int main() {
             db.exec("UPDATE players SET games_played=1, wins=1 WHERE id=$1",
                     {Param::int64(id)});
         }
-        db.exec("ANALYZE players");
+        // Tiny tables legitimately favor sequential scans. Exercise the real
+        // planner with a larger eligible population, not forced planner flags.
+        if (!db.exec(
+                "INSERT INTO players(username,username_ci,password_hash,elo_rating,games_played,wins)"
+                " SELECT 'bulk' || i,'bulk' || i,'hash',800 + i % 1600,1,1"
+                " FROM generate_series(1,10000) i").ok ||
+            !db.exec("ANALYZE players").ok) return false;
 
         auto plan = db.exec(
             "EXPLAIN (ANALYZE, COSTS OFF)"
@@ -788,14 +794,24 @@ int main() {
             g.think_times.clear();
             if (!save_completed_game(db, g).ok) return false;
         }
-        db.exec("ANALYZE games");
+        // History lookup must be selective: fifty games all belonging to the
+        // requested player correctly make a sequential scan cheaper.
+        int64_t other_w = insert_player(db, "OtherW", 1200);
+        int64_t other_b = insert_player(db, "OtherB", 1200);
+        if (other_w < 0 || other_b < 0 || !db.exec(
+                "INSERT INTO games(white_id,black_id,moves,result,termination,"
+                "white_elo,black_elo,time_control,started_at,ended_at,move_count)"
+                " SELECT $1,$2,'e2e4','1-0','resignation',1200,1200,'600+5',"
+                " now(),now(),1 FROM generate_series(1,10000)",
+                {Param::int64(other_w), Param::int64(other_b)}).ok ||
+            !db.exec("ANALYZE games").ok) return false;
 
         auto plan = db.exec(
             "EXPLAIN (ANALYZE, COSTS OFF)"
-            " (SELECT g.id FROM games g WHERE g.white_id = $1"
+            " (SELECT g.id,g.started_at FROM games g WHERE g.white_id = $1"
             "  UNION ALL"
-            "  SELECT g.id FROM games g WHERE g.black_id = $1)"
-            " ORDER BY id DESC LIMIT 20",
+            "  SELECT g.id,g.started_at FROM games g WHERE g.black_id = $1)"
+            " ORDER BY started_at DESC,id DESC LIMIT 20",
             {Param::int64(w)});
 
         bool used_index = false;

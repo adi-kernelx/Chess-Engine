@@ -31,6 +31,7 @@
 #include "crypto/sealed_key_store.h"
 #include "crypto/sealed_registry.h"
 #include "crypto/signature.h"
+#include "crypto/identity_file.h"
 #include "game/game_handler.h"
 #include "game/match_notify.h"
 #include "game/matchmaker.h"
@@ -51,13 +52,11 @@
 #include <string>
 #include <vector>
 
-chess::net::TcpServer*          g_server = nullptr;
-chess::concurrent::ThreadPool*  g_pool   = nullptr;
+volatile std::sig_atomic_t shutdown_signal = 0;
 
 void signal_handler(int signum) {
-    chess::core::Logger::info("main", "signal",
-        "Received signal " + std::to_string(signum) + ", shutting down...");
-    if (g_server) g_server->stop();
+    // No allocation, logging, locks or socket cleanup in asynchronous context.
+    shutdown_signal = signum;
 }
 
 namespace {
@@ -85,7 +84,7 @@ uint16_t resolve_port() {
  * If $SERVER_IDENTITY_KEY_PATH is set, read the ML-DSA-65 private key from
  * that file and return a live keypair. Returns an invalid MlDsa65KeyPair if
  * the env var is unset OR the file is unreadable — the caller treats that
- * as "sealed envelopes are disabled for this run".
+ * as disabled only when no key was requested and sealing is not required.
  *
  * The key is generated once out-of-band via `tools/gen_server_identity`
  * (§7.3). On Cloud Run the recommended wiring is `--set-secrets
@@ -102,9 +101,9 @@ chess::crypto::MlDsa65KeyPair try_load_identity(bool& out_loaded) {
             std::string("SERVER_IDENTITY_KEY_PATH set but unreadable: ") + path);
         return {};
     }
-    std::vector<uint8_t> buf((std::istreambuf_iterator<char>(in)),
-                             std::istreambuf_iterator<char>());
-    auto kp = chess::crypto::MlDsa65KeyPair::from_private_key(buf.data(), buf.size());
+    in.close();
+    // Accept original raw keys and the versioned text-safe deployment wrapper.
+    auto kp = chess::crypto::load_identity_key_file(path);
     out_loaded = kp.valid();
     if (!out_loaded) {
         chess::core::Logger::warn("main", "startup",
@@ -119,6 +118,12 @@ int main() {
     using namespace chess;
     core::Logger::init(core::LogLevel::DEBUG);
     core::Logger::info("main", "startup", "=== Multiplayer Chess Platform ===");
+    const char* seal_policy = std::getenv("AUTH_SEAL_REQUIRED");
+    if (seal_policy && std::string(seal_policy) != "0" && std::string(seal_policy) != "1") {
+        core::Logger::error("main", "startup", "AUTH_SEAL_REQUIRED must be 0 or 1");
+        return 1;
+    }
+    const bool require_sealing = seal_policy && std::string(seal_policy) == "1";
 
     std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);
@@ -127,11 +132,19 @@ int main() {
     core::Logger::info("main", "startup", "Binding to port " + std::to_string(port));
 
     // ── Network layer ──
-    concurrent::ThreadPool pool;
-    g_pool = &pool;
+    // Bound the process's worker count independently of host CPU reporting.
+    // At least two workers allow I/O waits to overlap on a one-vCPU deployment.
+    uint32_t worker_count = 4;
+    if (const char* value = std::getenv("SERVER_WORKER_THREADS")) {
+        if (value[0] < '1' || value[0] > '8' || value[1] != '\0') {
+            core::Logger::error("main", "startup", "SERVER_WORKER_THREADS must be 1..8");
+            return 1;
+        }
+        worker_count = static_cast<uint32_t>(value[0] - '0');
+    }
+    concurrent::ThreadPool pool(worker_count);
 
     net::TcpServer server(port, pool);
-    g_server = &server;
 
     // ── Game layer ──
     game::RoomManager  room_mgr;
@@ -180,6 +193,9 @@ int main() {
     // AND they must be destroyed BEFORE the router that references them. Using
     // unique_ptrs on the stack in main() satisfies both.
     std::unique_ptr<storage::Database>                    db;
+    std::unique_ptr<storage::Database>                    tournament_db;
+    std::unique_ptr<storage::Database>                    persistence_db;
+    std::unique_ptr<storage::DatabasePool>                identity_read_pool;
     std::unique_ptr<auth::TokenSigner>                    signer;
     std::unique_ptr<auth::SupabaseVerifier>               google;
     std::unique_ptr<crypto::MlDsa65KeyPair>               identity;
@@ -212,6 +228,10 @@ int main() {
         }
     }
 
+    if (require_sealing && !auth_enabled) {
+        core::Logger::error("main", "startup", "AUTH_SEAL_REQUIRED needs configured authentication");
+        return 1;
+    }
     if (auth_enabled) {
         // Supabase / Google is optional — even without it, password auth works.
         std::string err;
@@ -226,11 +246,17 @@ int main() {
         }
 
         // Sealed envelopes are optional too — they need the on-disk identity
-        // key. Password auth remains available without them (a downgrade the
-        // operator explicitly opts into by not deploying an identity key).
+        // key. Local development may explicitly omit sealing; production sets
+        // AUTH_SEAL_REQUIRED=1. A configured but invalid key never downgrades.
         bool id_ok = false;
         auto tentative_id = std::make_unique<crypto::MlDsa65KeyPair>(
             try_load_identity(id_ok));
+        const char* identity_path = std::getenv("SERVER_IDENTITY_KEY_PATH");
+        if (!id_ok && (require_sealing || (identity_path && *identity_path))) {
+            core::Logger::error("main", "startup",
+                "Sealed authentication needs a readable, valid SERVER_IDENTITY_KEY_PATH; refusing downgrade");
+            return 1;
+        }
         if (id_ok) {
             identity   = std::move(tentative_id);
             seal_store = std::make_unique<crypto::SealedKeyStore>();
@@ -251,11 +277,39 @@ int main() {
         // (which still calls Database directly — its own port is a
         // future slice), plus the LLD-3.2/3.3 ports for the game
         // family. Both ports get their real Postgres adapters here.
-        game_handler.set_database(db.get());
-        game_store     = std::make_unique<storage::PostgresGameStore>(*db);
-        player_queries = std::make_unique<storage::PostgresPlayerQueries>(*db);
+        // Bulk tournament reads/maintenance and completion transactions must
+        // not queue ahead of access-token validation or refresh rotation.
+        // These are three bounded, independently serialized PG sessions, not
+        // three threads concurrently using one libpq connection.
+        tournament_db = std::make_unique<storage::Database>();
+        persistence_db = std::make_unique<storage::Database>();
+        if (!tournament_db->connect_from_env(err) || !persistence_db->connect_from_env(err)) {
+            core::Logger::error("main", "startup", "Persistence connection initialization failed");
+            return 1;
+        }
+        game_handler.set_database(tournament_db.get());
+        game_store     = std::make_unique<storage::PostgresGameStore>(*persistence_db);
+        player_queries = std::make_unique<storage::PostgresPlayerQueries>(*persistence_db);
         game_handler.set_game_store(game_store.get());
         game_handler.set_player_queries(player_queries.get());
+        // Narrow, reversible optimization: only fresh identity reads borrow
+        // from a pool. Auth writes/refresh and tournament transactions retain
+        // their verified dedicated sessions. At most seven total PG sessions.
+        size_t read_connections = 2;
+        if (const char* value = std::getenv("AUTH_READ_POOL_SIZE")) {
+            if (value[0] < '0' || value[0] > '4' || value[1] != '\0') {
+                core::Logger::error("main", "startup", "AUTH_READ_POOL_SIZE must be 0..4");
+                return 1;
+            }
+            read_connections = static_cast<size_t>(value[0] - '0');
+        }
+        if (read_connections) {
+            identity_read_pool = std::make_unique<storage::DatabasePool>();
+            if (!identity_read_pool->connect_from_env(read_connections, err)) {
+                core::Logger::error("main", "startup", "Identity read pool initialization failed");
+                return 1;
+            }
+        }
         core::Logger::info("main", "startup", "Game persistence enabled");
     }
 
@@ -279,7 +333,7 @@ int main() {
     // registers as raw routes (SealOpen only); every other family
     // uses the typed path.
     application::auth::IdentityExtractor identity_extractor(
-        db.get(), signer.get());
+        db.get(), signer.get(), nullptr, identity_read_pool.get());
     auto lookup = [&server](int fd) -> net::Connection* {
         return server.get_connection(fd);
     };
@@ -318,8 +372,11 @@ int main() {
     pipeline.install_on_router(server.get_router());
 
     server.get_router().set_default_handler(
-        [](net::Connection& conn, const std::string& message) {
-            core::Logger::warn("main", "unknown", "Unrecognized message: " + message);
+        [](net::Connection& conn, const std::string&) {
+            // Even unregistered routes can contain credentials (e.g. Google
+            // auth when the DB is unavailable). Never log user-controlled
+            // payloads or types through this fallback.
+            core::Logger::warn("main", "unknown", "Unrecognized message (payload redacted)");
             net::WebSocket::write_frame(conn, net::WsOpcode::TEXT,
                 "{\"type\":\"error\",\"message\":\"Unknown message type\"}");
         });
@@ -327,13 +384,15 @@ int main() {
     if (server.start()) {
         core::Logger::info("main", "startup",
             "Server ready. Listening on ws://0.0.0.0:" + std::to_string(port));
-        server.run();
+        server.run([] { return shutdown_signal != 0; });
     } else {
         core::Logger::error("main", "startup", "Failed to start server");
         return 1;
     }
 
+    core::Logger::info("main", "shutdown", "Draining workers after event loop/maintenance exit");
     pool.shutdown();
+    server.stop();
     core::Logger::info("main", "shutdown", "Server exited gracefully");
     return 0;
 }

@@ -47,6 +47,7 @@
 #include <libpq-fe.h>
 
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -129,6 +130,7 @@ using PGconnPtr = std::unique_ptr<PGconn, PGconnDeleter>;
 
 class Database {
 public:
+    uint64_t query_count() const { return query_count_.load(std::memory_order_relaxed); }
     Database() = default;
 
     Database(const Database&)            = delete;
@@ -146,11 +148,16 @@ public:
      * it usually contains the password.
      */
     bool connect_from_env(std::string& out_error);
+    bool connect_from_env(std::string& out_error, int timeout_seconds);
 
     /// Explicit form for tests. Same rules: no logging of the string.
     bool connect(const std::string& conninfo, std::string& out_error);
 
     bool connected() const;
+
+    /// Pool return hygiene: roll back an unfinished transaction before reuse.
+    /// Caller must own the exclusive lease. No query when already idle.
+    bool reset_for_reuse();
 
     // A PGconn may be used by only one thread at a time. exec() locks each
     // statement automatically. Multi-statement transactions retain this
@@ -191,6 +198,7 @@ public:
     std::string last_sqlstate() const;
 
 private:
+    std::atomic<uint64_t> query_count_{0};
     mutable std::recursive_mutex operation_mutex_;
     PGconnPtr    conn_;
     std::string  last_sqlstate_;

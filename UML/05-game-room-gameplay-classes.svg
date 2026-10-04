@@ -1,0 +1,236 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1875" height="1088" viewBox="0 0 1875 1088" role="img" aria-labelledby="ttl dsc">
+<title id="ttl">Game room, gameplay service and matchmaking</title>
+<desc id="dsc">game/ + application/gameplay_service. GameRoom is the single source of truth for one game (one mutex per room, Fischer clock,
+draw / rematch offers, reconnect grace). GameplayService runs every gameplay route; Matchmaker pairs quick-play players by rating.</desc>
+<defs>
+<marker id="tri" viewBox="0 0 14 14" refX="13" refY="7" markerWidth="14" markerHeight="14" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L13,7 L1,13 Z" fill="#ffffff" stroke="#4a5a6a" stroke-width="1.3"/></marker>
+<marker id="open" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,6 L1,11" fill="none" stroke="#4a5a6a" stroke-width="1.4"/></marker>
+<marker id="dfill" viewBox="0 0 18 10" refX="17" refY="5" markerWidth="18" markerHeight="10" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+  <path d="M1,5 L9,1 L17,5 L9,9 Z" fill="#4a5a6a" stroke="#4a5a6a" stroke-width="1"/></marker>
+<marker id="dhollow" viewBox="0 0 18 10" refX="17" refY="5" markerWidth="18" markerHeight="10" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+  <path d="M1,5 L9,1 L17,5 L9,9 Z" fill="#ffffff" stroke="#4a5a6a" stroke-width="1.2"/></marker>
+<marker id="sync" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9 Z" fill="#1f2933"/></marker>
+<marker id="ret" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9" fill="none" stroke="#1f2933" stroke-width="1.3"/></marker>
+</defs>
+<rect x="0" y="0" width="1875" height="1088" fill="#ffffff"/>
+<rect x="0" y="0" width="1874.9" height="6" fill="#2c7a7b"/>
+<text x="40.0" y="36.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">CHESS PLATFORM  ·  UML 05  ·  CLASS DIAGRAM</text>
+<text x="40.0" y="70.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="650" fill="#1f2933" text-anchor="start" xml:space="preserve">Game room, gameplay service and matchmaking</text>
+<text x="40.0" y="96.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">game/ + application/gameplay_service. GameRoom is the single source of truth for one game (one mutex per room, Fischer clock,</text>
+<text x="40.0" y="116.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">draw / rematch offers, reconnect grace). GameplayService runs every gameplay route; Matchmaker pairs quick-play players by rating.</text>
+<line x1="40" y1="132" x2="1834.9" y2="132" stroke="#d8dee6"/>
+<path d="M252.8,276.0 L252.8,352.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="260.8" y="309.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="260.8" y="344.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M480.1,413.0 L600.0,413.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="502.1" y="406.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="592.0" y="406.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M480.1,608.0 L600.0,608.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="502.1" y="601.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="592.0" y="601.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M223.5,654.0 L223.5,742.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="231.5" y="687.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="231.5" y="734.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M798.1,562.0 L798.1,474.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="806.1" y="540.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="806.1" y="493.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M798.1,688.0 L798.1,782.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dfill)"/>
+<text x="806.1" y="721.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="806.1" y="774.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">0..*</text>
+<path d="M996.3,403.0 L1100.0,403.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dfill)"/>
+<text x="1018.3" y="396.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="1092.0" y="396.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">0..*</text>
+<path d="M1175.0,332.0 L1175.0,282.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-end="url(#open)"/>
+<path d="M1467.1,406.0 L1560.0,406.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dfill)"/>
+<text x="1489.1" y="399.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="1552.0" y="399.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">2</text>
+<path d="M1467.1,552.0 L1560.0,552.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dfill)"/>
+<text x="1489.1" y="545.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="1552.0" y="545.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">0..*</text>
+<path d="M1467.1,649.0 L1560.0,649.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dfill)"/>
+<text x="1489.1" y="642.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="1552.0" y="642.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M1214.2,714.0 L1214.2,822.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="1222.2" y="747.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="1222.2" y="814.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M1413.5,714.0 L1413.5,822.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="1421.5" y="747.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="1421.5" y="814.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">0..*</text>
+<rect x="40.0" y="182.0" width="425.5" height="94.0" rx="4" fill="#f5f9ff" stroke="#2b6cb0" stroke-width="1.6"/>
+<path d="M40.0,212.0 L40.0,186.0 Q40.0,182.0 44.0,182.0 L461.5,182.0 Q465.5,182.0 465.5,186.0 L465.5,212.0 Z" fill="#d6e6fa" stroke="none"/>
+<rect x="40.0" y="182.0" width="425.5" height="94.0" rx="4" fill="none" stroke="#2b6cb0" stroke-width="1.6"/>
+<text x="252.8" y="202.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">GameplayHandler</text>
+<line x1="40.0" y1="212.0" x2="465.5" y2="212.0" stroke="#2b6cb0" stroke-width="1"/>
+<text x="50.0" y="230.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- service_ : GameplayService&amp;</text>
+<line x1="40.0" y1="236.0" x2="465.5" y2="236.0" stroke="#2b6cb0" stroke-width="1"/>
+<text x="50.0" y="254.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ register_handlers(pipeline : RequestPipeline&amp;) : void</text>
+<text x="50.0" y="270.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- handle_make_move(ctx, msg, sink) : void</text>
+<rect x="40.0" y="352.0" width="440.1" height="302.0" rx="4" fill="#faf7ff" stroke="#6b46c1" stroke-width="1.6"/>
+<path d="M40.0,382.0 L40.0,356.0 Q40.0,352.0 44.0,352.0 L476.1,352.0 Q480.1,352.0 480.1,356.0 L480.1,382.0 Z" fill="#e6dcfa" stroke="none"/>
+<rect x="40.0" y="352.0" width="440.1" height="302.0" rx="4" fill="none" stroke="#6b46c1" stroke-width="1.6"/>
+<text x="260.0" y="372.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">GameplayService</text>
+<line x1="40.0" y1="382.0" x2="480.1" y2="382.0" stroke="#6b46c1" stroke-width="1"/>
+<text x="50.0" y="400.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- rooms_ : RoomManager&amp;</text>
+<text x="50.0" y="416.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- matchmaker_ : Matchmaker&amp;</text>
+<text x="50.0" y="432.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- ai_ : AIPlayer&amp;</text>
+<text x="50.0" y="448.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- foreign_sender_ : ForeignSender</text>
+<text x="50.0" y="464.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- DISCONNECT_GRACE_MS : int = 120000</text>
+<line x1="40.0" y1="470.0" x2="480.1" y2="470.0" stroke="#6b46c1" stroke-width="1"/>
+<text x="50.0" y="488.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ make_move(ctx, req : MakeMoveRequest, sink) : void</text>
+<text x="50.0" y="504.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ resign(ctx, req, sink) : void</text>
+<text x="50.0" y="520.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ offer_draw(ctx, sink) : void</text>
+<text x="50.0" y="536.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ create_game(ctx, actor, base, inc, sink) : void</text>
+<text x="50.0" y="552.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ join_game(ctx, actor, game_id, sink) : void</text>
+<text x="50.0" y="568.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ quick_play(ctx, actor, base, inc, sink) : void</text>
+<text x="50.0" y="584.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ play_ai(ctx, actor, difficulty, base, inc, sink) : void</text>
+<text x="50.0" y="600.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ get_active_game(ctx, actor, sink) : void</text>
+<text x="50.0" y="616.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ on_player_disconnect(fd : int) : void</text>
+<text x="50.0" y="632.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ expire_disconnected_games() : void</text>
+<text x="50.0" y="648.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- trigger_ai_move(room, human_fd) : void</text>
+<rect x="600.0" y="562.0" width="432.8" height="126.0" rx="4" fill="#f4fbfb" stroke="#2c7a7b" stroke-width="1.6"/>
+<path d="M600.0,592.0 L600.0,566.0 Q600.0,562.0 604.0,562.0 L1028.8,562.0 Q1032.8,562.0 1032.8,566.0 L1032.8,592.0 Z" fill="#d3eeee" stroke="none"/>
+<rect x="600.0" y="562.0" width="432.8" height="126.0" rx="4" fill="none" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="816.4" y="582.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">Matchmaker</text>
+<line x1="600.0" y1="592.0" x2="1032.8" y2="592.0" stroke="#2c7a7b" stroke-width="1"/>
+<text x="610.0" y="610.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- buckets_ : map&lt;TimeControl, multimap&lt;int, QueueEntry&gt;&gt;</text>
+<text x="610.0" y="626.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- fd_index_ : map&lt;int, QueueLocation&gt;</text>
+<line x1="600.0" y1="632.0" x2="1032.8" y2="632.0" stroke="#2c7a7b" stroke-width="1"/>
+<text x="610.0" y="650.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ enqueue(fd, pid, name, elo, tc, db_id) : void</text>
+<text x="610.0" y="666.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ dequeue(fd : int) : bool</text>
+<text x="610.0" y="682.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ try_match() : vector&lt;MatchResult&gt;</text>
+<rect x="600.0" y="782.0" width="396.3" height="124.0" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="1.6"/>
+<path d="M600.0,826.0 L600.0,786.0 Q600.0,782.0 604.0,782.0 L992.3,782.0 Q996.3,782.0 996.3,786.0 L996.3,826.0 Z" fill="#edf2f7" stroke="none"/>
+<rect x="600.0" y="782.0" width="396.3" height="124.0" rx="4" fill="none" stroke="#4a5568" stroke-width="1.6"/>
+<text x="798.1" y="798.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;value&gt;&gt;</text>
+<text x="798.1" y="816.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">QueueEntry</text>
+<line x1="600.0" y1="826.0" x2="996.3" y2="826.0" stroke="#4a5568" stroke-width="1"/>
+<text x="610.0" y="844.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ connection_fd : int</text>
+<text x="610.0" y="860.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ elo : int</text>
+<text x="610.0" y="876.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ enqueue_time : time_point</text>
+<line x1="600.0" y1="882.0" x2="996.3" y2="882.0" stroke="#4a5568" stroke-width="1"/>
+<text x="610.0" y="900.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ acceptable_range(now) : int  // 200 + 50 per 10 s</text>
+<rect x="600.0" y="332.0" width="396.3" height="142.0" rx="4" fill="#f4fbfb" stroke="#2c7a7b" stroke-width="1.6"/>
+<path d="M600.0,362.0 L600.0,336.0 Q600.0,332.0 604.0,332.0 L992.3,332.0 Q996.3,332.0 996.3,336.0 L996.3,362.0 Z" fill="#d3eeee" stroke="none"/>
+<rect x="600.0" y="332.0" width="396.3" height="142.0" rx="4" fill="none" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="798.1" y="352.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">RoomManager</text>
+<line x1="600.0" y1="362.0" x2="996.3" y2="362.0" stroke="#2c7a7b" stroke-width="1"/>
+<text x="610.0" y="380.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- rooms_ : map&lt;GameId, shared_ptr&lt;GameRoom&gt;&gt;</text>
+<text x="610.0" y="396.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- default_listener_ : GameEventListenerPtr</text>
+<line x1="600.0" y1="402.0" x2="996.3" y2="402.0" stroke="#2c7a7b" stroke-width="1"/>
+<text x="610.0" y="420.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ create_room(...) : shared_ptr&lt;GameRoom&gt;</text>
+<text x="610.0" y="436.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ find_room_by_fd(fd : int) : shared_ptr&lt;GameRoom&gt;</text>
+<text x="610.0" y="452.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ find_room_by_db_player(id) : shared_ptr&lt;GameRoom&gt;</text>
+<text x="610.0" y="468.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ set_default_listener(l) : void</text>
+<rect x="1100.0" y="332.0" width="367.1" height="382.0" rx="4" fill="#f4fbfb" stroke="#2c7a7b" stroke-width="1.6"/>
+<path d="M1100.0,362.0 L1100.0,336.0 Q1100.0,332.0 1104.0,332.0 L1463.1,332.0 Q1467.1,332.0 1467.1,336.0 L1467.1,362.0 Z" fill="#d3eeee" stroke="none"/>
+<rect x="1100.0" y="332.0" width="367.1" height="382.0" rx="4" fill="none" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="1283.5" y="352.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">GameRoom</text>
+<line x1="1100.0" y1="362.0" x2="1467.1" y2="362.0" stroke="#2c7a7b" stroke-width="1"/>
+<text x="1110.0" y="380.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- mutex_ : mutex</text>
+<text x="1110.0" y="396.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- state_ : RoomState</text>
+<text x="1110.0" y="412.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- board_ : Board</text>
+<text x="1110.0" y="428.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- white_ : PlayerSlot</text>
+<text x="1110.0" y="444.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- black_ : PlayerSlot</text>
+<text x="1110.0" y="460.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- move_history_ : vector&lt;MoveRecord&gt;</text>
+<text x="1110.0" y="476.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- spectator_fds_ : vector&lt;int&gt;</text>
+<text x="1110.0" y="492.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- listeners_ : vector&lt;GameEventListenerPtr&gt;</text>
+<text x="1110.0" y="508.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- clock_ : Clock*</text>
+<text x="1110.0" y="524.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- revision_ : atomic&lt;uint64_t&gt;</text>
+<line x1="1100.0" y1="530.0" x2="1467.1" y2="530.0" stroke="#2c7a7b" stroke-width="1"/>
+<text x="1110.0" y="548.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ join(pid, name, fd, db_id, elo) : bool</text>
+<text x="1110.0" y="564.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ submit_move(fd, from, to, promo) : MoveResult</text>
+<text x="1110.0" y="580.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ resign(fd : int) : bool</text>
+<text x="1110.0" y="596.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ offer_draw(fd, err&amp;) : bool</text>
+<text x="1110.0" y="612.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ on_disconnect(fd : int) : void</text>
+<text x="1110.0" y="628.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ on_reconnect_db_player(id, fd, gen) : bool</text>
+<text x="1110.0" y="644.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ expire_disconnected(grace) : bool</text>
+<text x="1110.0" y="660.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ add_spectator(fd : int) : bool</text>
+<text x="1110.0" y="676.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ add_listener(l) : void</text>
+<text x="1110.0" y="692.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- finish_game(status, result) : void</text>
+<text x="1110.0" y="708.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- switch_clock() : void</text>
+<rect x="1560.0" y="332.0" width="264.9" height="148.0" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="1.6"/>
+<path d="M1560.0,376.0 L1560.0,336.0 Q1560.0,332.0 1564.0,332.0 L1820.9,332.0 Q1824.9,332.0 1824.9,336.0 L1824.9,376.0 Z" fill="#edf2f7" stroke="none"/>
+<rect x="1560.0" y="332.0" width="264.9" height="148.0" rx="4" fill="none" stroke="#4a5568" stroke-width="1.6"/>
+<text x="1692.5" y="348.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;value&gt;&gt;</text>
+<text x="1692.5" y="366.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">PlayerSlot</text>
+<line x1="1560.0" y1="376.0" x2="1824.9" y2="376.0" stroke="#4a5568" stroke-width="1"/>
+<text x="1570.0" y="394.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ connection_fd : int  // -2 = AI</text>
+<text x="1570.0" y="410.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ db_player_id : int64_t</text>
+<text x="1570.0" y="426.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ username : string</text>
+<text x="1570.0" y="442.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ elo : int</text>
+<text x="1570.0" y="458.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ remaining_ms : int</text>
+<text x="1570.0" y="474.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ connected : bool</text>
+<rect x="1560.0" y="502.0" width="177.3" height="100.0" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="1.6"/>
+<path d="M1560.0,546.0 L1560.0,506.0 Q1560.0,502.0 1564.0,502.0 L1733.3,502.0 Q1737.3,502.0 1737.3,506.0 L1737.3,546.0 Z" fill="#edf2f7" stroke="none"/>
+<rect x="1560.0" y="502.0" width="177.3" height="100.0" rx="4" fill="none" stroke="#4a5568" stroke-width="1.6"/>
+<text x="1648.7" y="518.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;value&gt;&gt;</text>
+<text x="1648.7" y="536.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">MoveRecord</text>
+<line x1="1560.0" y1="546.0" x2="1737.3" y2="546.0" stroke="#4a5568" stroke-width="1"/>
+<text x="1570.0" y="564.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ move : Move</text>
+<text x="1570.0" y="580.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ san : string</text>
+<text x="1570.0" y="596.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ think_time_ms : int</text>
+<rect x="1100.0" y="182.0" width="150.0" height="100.0" rx="4" fill="#ffffff" stroke="#4a5568" stroke-width="1.6"/>
+<path d="M1100.0,226.0 L1100.0,186.0 Q1100.0,182.0 1104.0,182.0 L1246.0,182.0 Q1250.0,182.0 1250.0,186.0 L1250.0,226.0 Z" fill="#edf2f7" stroke="none"/>
+<rect x="1100.0" y="182.0" width="150.0" height="100.0" rx="4" fill="none" stroke="#4a5568" stroke-width="1.6"/>
+<text x="1175.0" y="198.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;enumeration&gt;&gt;</text>
+<text x="1175.0" y="216.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">RoomState</text>
+<line x1="1100.0" y1="226.0" x2="1250.0" y2="226.0" stroke="#4a5568" stroke-width="1"/>
+<text x="1110.0" y="244.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">WAITING</text>
+<text x="1110.0" y="260.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">IN_PROGRESS</text>
+<text x="1110.0" y="276.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">FINISHED</text>
+<rect x="1560.0" y="622.0" width="228.4" height="54.0" rx="4" fill="#f3faf9" stroke="#285e61" stroke-width="1.6"/>
+<path d="M1560.0,652.0 L1560.0,626.0 Q1560.0,622.0 1564.0,622.0 L1784.4,622.0 Q1788.4,622.0 1788.4,626.0 L1788.4,652.0 Z" fill="#cde7e3" stroke="none"/>
+<rect x="1560.0" y="622.0" width="228.4" height="54.0" rx="4" fill="none" stroke="#285e61" stroke-width="1.6"/>
+<text x="1674.2" y="642.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">Board</text>
+<line x1="1560.0" y1="652.0" x2="1788.4" y2="652.0" stroke="#285e61" stroke-width="1"/>
+<text x="1570.0" y="670.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ make_move(move) : UndoInfo</text>
+<rect x="1100.0" y="822.0" width="228.4" height="84.0" rx="4" fill="#ffffff" stroke="#6b46c1" stroke-width="1.6" stroke-dasharray="6 4"/>
+<path d="M1100.0,866.0 L1100.0,826.0 Q1100.0,822.0 1104.0,822.0 L1324.4,822.0 Q1328.4,822.0 1328.4,826.0 L1328.4,866.0 Z" fill="#ffffff" stroke="none"/>
+<rect x="1100.0" y="822.0" width="228.4" height="84.0" rx="4" fill="none" stroke="#6b46c1" stroke-width="1.6" stroke-dasharray="6 4"/>
+<text x="1214.2" y="838.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;interface&gt;&gt;</text>
+<text x="1214.2" y="856.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" font-style="italic" xml:space="preserve">Clock</text>
+<line x1="1100.0" y1="866.0" x2="1328.4" y2="866.0" stroke="#6b46c1" stroke-width="1"/>
+<text x="1110.0" y="884.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ steady_now() : SteadyPoint</text>
+<text x="1110.0" y="900.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ unix_seconds() : int64_t</text>
+<rect x="1360.0" y="822.0" width="359.8" height="68.0" rx="4" fill="#ffffff" stroke="#6b46c1" stroke-width="1.6" stroke-dasharray="6 4"/>
+<path d="M1360.0,866.0 L1360.0,826.0 Q1360.0,822.0 1364.0,822.0 L1715.8,822.0 Q1719.8,822.0 1719.8,826.0 L1719.8,866.0 Z" fill="#ffffff" stroke="none"/>
+<rect x="1360.0" y="822.0" width="359.8" height="68.0" rx="4" fill="none" stroke="#6b46c1" stroke-width="1.6" stroke-dasharray="6 4"/>
+<text x="1539.9" y="838.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;interface&gt;&gt;</text>
+<text x="1539.9" y="856.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" font-style="italic" xml:space="preserve">GameEventListener</text>
+<line x1="1360.0" y1="866.0" x2="1719.8" y2="866.0" stroke="#6b46c1" stroke-width="1"/>
+<text x="1370.0" y="884.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ on_game_completed(ev : GameCompleted) : void</text>
+<rect x="40.0" y="742.0" width="367.1" height="54.0" rx="4" fill="#f4fbfb" stroke="#2c7a7b" stroke-width="1.6"/>
+<path d="M40.0,772.0 L40.0,746.0 Q40.0,742.0 44.0,742.0 L403.1,742.0 Q407.1,742.0 407.1,746.0 L407.1,772.0 Z" fill="#d3eeee" stroke="none"/>
+<rect x="40.0" y="742.0" width="367.1" height="54.0" rx="4" fill="none" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="223.5" y="762.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">AIPlayer</text>
+<line x1="40.0" y1="772.0" x2="407.1" y2="772.0" stroke="#2c7a7b" stroke-width="1"/>
+<text x="50.0" y="790.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ compute_move(board, difficulty, ...) : AIMove</text>
+<text x="40.0" y="946.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Legend</text>
+<rect x="40" y="956" width="16" height="12" rx="2" fill="#d6e6fa" stroke="#2b6cb0"/>
+<text x="62.0" y="967.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Protocol boundary</text>
+<rect x="230" y="956" width="16" height="12" rx="2" fill="#e6dcfa" stroke="#6b46c1"/>
+<text x="252.0" y="967.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Application service</text>
+<rect x="420" y="956" width="16" height="12" rx="2" fill="#ffffff" stroke="#6b46c1" stroke-dasharray="4 3"/>
+<text x="442.0" y="967.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Port (interface)</text>
+<rect x="610" y="956" width="16" height="12" rx="2" fill="#d3eeee" stroke="#2c7a7b"/>
+<text x="632.0" y="967.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Game domain</text>
+<rect x="40" y="978" width="16" height="12" rx="2" fill="#cde7e3" stroke="#285e61"/>
+<text x="62.0" y="989.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Chess rules / engine</text>
+<rect x="230" y="978" width="16" height="12" rx="2" fill="#edf2f7" stroke="#4a5568"/>
+<text x="252.0" y="989.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Value / DTO</text>
+<text x="820.0" y="946.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Relationships</text>
+<path d="M820,964 L870,964" stroke="#4a5a6a" stroke-width="1.4" fill="none" marker-end="url(#tri)"/>
+<text x="880.0" y="968.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">inheritance (IS-A) / implements</text>
+<path d="M1120,964 L1170,964" stroke="#4a5a6a" stroke-width="1.4" fill="none" marker-end="url(#open)"/>
+<text x="1180.0" y="968.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">simple association (uses)</text>
+<path d="M820,986 L870,986" stroke="#4a5a6a" stroke-width="1.4" fill="none" marker-start="url(#dhollow)"/>
+<text x="880.0" y="990.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">aggregation: part survives</text>
+<path d="M1120,986 L1170,986" stroke="#4a5a6a" stroke-width="1.4" fill="none" marker-start="url(#dfill)"/>
+<text x="1180.0" y="990.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">composition: part dies with whole</text>
+<text x="820.0" y="1012.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Access: + public   # protected   - private      Multiplicity: 1   0..1   0..*   1..*</text>
+<text x="820.0" y="1032.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">&lt;&lt;interface&gt;&gt; = abstract class with only pure virtual methods;  &lt;&lt;abstract&gt;&gt; = has some.</text>
+</svg>

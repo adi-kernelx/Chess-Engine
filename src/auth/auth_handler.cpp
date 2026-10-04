@@ -264,6 +264,10 @@ void AuthHandler::handle_refresh(net::Connection& conn, const std::string& messa
     if (!require_string(conn, j, "refresh_token", refresh_token)) return;
 
     RefreshOutcome outcome;
+    // Capture rotation time after waiting for this PG session. A request that
+    // queued behind another rotation must not compare an earlier timestamp
+    // against that successor's later rotated_at and revoke a valid family.
+    auto operation = db_.acquire_operation();
     auto tokens = refresh_session(db_, signer_, refresh_token, now_seconds(), outcome);
     if (outcome != RefreshOutcome::Ok || !tokens.ok) {
         // A database/transport problem is retryable and must not instruct the

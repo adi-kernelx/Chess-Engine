@@ -174,6 +174,26 @@ int main() {
         return seen_type == "ping";
     });
 
+    run_test("Typed replies and rejections retain the request correlation id", []() {
+        Fixture fx;
+        RequestPipeline pipeline(nullptr, SealOpenFn{}, fx.lookup());
+        pipeline.dispatch_for_test(RoutePolicy{"ping"},
+            [](RequestContext&, const json&, MessageSink& sink) { sink.send(R"({"type":"pong"})"); },
+            *fx.conn, R"({"type":"ping","request_id":"test-42"})");
+        fx.drain();
+        const auto reply = json::parse(read_frame_payload(fx.pair.peer_fd));
+        RoutePolicy auth{"secure"};
+        auth.auth = AuthRequirement::Required;
+        pipeline.dispatch_for_test(auth,
+            [](RequestContext&, const json&, MessageSink&) {},
+            *fx.conn, R"({"type":"secure","request_id":"test-43"})");
+        fx.drain();
+        const auto rejected = json::parse(read_frame_payload(fx.pair.peer_fd));
+        return reply.value("request_id", "") == "test-42"
+            && rejected.value("request_id", "") == "test-43"
+            && rejected.value("code", "") == "auth_required";
+    });
+
     // ── Auth: None ──────────────────────────────────────────────────────
 
     run_test("AuthRequirement::None does not touch extractor", []() {

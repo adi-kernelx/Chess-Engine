@@ -11,6 +11,7 @@ class TestNode {
         this.value = ''; this.hidden = false; this.disabled = false;
     }
     setAttribute(key, value) { this.attributes[key] = value; if (key === 'id') elements.set(value, this); }
+    removeAttribute(key) { delete this.attributes[key]; }
     addEventListener(name, fn) { this.handlers.set(name, fn); }
     appendChild(child) {
         child.parentNode = this; this.children.push(child);
@@ -53,3 +54,51 @@ assert.equal(rounds.value, '5');
 const css = readFileSync(new URL('../frontend/css/base.css', import.meta.url), 'utf8');
 assert.match(css, /\[hidden\]\s*\{\s*display:\s*none\s*!important\s*;/);
 console.log('PASS: create-form Swiss → winners-advance → Swiss visibility/disabled state and semantic hidden CSS contract');
+
+// Dispatch real correction handlers: an old mandatory-reason error must clear
+// when valid input is supplied, before the async save finishes.
+screen._openOverride({ id: 15 }, { id: 1, result: '1-0', whiteUsername: 'A', blackUsername: 'B' });
+const flatten = node => [node, ...node.children.flatMap(flatten)];
+const reasonNode = flatten(dialog.body).find(node => node.tag === 'textarea');
+const reasonError = flatten(dialog.body).find(node => node.attributes.class === 'field__error');
+const saveCorrection = flatten(dialog.footer).find(node => node.tag === 'button' && node.textContent === 'Save correction');
+await saveCorrection.handlers.get('click')();
+assert.equal(reasonError.hidden, false);
+assert.equal(reasonNode.attributes['aria-invalid'], 'true');
+reasonNode.handlers.get('input')({ target: { value: '   ' } });
+assert.equal(reasonError.hidden, false);
+reasonNode.handlers.get('input')({ target: { value: 'RC correction test' } });
+assert.equal(reasonError.hidden, true);
+assert.equal(reasonNode.attributes['aria-invalid'], undefined);
+console.log('PASS: correction reason validation clears stale inline error and invalid state on valid input');
+
+// Render the actual pairing table/footer with stale server state. A locally
+// elapsed cutoff must hide registration, and a room id alone cannot offer
+// early board entry. This is structural/non-visual verification only.
+const savedNow = Date.now;
+let nowSeconds = 1000;
+Date.now = () => nowSeconds * 1000;
+try {
+    const detail = new TournamentScreen({ session: { username: 'Alice', isAuthenticated: true } });
+    detail._detailBody = new TestNode('div'); detail._detailFooter = new TestNode('div');
+    detail._detailTab = 'pairings';
+    detail._detailState = {
+        tournament: { id: 42, name: 'Start gate', format: 'swiss', status: 'registration', registrationOpen: true,
+            createdByUsername: 'Alice', registrationDeadline: 1170, firstRoundStartsAt: 1200 },
+        standings: [{ username: 'Alice', playerId: 1 }], checkIns: [],
+        rounds: [{ round: 1, status: 'live', earliestStartAt: 1200, checkInClosesAt: 1260 }],
+        pairings: [{ id: 9, round: 1, whiteUsername: 'Alice', blackUsername: 'Bob', whitePlayerId: 1,
+            blackPlayerId: 2, result: 'pending', gameId: 99 }],
+    };
+    detail._renderDetail();
+    assert.match(detail._detailFooter.textContent, /Unregister/);
+    assert.match(detail._detailBody.textContent, /Waiting for scheduled start/);
+    assert.doesNotMatch(detail._detailBody.textContent, /Open game/);
+    nowSeconds = 1110;
+    detail._updateCountdown();
+    assert.doesNotMatch(detail._detailFooter.textContent, /Unregister|Close registration|Reopen registration/);
+    nowSeconds = 1200;
+    detail._renderDetail();
+    assert.match(detail._detailBody.textContent, /Open game/);
+} finally { Date.now = savedNow; }
+console.log('PASS: real pairing-table start gate and cutoff-driven registration controls');

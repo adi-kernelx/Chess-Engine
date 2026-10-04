@@ -15,6 +15,7 @@ class FakeSocket {
         this.stateListeners = new Set();
         this.messageListeners = new Map();
         this.sent = [];
+        this.connected = true;
     }
 
     onState(fn) {
@@ -29,9 +30,10 @@ class FakeSocket {
     }
 
     send(message) { this.sent.push(message); }
-    isConnected() { return true; }
+    isConnected() { return this.connected; }
 
     emitState(state) {
+        this.connected = state === 'connected';
         for (const fn of [...this.stateListeners]) fn(state);
     }
 
@@ -176,8 +178,8 @@ assert.ok(navigator.locks.requests >= 2,
 
 console.log('frontend session restoration tests passed');
 
-// A slow startup refresh must not release signed-out screens. Retry remains
-// gated, and a successful retry preserves the requested route/account.
+// A slow refresh on a live socket must keep its reply listener instead of
+// rotating the same token again. The late successor must not be discarded.
 {
     const savedSetTimeout = globalThis.setTimeout;
     const savedClearTimeout = globalThis.clearTimeout;
@@ -199,9 +201,9 @@ console.log('frontend session restoration tests passed');
         assert.equal(session.isRestoring, true);
         assert.equal(session.hasRefreshToken, true);
         const retry = [...timers.values()].find(t => t.delay === 1500);
-        assert.ok(retry); retry.fn();
+        assert.equal(retry, undefined, 'do not resend a refresh with an unknown committed outcome');
         for (let i = 0; i < 10; ++i) await Promise.resolve();
-        assert.equal(socket.sent.length, 2);
+        assert.equal(socket.sent.length, 1);
         socket.emit('auth_ok', { access_token: 'restored', refresh_token: 'next', username: 'adi', elo: 800 });
         await session.whenReady();
         assert.equal(session.isAuthenticated, true);
@@ -230,3 +232,82 @@ console.log('frontend session restoration tests passed');
     assert.equal(router.current.path, '/spectate/77');
 }
 console.log('frontend delayed-restoration and early-navigation tests passed');
+
+// Exercise the 12-minute background refresh, not just hard-reload restoration.
+// Artificial timers make this deterministic without a browser or real sleep.
+{
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const timers = new Map();
+    let timerId = 0;
+    globalThis.setTimeout = (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; };
+    globalThis.clearTimeout = id => timers.delete(id);
+    const drain = async () => { for (let i = 0; i < 12; ++i) await Promise.resolve(); };
+    const fire = delay => {
+        const entry = [...timers].find(([, timer]) => Math.abs(timer.delay - delay) < 100);
+        assert.ok(entry, `expected ${delay}ms timer`);
+        timers.delete(entry[0]); entry[1].fn();
+    };
+    try {
+        localStorage.clear();
+        const socket = new FakeSocket();
+        const session = new Session(socket);
+        session.adopt({ access_token: 'initial-access', refresh_token: 'initial-refresh',
+            username: 'adi', elo: 800, access_expires_in: 900 });
+        let expirations = 0;
+        session.on('expired', () => expirations++);
+        fire(720000); await drain();
+        assert.equal(socket.sent.length, 1);
+        fire(4000); await drain();
+        assert.equal(socket.sent.length, 1);
+        assert.equal([...timers.values()].some(t => t.delay === 1500), false);
+        assert.equal(session.isAuthenticated, true);
+        socket.emit('auth_ok', { access_token: 'late-access', refresh_token: 'late-successor',
+            username: 'adi', elo: 800, access_expires_in: 900 });
+        await drain();
+        assert.equal(session.refreshToken, 'late-successor');
+        assert.equal(expirations, 0);
+
+        // The next scheduled refresh uses the delivered successor, not the
+        // predecessor or a token superseded by a duplicate rotation.
+        fire(720000); await drain();
+        assert.equal(socket.sent.at(-1).refresh_token, 'late-successor');
+        socket.emit('auth_error', { code: 'internal' }); await drain();
+        assert.equal(session.isAuthenticated, true);
+        assert.equal(session.refreshToken, 'late-successor');
+        fire(1500); await drain();
+        assert.equal(socket.sent.at(-1).refresh_token, 'late-successor');
+        socket.emit('auth_ok', { access_token: 'recovered-access', refresh_token: 'recovered-successor',
+            username: 'adi', elo: 800, access_expires_in: 900 });
+        await drain();
+        assert.equal(session.refreshToken, 'recovered-successor');
+
+        // Disconnect still releases the waiter and permits transport recovery.
+        fire(720000); await drain();
+        socket.emitState('offline'); await drain();
+        assert.equal(session.hasRefreshToken, true);
+        const sentBeforeReconnect = socket.sent.length;
+        fire(1500); await drain();
+        assert.equal(socket.sent.length, sentBeforeReconnect, 'offline retry must not queue a rotating token');
+        socket.emitState('connected');
+        fire(1500); await drain();
+        socket.emit('auth_ok', { access_token: 'reconnected', refresh_token: 'reconnected-successor',
+            username: 'adi', elo: 800, access_expires_in: 900 });
+        await drain();
+        assert.equal(session.refreshToken, 'reconnected-successor');
+
+        // A pending reply must not bring the user back after explicit logout.
+        fire(720000); await drain();
+        await session.logout(); await drain();
+        socket.emit('auth_ok', { access_token: 'obsolete', refresh_token: 'obsolete', username: 'adi' });
+        await drain();
+        assert.equal(session.isAuthenticated, false);
+        assert.equal(session.hasRefreshToken, false);
+        assert.equal(localStorage.getItem('chess:refreshToken'), null);
+        assert.equal(expirations, 0);
+    } finally {
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+    }
+}
+console.log('frontend automatic-refresh delayed-reply/lifecycle tests passed');

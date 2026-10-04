@@ -28,6 +28,9 @@
  * receives exactly what it would have received unsealed and cannot tell how it
  * arrived. That is what makes this a service rather than a special case welded
  * onto the auth path.
+ * For login/register/google_auth, the encrypted payload MUST contain a type
+ * matching the outer route; changing the visible action cannot reuse a valid
+ * envelope for another authentication operation.
  *
  * A note on `type` placement: websocket.cpp finds `type` by string-scanning
  * rather than parsing, and takes the FIRST match. The rewritten message is

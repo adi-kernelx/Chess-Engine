@@ -86,6 +86,18 @@ struct StoredTournamentRound {
 
 // ── Result types ─────────────────────────────────────────────────────
 
+struct TournamentSnapshot {
+    StoredTournament tournament;
+    std::vector<StoredTournamentPlayer> participants;
+    std::vector<StoredPairing> pairings;
+    std::vector<StoredTournamentRound> rounds;
+    std::map<int64_t, std::string> usernames;
+    std::vector<std::pair<int, int64_t>> check_ins;
+};
+
+/// One SQL statement / MVCC snapshot, not six serialized network round trips.
+std::optional<TournamentSnapshot> read_tournament_snapshot(storage::Database& db, int64_t id);
+
 struct CreateTournamentResult {
     bool        ok = false;
     int64_t     id = 0;

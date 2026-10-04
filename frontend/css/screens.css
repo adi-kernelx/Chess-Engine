@@ -344,6 +344,21 @@
     flex-direction: column;
     gap: var(--sp-4);
 }
+.auth-card .card__body { padding: var(--sp-6); }
+.auth-intro { margin-bottom: var(--sp-2); }
+.auth-intro__logo { width: 72px; height: 72px; margin-bottom: var(--sp-4); background: url('../assets/logo-192.png') center / contain no-repeat; }
+.auth-intro__title { font-size: var(--fs-2xl); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-tight); }
+.auth-intro__copy { margin-top: var(--sp-2); color: var(--text-secondary); font-size: var(--fs-sm); line-height: var(--lh-normal); }
+.auth-form .input, .auth-form .btn { min-height: 44px; }
+.auth-form .input { font-size: var(--fs-lg); }
+.auth-form .field__hint { color: var(--text-secondary); }
+.auth-divider { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-secondary); font-size: var(--fs-xs); margin: var(--sp-1) 0; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-normal); }
+.auth-form .auth-google { position: relative; padding: var(--sp-2) var(--sp-6); background: var(--google-button-bg); color: var(--google-button-text); border-color: var(--google-button-border); font-weight: var(--fw-medium); }
+.auth-form .auth-google:hover:not(:disabled) { background: var(--google-button-hover); border-color: var(--google-button-border); }
+.auth-google__icon { position: absolute; left: var(--sp-1); width: 40px; height: 40px; flex: none; }
+.auth-google span { padding-inline: var(--sp-5); }
+.auth-note { color: var(--text-secondary); font-size: var(--fs-xs); line-height: var(--lh-normal); text-align: center; }
 
 /* ─── Scheduled tournaments ─────────────────────────────── */
 .tournament-refresh { margin-left: auto; }

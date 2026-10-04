@@ -46,7 +46,7 @@ json tournament_to_json(const chess::tournament::StoredTournament& t) {
     j["time_base"]      = t.time_control_initial_ms   / 1000;
     j["time_inc"]       = t.time_control_increment_ms / 1000;
     j["status"]         = t.status;
-    j["registration_deadline"] = t.registration_deadline_unix;
+    j["registration_deadline"] = std::min(t.registration_deadline_unix, t.first_round_starts_at_unix - 90);
     j["first_round_starts_at"] = t.first_round_starts_at_unix;
     j["round_duration_seconds"] = t.round_duration_seconds;
     j["registration_open"] = t.registration_open;
@@ -122,6 +122,7 @@ void TournamentService::create_tournament(const RequestContext& /*ctx*/,
                                           int                   round_duration_seconds,
                                           MessageSink&          caller_sink,
                                           const std::string&    format) {
+    invalidate_state_cache();
     if (!db_) {
         caller_sink.send(make_error_frame("Tournaments require a database"));
         return;
@@ -156,7 +157,7 @@ void TournamentService::create_tournament(const RequestContext& /*ctx*/,
     if (!chess::tournament::TournamentManager::valid_schedule(
             registration_deadline_unix, first_round_starts_at_unix,
             round_duration_seconds)
-        || registration_deadline_unix <= clock_.unix_seconds()) {
+        || std::min(registration_deadline_unix, first_round_starts_at_unix - 90) <= clock_.unix_seconds()) {
         caller_sink.send(make_error_frame("Invalid tournament schedule"));
         return;
     }
@@ -168,6 +169,10 @@ void TournamentService::create_tournament(const RequestContext& /*ctx*/,
         actor_db_player_id, registration_deadline_unix,
         first_round_starts_at_unix, round_duration_seconds, format);
     if (!cr.ok) {
+        if (cr.error == "tournament_name_taken") {
+            caller_sink.send(make_error_frame("A tournament with this name already exists. Choose a different name."));
+            return;
+        }
         caller_sink.send(make_error_frame("create_tournament failed: " + cr.error));
         return;
     }
@@ -204,6 +209,7 @@ void TournamentService::join_tournament(const RequestContext& /*ctx*/,
 
     json response;
     response["type"]          = "tournament_joined";
+    invalidate_state_cache();
     response["tournament_id"] = tournament_id;
     caller_sink.send(response.dump());
 }
@@ -224,6 +230,7 @@ void TournamentService::leave_tournament(const RequestContext& /*ctx*/,
     chess::tournament::TournamentManager tm(*db_, clock_);
     auto r = tm.leave(tournament_id, actor_db_player_id);
     if (!r.ok) { caller_sink.send(make_error_frame(r.error)); return; }
+    invalidate_state_cache();
     caller_sink.send(json{{"type", "tournament_left"},
                           {"tournament_id", tournament_id}}.dump());
 }
@@ -258,6 +265,7 @@ void TournamentService::start_tournament(const RequestContext& /*ctx*/,
     // Preserve the legacy acknowledgement type until the Phase-3 UI replaces
     // this control; authoritative state already reports status='scheduled'.
     response["type"]          = "tournament_started";
+    invalidate_state_cache();
     response["tournament_id"] = tournament_id;
     response["round"]         = current_round;
     caller_sink.send(response.dump());
@@ -271,6 +279,7 @@ void TournamentService::set_registration(const RequestContext&, int64_t actor,
     chess::tournament::TournamentManager tm(*db_, clock_);
     auto r = tm.set_registration(tournament_id, actor, open);
     if (!r.ok) { sink.send(make_error_frame(r.error)); return; }
+    invalidate_state_cache();
     json response{{"type", "tournament_registration_updated"},
                   {"tournament_id", tournament_id}, {"open", open}};
     sink.send(response.dump());
@@ -285,7 +294,7 @@ void TournamentService::check_in_round(const RequestContext& ctx, int64_t actor,
                   {"tournament_id", tournament_id}, {"round", round}};
     if (runtime_ && ctx.identity) {
         auto r = runtime_->check_in_and_bind(
-            tournament_id, round, *ctx.identity, ctx.caller.fd);
+            tournament_id, round, *ctx.identity, ctx.caller.fd, ctx.caller.generation);
         if (!r.ok) { sink.send(make_error_frame(r.error)); return; }
         response["room_ready"] = r.room_ready;
         response["game_started"] = r.game_started;
@@ -300,6 +309,7 @@ void TournamentService::check_in_round(const RequestContext& ctx, int64_t actor,
         response["room_ready"] = false;
         response["game_started"] = false;
     }
+    invalidate_state_cache();
     sink.send(response.dump());
 }
 
@@ -318,6 +328,16 @@ void TournamentService::tournament_state(const RequestContext& /*ctx*/,
         return;
     }
 
+    // Public state is identical for all callers. Coalesce concurrent readers
+    // and bound staleness to 500ms; never cache credentials or write decisions.
+    std::unique_lock<std::mutex> cache_lock(state_cache_mutex_);
+    const auto cached = state_cache_.find(tournament_id);
+    if (cached != state_cache_.end() && cached->second.expires > std::chrono::steady_clock::now()) {
+        const auto frame = cached->second.frame;
+        cache_lock.unlock();
+        caller_sink.send(frame);
+        return;
+    }
     chess::tournament::TournamentManager tm(*db_);
     auto st = tm.get_state(tournament_id);
     if (!st) {
@@ -326,8 +346,7 @@ void TournamentService::tournament_state(const RequestContext& /*ctx*/,
     }
 
     json response;
-    const auto names = chess::tournament::get_participant_usernames(
-        *db_, tournament_id);
+    const auto& names = st->usernames;
     response["type"]       = "tournament_state";
     response["tournament"] = tournament_to_json(st->tournament);
     response["tournament"]["created_by_username"] =
@@ -356,20 +375,17 @@ void TournamentService::tournament_state(const RequestContext& /*ctx*/,
     response["rounds"] = rounds;
 
     json check_ins = json::array();
-    const auto checked = db_->exec(
-        "SELECT round,player_id FROM tournament_round_checkins WHERE tournament_id=$1 ORDER BY round,player_id",
-        {chess::storage::Param::int64(tournament_id)});
-    if (!checked.ok) {
-        caller_sink.send(make_error_frame("Tournament check-ins temporarily unavailable")); return;
-    }
-    for (const auto& row : checked.rows) {
-        const int64_t player_id = std::stoll(row.at(1));
-        check_ins.push_back({{"round", std::stoi(row.at(0))}, {"player_id", player_id},
+    for (const auto& row : st->check_ins) {
+        const int64_t player_id = row.second;
+        check_ins.push_back({{"round", row.first}, {"player_id", player_id},
             {"username", participant_name(names, player_id)}});
     }
     response["check_ins"] = check_ins;
-
-    caller_sink.send(response.dump());
+    const auto frame = response.dump();
+    if (state_cache_.size() >= 128) state_cache_.clear();
+    state_cache_[tournament_id] = {frame, std::chrono::steady_clock::now() + std::chrono::milliseconds(500)};
+    cache_lock.unlock();
+    caller_sink.send(frame);
 }
 
 // ── list_tournaments ────────────────────────────────────────────────
@@ -449,6 +465,7 @@ void TournamentService::report_tournament_result(const RequestContext& /*ctx*/,
 
     json response;
     response["type"]       = "tournament_result_recorded";
+    invalidate_state_cache();
     response["pairing_id"] = pairing_id;
     response["result"]     = result;
     caller_sink.send(response.dump());

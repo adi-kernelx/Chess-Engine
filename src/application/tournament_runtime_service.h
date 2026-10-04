@@ -33,7 +33,7 @@ public:
 
     ports::TournamentCheckInResult check_in_and_bind(
         int64_t tournament_id, int round,
-        const AuthenticatedIdentity& actor, int connection_fd) override;
+        const AuthenticatedIdentity& actor, int connection_fd, uint64_t generation = 0) override;
 
     /// Run durable maintenance, materialize every pending live pairing, and
     /// bind any early check-ins remembered by durable player identity.
@@ -48,6 +48,7 @@ private:
     struct PendingSeat {
         int64_t player_id = 0;
         int fd = -1;
+        uint64_t generation = 0;
     };
     using CheckInKey = std::tuple<int64_t, int, int64_t>;
 
@@ -66,6 +67,7 @@ private:
     std::map<CheckInKey, PendingSeat> pending_seats_;
     std::map<std::pair<int64_t,int>, std::string> notified_states_;
     std::mutex maintenance_mutex_;
+    std::mutex materialization_mutex_;
     ports::Clock::SteadyPoint next_maintenance_at_{};
     bool maintenance_scheduled_ = false;
     std::atomic<bool> maintenance_error_logged_{false};

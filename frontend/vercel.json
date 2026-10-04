@@ -9,11 +9,11 @@
     "script-src 'self': no inline <script> and no third-party JS. The vendored",
     "  @noble/post-quantum bundle (frontend/js/vendor/pqc.min.js) is served",
     "  from our own origin and is covered by 'self'.",
-    "connect-src 'self' wss://<cloud-run-host> https://<supabase-project>.supabase.co:",
+    "connect-src 'self' wss://<cloud-run-host> https://hpukcrhxpzyeidoxwqvi.supabase.co:",
     "  XHR/fetch/WebSocket can talk only to this origin, the Cloud Run backend",
     "  over TLS, and the Supabase Auth endpoint used by the Google Sign-In",
     "  redirect flow (the browser POSTs the code to Supabase, which returns the",
-    "  session JWT). Replace both placeholders before deploy — a wildcard here",
+    "  session JWT). Replace the backend placeholder before deploy — a wildcard here",
     "  would defeat the point.",
     "object-src 'none': no <object>/<embed>/<applet>. Nothing legitimate needs them.",
     "base-uri 'none': the <base> tag cannot be injected to rewrite relative URLs.",
@@ -32,7 +32,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self'; connect-src 'self' wss://<cloud-run-host> https://<supabase-project>.supabase.co; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+          "value": "default-src 'self'; script-src 'self'; connect-src 'self' wss://<cloud-run-host> https://hpukcrhxpzyeidoxwqvi.supabase.co; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         },
         {
           "key": "Referrer-Policy",

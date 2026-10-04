@@ -68,6 +68,13 @@ export class ChessSocket {
         }
     }
 
+    // Security-sensitive frames must never survive disconnects in the queue.
+    sendImmediate(obj) {
+        if (this.state !== 'connected' || !this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+        try { this.ws.send(JSON.stringify(obj)); return true; }
+        catch { return false; }
+    }
+
     /** Escape hatch — used by capability.js which needs the exact serialized form. */
     sendRaw(text) {
         if (this.state === 'connected' && this.ws && this.ws.readyState === WebSocket.OPEN) {

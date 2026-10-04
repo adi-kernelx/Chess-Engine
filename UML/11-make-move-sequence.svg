@@ -1,0 +1,194 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2171" height="1827" viewBox="0 0 2171 1827" role="img" aria-labelledby="ttl dsc">
+<title id="ttl">Make a move — validation, broadcast and the AI reply</title>
+<desc id="dsc">Use case: a seated player moves (after the pipeline of UML 09). GameRoom holds its mutex only inside submit_move: LockAndDrain is created
+on entry and destroyed on return. Replies go to the mover, the opponent and spectators; in an AI game the engine answers on the same worker.</desc>
+<defs>
+<marker id="tri" viewBox="0 0 14 14" refX="13" refY="7" markerWidth="14" markerHeight="14" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L13,7 L1,13 Z" fill="#ffffff" stroke="#4a5a6a" stroke-width="1.3"/></marker>
+<marker id="open" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,6 L1,11" fill="none" stroke="#4a5a6a" stroke-width="1.4"/></marker>
+<marker id="dfill" viewBox="0 0 18 10" refX="17" refY="5" markerWidth="18" markerHeight="10" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+  <path d="M1,5 L9,1 L17,5 L9,9 Z" fill="#4a5a6a" stroke="#4a5a6a" stroke-width="1"/></marker>
+<marker id="dhollow" viewBox="0 0 18 10" refX="17" refY="5" markerWidth="18" markerHeight="10" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+  <path d="M1,5 L9,1 L17,5 L9,9 Z" fill="#ffffff" stroke="#4a5a6a" stroke-width="1.2"/></marker>
+<marker id="sync" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9 Z" fill="#1f2933"/></marker>
+<marker id="ret" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9" fill="none" stroke="#1f2933" stroke-width="1.3"/></marker>
+<marker id="syncL" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9 Z" fill="#8a96a6"/></marker>
+<marker id="retL" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9" fill="none" stroke="#8a96a6" stroke-width="1.3"/></marker>
+</defs>
+<rect x="0" y="0" width="2171" height="1827" fill="#ffffff"/>
+<rect x="0" y="0" width="2171" height="6" fill="#2c7a7b"/>
+<text x="40.0" y="36.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">CHESS PLATFORM  ·  UML 11  ·  SEQUENCE DIAGRAM</text>
+<text x="40.0" y="70.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="650" fill="#1f2933" text-anchor="start" xml:space="preserve">Make a move — validation, broadcast and the AI reply</text>
+<text x="40.0" y="96.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Use case: a seated player moves (after the pipeline of UML 09). GameRoom holds its mutex only inside submit_move: LockAndDrain is created</text>
+<text x="40.0" y="116.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">on entry and destroyed on return. Replies go to the mover, the opponent and spectators; in an AI game the engine answers on the same worker.</text>
+<line x1="40" y1="132" x2="2131" y2="132" stroke="#d8dee6"/>
+<rect x="300" y="587.0" width="1266" height="406.0" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<rect x="40" y="1067.0" width="2051" height="552.0" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<rect x="920" y="803.0" width="634" height="90.0" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<rect x="52" y="1169.0" width="2027" height="104.0" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<rect x="550" y="1287.0" width="1460.1" height="252.0" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<line x1="110" y1="210" x2="110" y2="1679.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<circle cx="110" cy="168" r="7" fill="#d9f2e3" stroke="#2f855a" stroke-width="1.5"/>
+<path d="M110,175 L110,192 M99,181 L121,181 M110,192 L101,204 M110,192 L119,204" stroke="#2f855a" stroke-width="1.5" fill="none"/>
+<rect x="55.0" y="204.0" width="110.0" height="18" fill="#ffffff"/>
+<text x="110.0" y="216.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">Player</text>
+<line x1="370" y1="210" x2="370" y2="1679.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="301.0" y="160" width="138.0" height="50" rx="5" fill="#d6e6fa" stroke="#2b6cb0" stroke-width="1.6"/>
+<text x="370.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">GameplayHandler</text>
+<line x1="608" y1="210" x2="608" y2="1679.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="539.0" y="160" width="138.0" height="50" rx="5" fill="#e6dcfa" stroke="#6b46c1" stroke-width="1.6"/>
+<text x="608.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">GameplayService</text>
+<line x1="803" y1="210" x2="803" y2="1679.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="748.0" y="160" width="110.0" height="50" rx="5" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="803.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">RoomManager</text>
+<line x1="978" y1="210" x2="978" y2="1679.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="923.0" y="160" width="110.0" height="50" rx="5" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="978.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">GameRoom</text>
+<line x1="1321" y1="445.0" x2="1321" y2="1013.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<path d="M1312,1004.0 L1330,1022.0 M1330,1004.0 L1312,1022.0" stroke="#c53030" stroke-width="2.4"/>
+<rect x="1263.4" y="395.0" width="115.2" height="50" rx="5" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="1321.0" y="425.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">LockAndDrain</text>
+<line x1="1496" y1="210" x2="1496" y2="1679.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="1441.0" y="160" width="110.0" height="50" rx="5" fill="#cde7e3" stroke="#285e61" stroke-width="1.6"/>
+<text x="1496.0" y="182.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">Board /</text>
+<text x="1496.0" y="198.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">move_gen</text>
+<line x1="1671" y1="210" x2="1671" y2="1679.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="1616.0" y="160" width="110.0" height="50" rx="5" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="1671.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">AIPlayer</text>
+<line x1="2021" y1="210" x2="2021" y2="1679.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<circle cx="2021" cy="168" r="7" fill="#d9f2e3" stroke="#2f855a" stroke-width="1.5"/>
+<path d="M2021,175 L2021,192 M2010,181 L2032,181 M2021,192 L2012,204 M2021,192 L2030,204" stroke="#2f855a" stroke-width="1.5" fill="none"/>
+<rect x="1933.0" y="204.0" width="176.0" height="18" fill="#ffffff"/>
+<text x="2021.0" y="216.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">Opponent, spectators</text>
+<rect x="798" y="306" width="10" height="44" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="979" y="487.0" width="10" height="28.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="1491" y="523.0" width="10" height="44.0" fill="#cde7e3" stroke="#285e61" stroke-width="1.2"/>
+<rect x="1491" y="621.0" width="10" height="44.0" fill="#cde7e3" stroke="#285e61" stroke-width="1.2"/>
+<rect x="979" y="703.0" width="10" height="28.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="1491" y="739.0" width="10" height="44.0" fill="#cde7e3" stroke="#285e61" stroke-width="1.2"/>
+<rect x="979" y="855.0" width="10" height="28.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="979" y="955.0" width="10" height="28.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="973" y="370" width="10" height="677.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="1672" y="1373.0" width="10" height="28.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="1666" y="1321.0" width="10" height="98.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="973" y="1439.0" width="10" height="44.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="603" y="272" width="10" height="1371.0" fill="#e6dcfa" stroke="#6b46c1" stroke-width="1.2"/>
+<rect x="365" y="268" width="10" height="1391.0" fill="#d6e6fa" stroke="#2b6cb0" stroke-width="1.2"/>
+<rect x="300" y="587.0" width="1266" height="406.0" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M310,587.0 L303,590.0 Q300,593.0 300,597.0 L300,983.0 Q300,987.0 303,990.0 L310,993.0 L306,993.0 L306,587.0 Z" fill="#c2410c"/>
+<rect x="314" y="593.0" width="44" height="18" rx="9" fill="#c2410c"/>
+<text x="336.0" y="606.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">ALT</text>
+<line x1="306" y1="907.0" x2="1566" y2="907.0" stroke="#c2410c" stroke-width="1.4" stroke-dasharray="7 4"/>
+<rect x="40" y="1067.0" width="2051" height="552.0" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M50,1067.0 L43,1070.0 Q40,1073.0 40,1077.0 L40,1609.0 Q40,1613.0 43,1616.0 L50,1619.0 L46,1619.0 L46,1067.0 Z" fill="#c2410c"/>
+<rect x="54" y="1073.0" width="44" height="18" rx="9" fill="#c2410c"/>
+<text x="76.0" y="1086.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">ALT</text>
+<line x1="46" y1="1553.0" x2="2091" y2="1553.0" stroke="#c2410c" stroke-width="1.4" stroke-dasharray="7 4"/>
+<rect x="920" y="803.0" width="634" height="90.0" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M930,803.0 L923,806.0 Q920,809.0 920,813.0 L920,883.0 Q920,887.0 923,890.0 L930,893.0 L926,893.0 L926,803.0 Z" fill="#c2410c"/>
+<rect x="934" y="809.0" width="44" height="18" rx="9" fill="#c2410c"/>
+<text x="956.0" y="822.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">OPT</text>
+<rect x="52" y="1169.0" width="2027" height="104.0" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M62,1169.0 L55,1172.0 Q52,1175.0 52,1179.0 L52,1263.0 Q52,1267.0 55,1270.0 L62,1273.0 L58,1273.0 L58,1169.0 Z" fill="#c2410c"/>
+<rect x="66" y="1175.0" width="44" height="18" rx="9" fill="#c2410c"/>
+<text x="88.0" y="1188.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">OPT</text>
+<rect x="550" y="1287.0" width="1460.1" height="252.0" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M560,1287.0 L553,1290.0 Q550,1293.0 550,1297.0 L550,1529.0 Q550,1533.0 553,1536.0 L560,1539.0 L556,1539.0 L556,1287.0 Z" fill="#c2410c"/>
+<rect x="564" y="1293.0" width="44" height="18" rx="9" fill="#c2410c"/>
+<text x="586.0" y="1306.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">OPT</text>
+<text x="366.0" y="606.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[move is legal]</text>
+<text x="316.0" y="923.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[illegal move or not your turn]</text>
+<text x="106.0" y="1086.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[result.success]</text>
+<text x="56.0" y="1569.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[rejected]</text>
+<text x="986.0" y="822.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[status != ONGOING]</text>
+<text x="118.0" y="1188.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[game over]</text>
+<text x="616.0" y="1306.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[AI game and still ongoing]</text>
+<path d="M110.0,244 L370.0,244" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="240.0" y="238.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">make_move {from: e2, to: e4}</text>
+<path d="M375.0,278 L603.0,278" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="489.0" y="272.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">make_move(ctx, req, sink)</text>
+<path d="M613.0,312 L798.0,312" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="705.5" y="306.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">find_room_by_fd(fd)</text>
+<path d="M798.0,346 L613.0,346" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="705.5" y="340.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">room</text>
+<path d="M613.0,376 L973.0,376" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="793.0" y="370.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">submit_move(fd, from, to, promo)</text>
+<path d="M983.0,420 L1263.4,420" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<rect x="1100.0" y="403" width="155.4" height="14" fill="#ffffff" opacity="0.9"/>
+<text x="1255.4" y="414.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="end" xml:space="preserve">&lt;&lt;create&gt;&gt; lock mutex_</text>
+<path d="M988,475.0 L1029,475.0 L1029,501.0 L994,501.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1035.0" y="483.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">is it this seat&#x27;s turn? check_flag()</text>
+<path d="M983.0,529.0 L1491.0,529.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1237.0" y="523.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">generate_legal_moves(board_)</text>
+<path d="M1491.0,563.0 L983.0,563.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1237.0" y="557.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">legal moves</text>
+<path d="M983.0,627.0 L1491.0,627.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1237.0" y="621.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">make_move(move)</text>
+<path d="M1491.0,661.0 L983.0,661.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1237.0" y="655.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">UndoInfo</text>
+<path d="M988,691.0 L1029,691.0 L1029,717.0 L994,717.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1035.0" y="699.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">switch_clock()  (+ increment)</text>
+<path d="M983.0,745.0 L1491.0,745.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1237.0" y="739.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">get_game_status(board_)</text>
+<path d="M1491.0,779.0 L983.0,779.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1237.0" y="773.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">status</text>
+<path d="M988,843.0 L1029,843.0 L1029,869.0 L994,869.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1035.0" y="851.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">finish_game(): queue GameCompleted</text>
+<path d="M988,943.0 L1029,943.0 L1029,969.0 L994,969.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1035.0" y="951.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">result.error = reason</text>
+<path d="M983.0,1013.0 L1321.0,1013.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1152.0" y="1007.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">&lt;&lt;destroy&gt;&gt; unlock; notify listeners</text>
+<path d="M973.0,1043.0 L613.0,1043.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="793.0" y="1037.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">MoveResult</text>
+<path d="M603.0,1107.0 L110.0,1107.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="356.5" y="1101.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">move_made {san, fen, clocks}</text>
+<path d="M613.0,1141.0 L2021.0,1141.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="1317.0" y="1135.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">move_made</text>
+<path d="M603.0,1209.0 L110.0,1209.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="356.5" y="1203.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">game_over {result, reason}</text>
+<path d="M613.0,1243.0 L2021.0,1243.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="1317.0" y="1237.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">game_over</text>
+<path d="M613.0,1327.0 L1666.0,1327.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1139.5" y="1321.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">compute_move(board, difficulty, ms, inc)</text>
+<path d="M1681,1361.0 L1722,1361.0 L1722,1387.0 L1687,1387.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1728.0" y="1369.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Engine::search(): iterative deepening</text>
+<path d="M1666.0,1415.0 L613.0,1415.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1139.5" y="1409.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">AIMove</text>
+<path d="M613.0,1445.0 L973.0,1445.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="793.0" y="1439.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">submit_move_ai(from, to, promo)</text>
+<path d="M973.0,1479.0 L613.0,1479.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="793.0" y="1473.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">MoveResult</text>
+<path d="M603.0,1509.0 L110.0,1509.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="356.5" y="1503.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">move_made (AI reply)</text>
+<path d="M603.0,1589.0 L110.0,1589.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="356.5" y="1583.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">move_rejected {error}</text>
+<path d="M603.0,1639.0 L375.0,1639.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="40.0" y="1713.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Legend</text>
+<rect x="40" y="1723.0" width="16" height="12" rx="2" fill="#d9f2e3" stroke="#2f855a"/>
+<text x="62.0" y="1734.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Browser frontend</text>
+<rect x="230" y="1723.0" width="16" height="12" rx="2" fill="#d6e6fa" stroke="#2b6cb0"/>
+<text x="252.0" y="1734.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Protocol boundary</text>
+<rect x="420" y="1723.0" width="16" height="12" rx="2" fill="#e6dcfa" stroke="#6b46c1"/>
+<text x="442.0" y="1734.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Application service</text>
+<rect x="610" y="1723.0" width="16" height="12" rx="2" fill="#d3eeee" stroke="#2c7a7b"/>
+<text x="632.0" y="1734.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Game domain</text>
+<rect x="40" y="1745.0" width="16" height="12" rx="2" fill="#cde7e3" stroke="#285e61"/>
+<text x="62.0" y="1756.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Chess rules / engine</text>
+<text x="810.0" y="1713.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Messages</text>
+<path d="M810,1731.0 L856,1731.0" stroke="#1f2933" stroke-width="1.3" fill="none" marker-end="url(#sync)"/>
+<text x="866.0" y="1735.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">synchronous call (caller waits)</text>
+<path d="M1100,1731.0 L1146,1731.0" stroke="#1f2933" stroke-width="1.3" fill="none" marker-end="url(#ret)"/>
+<text x="1156.0" y="1735.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">asynchronous (no wait)</text>
+<path d="M810,1753.0 L856,1753.0" stroke="#1f2933" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#ret)"/>
+<text x="866.0" y="1757.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">return / reply</text>
+<path d="M1100,1753.0 L1146,1753.0" stroke="#1f2933" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#ret)"/>
+<text x="1156.0" y="1757.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">&lt;&lt;create&gt;&gt; new object</text>
+<path d="M825,1766.0 L841,1782.0 M841,1766.0 L825,1782.0" stroke="#c53030" stroke-width="2.4"/>
+<text x="866.0" y="1779.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">&lt;&lt;destroy&gt;&gt;: lifeline ends</text>
+<text x="1100.0" y="1779.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">alt = if / else    opt = if    loop = repeat</text>
+</svg>

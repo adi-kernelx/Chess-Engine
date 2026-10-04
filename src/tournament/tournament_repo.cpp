@@ -14,6 +14,8 @@
 #include "tournament/tournament_repo.h"
 
 #include <sstream>
+#include <nlohmann/json.hpp>
+#include "storage/transaction.h"
 
 using chess::storage::Database;
 using chess::storage::Param;
@@ -146,6 +148,18 @@ CreateTournamentResult create_tournament(Database& db,
         return out;
     }
 
+    // Serialize the normalized name across connections/processes. Existing
+    // duplicate legacy rows remain untouched; new creates cannot add another.
+    storage::Transaction tx(db);
+    if (!tx.ok()) { out.error = "database unavailable"; return out; }
+    auto name_lock = db.exec("SELECT pg_advisory_xact_lock(hashtextextended(lower(btrim($1)), 73491))",
+        {Param::text(name)});
+    if (!name_lock.ok) { out.error = name_lock.error; return out; }
+    auto duplicate = db.exec("SELECT 1 FROM tournaments WHERE lower(btrim(name))=lower(btrim($1)) LIMIT 1",
+        {Param::text(name)});
+    if (!duplicate.ok) { out.error = duplicate.error; return out; }
+    if (!duplicate.empty()) { out.error = "tournament_name_taken"; return out; }
+
     QueryResult r = db.exec(
         "WITH made AS (INSERT INTO tournaments "
         "(name, format, rounds, current_round, "
@@ -172,6 +186,7 @@ CreateTournamentResult create_tournament(Database& db,
     if (r.rows.empty()) { out.error = "INSERT ... RETURNING no row";    return out; }
 
     out.id = std::stoll(r.rows[0].at(0));
+    if (!tx.commit()) { out.error = "create transaction failed"; return out; }
     out.ok = true;
     return out;
 }
@@ -183,6 +198,52 @@ std::optional<StoredTournament> find_tournament(Database& db, int64_t id) {
         {Param::int64(id)});
     if (!r.ok || r.rows.empty()) return std::nullopt;
     return row_to_tournament(r.rows[0]);
+}
+
+std::optional<TournamentSnapshot> read_tournament_snapshot(Database& db, int64_t id) {
+    const std::string sql = "SELECT jsonb_build_array(" + tournaments_columns() + ")::text, "
+        "COALESCE((SELECT jsonb_agg(jsonb_build_array(" + PARTICIPANT_COLUMNS +
+        ") ORDER BY player_id) FROM tournament_players WHERE tournament_id=$1),'[]')::text, "
+        "COALESCE((SELECT jsonb_agg(jsonb_build_array(" + PAIRING_COLUMNS +
+        ") ORDER BY round,id) FROM tournament_pairings WHERE tournament_id=$1),'[]')::text, "
+        "COALESCE((SELECT jsonb_agg(jsonb_build_array(tournament_id,round, "
+        "EXTRACT(EPOCH FROM earliest_start_at)::bigint,COALESCE(EXTRACT(EPOCH FROM actual_start_at)::bigint,0), "
+        "EXTRACT(EPOCH FROM check_in_closes_at)::bigint,COALESCE(EXTRACT(EPOCH FROM completed_at)::bigint,0),status) "
+        "ORDER BY round) FROM tournament_rounds WHERE tournament_id=$1),'[]')::text, "
+        "COALESCE((SELECT jsonb_agg(jsonb_build_array(p.id,p.username)) FROM players p "
+        "WHERE p.id=tournaments.created_by OR EXISTS (SELECT 1 FROM tournament_players tp "
+        "WHERE tp.tournament_id=$1 AND tp.player_id=p.id)),'[]')::text, "
+        "COALESCE((SELECT jsonb_agg(jsonb_build_array(round,player_id) ORDER BY round,player_id) "
+        "FROM tournament_round_checkins WHERE tournament_id=$1),'[]')::text "
+        "FROM tournaments WHERE id=$1";
+    auto result = db.exec(sql, {Param::int64(id)});
+    if (!result.ok || result.empty()) return std::nullopt;
+    const auto as_row = [](const nlohmann::json& array) {
+        Row row;
+        for (const auto& value : array) {
+            row.nulls.push_back(value.is_null());
+            row.values.push_back(value.is_null() ? "" : value.is_string() ? value.get<std::string>() : value.dump());
+        }
+        return row;
+    };
+    const auto& row = result.first();
+    TournamentSnapshot snapshot;
+    snapshot.tournament = row_to_tournament(as_row(nlohmann::json::parse(row.at(0))));
+    for (const auto& item : nlohmann::json::parse(row.at(1))) snapshot.participants.push_back(row_to_participant(as_row(item)));
+    for (const auto& item : nlohmann::json::parse(row.at(2))) snapshot.pairings.push_back(row_to_pairing(as_row(item)));
+    for (const auto& item : nlohmann::json::parse(row.at(3))) {
+        auto r = as_row(item);
+        StoredTournamentRound round;
+        round.tournament_id = std::stoll(r.at(0)); round.round = std::stoi(r.at(1));
+        round.earliest_start_at_unix = std::stoll(r.at(2)); round.actual_start_at_unix = std::stoll(r.at(3));
+        round.check_in_closes_at_unix = std::stoll(r.at(4)); round.completed_at_unix = std::stoll(r.at(5));
+        round.status = r.at(6); snapshot.rounds.push_back(round);
+    }
+    for (const auto& item : nlohmann::json::parse(row.at(4)))
+        snapshot.usernames[item.at(0).get<int64_t>()] = item.at(1).get<std::string>();
+    for (const auto& item : nlohmann::json::parse(row.at(5)))
+        snapshot.check_ins.emplace_back(item.at(0).get<int>(), item.at(1).get<int64_t>());
+    return snapshot;
 }
 
 std::vector<StoredTournament> list_tournaments(Database& db,
@@ -248,7 +309,7 @@ JoinTournamentResult add_participant(Database& db,
         "(tournament_id, player_id, initial_elo) "
         "SELECT $1, $2, $3 FROM tournaments t "
         "WHERE t.id=$1 AND t.status='registration' AND t.registration_open "
-        "  AND ($4=0 OR t.registration_deadline > to_timestamp($4)) "
+        "  AND ($4=0 OR LEAST(t.registration_deadline,t.first_round_starts_at-INTERVAL '90 seconds') > to_timestamp($4)) "
         "ON CONFLICT (tournament_id, player_id) DO NOTHING",
         {Param::int64(tournament_id),
          Param::int64(player_id),
@@ -277,7 +338,7 @@ JoinTournamentResult remove_participant(Database& db,
         "DELETE FROM tournament_players tp USING tournaments t "
         "WHERE tp.tournament_id=$1 AND tp.player_id=$2 AND t.id=tp.tournament_id "
         " AND t.status='registration' AND t.registration_open "
-        " AND t.registration_deadline>to_timestamp($3)",
+        " AND LEAST(t.registration_deadline,t.first_round_starts_at-INTERVAL '90 seconds')>to_timestamp($3)",
         {Param::int64(tournament_id), Param::int64(player_id), Param::int64(now_unix)});
     if (!r.ok) { out.error = r.error; return out; }
     if (r.rows_affected == 0) {
@@ -296,11 +357,11 @@ bool set_registration_open(Database& db, int64_t tournament_id,
                            bool open, int64_t now_unix) {
     QueryResult r = db.exec(
         "UPDATE tournaments SET registration_open=$1, "
-        " registration_closed_at=CASE WHEN $1 THEN NULL ELSE to_timestamp($2) END, "
+        " registration_closed_at=CASE WHEN $1 THEN NULL ELSE COALESCE(registration_closed_at,to_timestamp($2)) END, "
         " status=CASE WHEN $1 THEN 'registration' ELSE 'scheduled' END "
         "WHERE id=$3 AND status IN ('registration','scheduled') "
-        "  AND ($1 OR registration_open) "
-        "  AND (NOT $1 OR registration_deadline > to_timestamp($2))",
+        "  AND (NOT $1 OR (LEAST(registration_deadline,first_round_starts_at-INTERVAL '90 seconds') > to_timestamp($2) "
+        "    AND NOT EXISTS (SELECT 1 FROM tournament_pairings p WHERE p.tournament_id=$3)))",
         {Param::boolean(open), Param::int64(now_unix), Param::int64(tournament_id)});
     return r.ok && r.rows_affected > 0;
 }

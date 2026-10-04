@@ -1,0 +1,20 @@
+# Only source/build inputs enter Docker's context; never local credentials,
+# checkouts, build outputs, unrelated design files, or personal context.
+**
+!Dockerfile
+!CMakeLists.txt
+!src/
+!src/**
+!tests/
+!tests/**
+!tools/
+!tools/**
+!third_party/
+!third_party/**
+**/.env
+**/.env.*
+**/secrets/**
+**/*.key
+**/*.pem
+**/__pycache__/**
+**/node_modules/**

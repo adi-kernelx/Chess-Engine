@@ -9,13 +9,52 @@
 #include "protocol/request_pipeline.h"
 
 #include <ctime>
+#include <chrono>
 #include <utility>
 
 #include <nlohmann/json.hpp>
+#include "core/logger.h"
 
 using nlohmann::json;
 
 namespace chess::protocol {
+
+namespace {
+class RequestTiming {
+public:
+    explicit RequestTiming(const std::string& type) : type_(type) {}
+    ~RequestTiming() {
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_).count();
+        if (ms >= 500) chess::core::Logger::warn("protocol", "RequestPipeline",
+            "slow request type=" + type_ + " elapsed_ms=" + std::to_string(ms));
+    }
+private:
+    std::string type_;
+    std::chrono::steady_clock::time_point start_ = std::chrono::steady_clock::now();
+};
+// Optional request correlation for typed calls. Unsolicited room events still
+// use their normal sender and are never attributed to a pending request.
+class CorrelatedSink final : public chess::application::MessageSink {
+public:
+    CorrelatedSink(chess::application::MessageSink& target, const json& request)
+        : target_(target) {
+        if (request.contains("request_id") && request["request_id"].is_string()
+            && request["request_id"].get_ref<const std::string&>().size() <= 128)
+            request_id_ = request["request_id"];
+    }
+    bool send(std::string frame) override {
+        if (request_id_.empty()) return target_.send(std::move(frame));
+        auto response = json::parse(frame, nullptr, false);
+        if (!response.is_object()) return target_.send(std::move(frame));
+        response["request_id"] = request_id_;
+        return target_.send(response.dump());
+    }
+private:
+    chess::application::MessageSink& target_;
+    std::string request_id_;
+};
+}
 
 RequestPipeline::RequestPipeline(
         const chess::application::auth::IdentityExtractor* identity,
@@ -84,6 +123,7 @@ SealOutcome RequestPipeline::seal_stage(const std::string& type,
 void RequestPipeline::run_typed(const TypedEntry&        entry,
                                 chess::net::Connection&  conn,
                                 const std::string&       message) {
+    RequestTiming timing(entry.policy.type);
     chess::net::SocketMessageSink caller_sink(conn);
 
     // Stage 0: SealOpen. Rejected → silent drop.
@@ -101,6 +141,7 @@ void RequestPipeline::run_typed(const TypedEntry&        entry,
         send_error(caller_sink, std::string("Invalid JSON: ") + e.what());
         return;
     }
+    CorrelatedSink response_sink(caller_sink, msg);
 
     chess::application::RequestContext ctx;
     ctx.caller           = conn.handle();
@@ -109,25 +150,28 @@ void RequestPipeline::run_typed(const TypedEntry&        entry,
     // Stage 2: Auth.
     if (entry.policy.auth == AuthRequirement::Required) {
         if (!identity_) {
-            send_auth_error(caller_sink,
+            send_auth_error(response_sink,
                 "Authentication is not configured on this server");
             return;
         }
         auto id_res = identity_->extract(msg);
         if (!id_res.is_ok()) {
-            send_auth_error(caller_sink, id_res.reason);
+            if (id_res.code == chess::application::ResultCode::Unavailable)
+                send_error(response_sink, id_res.reason);
+            else send_auth_error(response_sink, id_res.reason);
             return;
         }
         ctx.identity = id_res.value;
     }
 
     // Stage 3: Dispatch.
-    entry.fn(ctx, msg, caller_sink);
+    entry.fn(ctx, msg, response_sink);
 }
 
 void RequestPipeline::run_raw(const RawEntry&         entry,
                               chess::net::Connection& conn,
                               const std::string&      message) {
+    RequestTiming timing(entry.policy.type);
     chess::net::SocketMessageSink caller_sink(conn);
 
     // Stage 0: SealOpen. Same behaviour as the typed path.

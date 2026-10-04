@@ -1,0 +1,221 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1650" height="1392" viewBox="0 0 1650 1392" role="img" aria-labelledby="ttl dsc">
+<title id="ttl">Authentication and sealed (post-quantum encrypted) login</title>
+<desc id="dsc">auth/ + crypto/. AuthHandler owns one RateLimiter per surface and issues HS384 JWT sessions. login / register / google_auth arrive
+sealed with a one-time ML-KEM-768 + X25519 key offered by SealedRegistry and signed by the server&#x27;s ML-DSA-65 identity key.</desc>
+<defs>
+<marker id="tri" viewBox="0 0 14 14" refX="13" refY="7" markerWidth="14" markerHeight="14" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L13,7 L1,13 Z" fill="#ffffff" stroke="#4a5a6a" stroke-width="1.3"/></marker>
+<marker id="open" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,6 L1,11" fill="none" stroke="#4a5a6a" stroke-width="1.4"/></marker>
+<marker id="dfill" viewBox="0 0 18 10" refX="17" refY="5" markerWidth="18" markerHeight="10" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+  <path d="M1,5 L9,1 L17,5 L9,9 Z" fill="#4a5a6a" stroke="#4a5a6a" stroke-width="1"/></marker>
+<marker id="dhollow" viewBox="0 0 18 10" refX="17" refY="5" markerWidth="18" markerHeight="10" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+  <path d="M1,5 L9,1 L17,5 L9,9 Z" fill="#ffffff" stroke="#4a5a6a" stroke-width="1.2"/></marker>
+<marker id="sync" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9 Z" fill="#1f2933"/></marker>
+<marker id="ret" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9" fill="none" stroke="#1f2933" stroke-width="1.3"/></marker>
+</defs>
+<rect x="0" y="0" width="1650" height="1392" fill="#ffffff"/>
+<rect x="0" y="0" width="1649.8" height="6" fill="#2c7a7b"/>
+<text x="40.0" y="36.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">CHESS PLATFORM  ·  UML 03  ·  CLASS DIAGRAM</text>
+<text x="40.0" y="70.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="650" fill="#1f2933" text-anchor="start" xml:space="preserve">Authentication and sealed (post-quantum encrypted) login</text>
+<text x="40.0" y="96.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">auth/ + crypto/. AuthHandler owns one RateLimiter per surface and issues HS384 JWT sessions. login / register / google_auth arrive</text>
+<text x="40.0" y="116.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">sealed with a one-time ML-KEM-768 + X25519 key offered by SealedRegistry and signed by the server&#x27;s ML-DSA-65 identity key.</text>
+<line x1="40" y1="132" x2="1609.8" y2="132" stroke="#d8dee6"/>
+<path d="M494.7,221.0 L660.0,221.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dfill)"/>
+<text x="516.7" y="214.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="652.0" y="214.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">5</text>
+<path d="M494.7,328.0 L660.0,328.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-end="url(#open)"/>
+<rect x="527.5" y="310.0" width="93.8" height="16" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="577.4" y="322.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#5b6b7c" text-anchor="middle" font-style="italic" xml:space="preserve">hash / verify</text>
+<path d="M494.7,422.0 L660.0,422.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-end="url(#open)"/>
+<rect x="530.8" y="404.0" width="87.2" height="16" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="577.4" y="416.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#5b6b7c" text-anchor="middle" font-style="italic" xml:space="preserve">issue tokens</text>
+<path d="M1158.5,439.0 L1240.0,439.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="1180.5" y="432.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="1232.0" y="432.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M427.4,452.0 L427.4,562.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="435.4" y="485.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="435.4" y="554.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">0..1</text>
+<path d="M208.9,452.0 L208.9,702.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="216.9" y="485.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="216.9" y="694.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">0..1</text>
+<path d="M377.9,783.0 L520.0,783.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<text x="399.9" y="776.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="512.0" y="776.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M894.4,777.0 L1000.0,777.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dfill)"/>
+<text x="916.4" y="770.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="992.0" y="770.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">0..*</text>
+<path d="M1191.9,764.0 L1300.0,764.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dfill)"/>
+<text x="1213.9" y="757.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="1292.0" y="757.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="end" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M1096.0,827.0 L1096.0,922.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dfill)"/>
+<text x="1104.0" y="860.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="1104.0" y="914.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M132.3,844.0 L132.3,942.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-start="url(#dhollow)"/>
+<rect x="139.3" y="888.8" width="87.2" height="16" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="142.3" y="900.8" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#5b6b7c" text-anchor="start" font-style="italic" xml:space="preserve">identity key</text>
+<text x="140.3" y="877.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<text x="140.3" y="934.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1a365d" text-anchor="start" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">1</text>
+<path d="M327.2,844.0 L327.2,984.0 L520.0,984.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-end="url(#open)"/>
+<rect x="396.8" y="966.0" width="47.6" height="16" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="423.6" y="978.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#5b6b7c" text-anchor="middle" font-style="italic" xml:space="preserve">open()</text>
+<path d="M696.2,1026.0 L696.2,1102.0" fill="none" stroke="#4a5a6a" stroke-width="1.4" marker-end="url(#open)"/>
+<rect x="40.0" y="182.0" width="454.7" height="270.0" rx="4" fill="#fff6f6" stroke="#9b2c2c" stroke-width="1.6"/>
+<path d="M40.0,212.0 L40.0,186.0 Q40.0,182.0 44.0,182.0 L490.7,182.0 Q494.7,182.0 494.7,186.0 L494.7,212.0 Z" fill="#f8d7d7" stroke="none"/>
+<rect x="40.0" y="182.0" width="454.7" height="270.0" rx="4" fill="none" stroke="#9b2c2c" stroke-width="1.6"/>
+<text x="267.4" y="202.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">AuthHandler</text>
+<line x1="40.0" y1="212.0" x2="494.7" y2="212.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="50.0" y="230.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- db_ : Database&amp;</text>
+<text x="50.0" y="246.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- signer_ : TokenSigner&amp;</text>
+<text x="50.0" y="262.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- google_ : SupabaseVerifier*</text>
+<text x="50.0" y="278.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- sealed_reg_ : SealedRegistry*</text>
+<text x="50.0" y="294.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- rl_login_ip_ : RateLimiter</text>
+<text x="50.0" y="310.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- rl_login_account_ : RateLimiter</text>
+<text x="50.0" y="326.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- rl_register_ip_, rl_google_ip_, rl_seal_ip_ : RateLimiter</text>
+<line x1="40.0" y1="332.0" x2="494.7" y2="332.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="50.0" y="350.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ register_handlers(pipeline : RequestPipeline&amp;) : void</text>
+<text x="50.0" y="366.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- handle_seal_request(conn, msg) : void</text>
+<text x="50.0" y="382.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- handle_register(conn, msg) : void</text>
+<text x="50.0" y="398.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- handle_login(conn, msg) : void</text>
+<text x="50.0" y="414.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- handle_refresh(conn, msg) : void</text>
+<text x="50.0" y="430.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- handle_logout(conn, msg) : void</text>
+<text x="50.0" y="446.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- handle_google_auth(conn, msg) : void</text>
+<rect x="660.0" y="182.0" width="359.8" height="78.0" rx="4" fill="#fff6f6" stroke="#9b2c2c" stroke-width="1.6"/>
+<path d="M660.0,212.0 L660.0,186.0 Q660.0,182.0 664.0,182.0 L1015.8,182.0 Q1019.8,182.0 1019.8,186.0 L1019.8,212.0 Z" fill="#f8d7d7" stroke="none"/>
+<rect x="660.0" y="182.0" width="359.8" height="78.0" rx="4" fill="none" stroke="#9b2c2c" stroke-width="1.6"/>
+<text x="839.9" y="202.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">RateLimiter</text>
+<line x1="660.0" y1="212.0" x2="1019.8" y2="212.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="670.0" y="230.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- buckets_ : map&lt;string, Bucket&gt;</text>
+<line x1="660.0" y1="236.0" x2="1019.8" y2="236.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="670.0" y="254.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ try_take(key : string, cost : size_t) : bool</text>
+<rect x="660.0" y="278.0" width="425.5" height="100.0" rx="4" fill="#fff6f6" stroke="#9b2c2c" stroke-width="1.6"/>
+<path d="M660.0,322.0 L660.0,282.0 Q660.0,278.0 664.0,278.0 L1081.5,278.0 Q1085.5,278.0 1085.5,282.0 L1085.5,322.0 Z" fill="#f8d7d7" stroke="none"/>
+<rect x="660.0" y="278.0" width="425.5" height="100.0" rx="4" fill="none" stroke="#9b2c2c" stroke-width="1.6"/>
+<text x="872.8" y="294.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;utility&gt;&gt;</text>
+<text x="872.8" y="312.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">auth::service</text>
+<line x1="660.0" y1="322.0" x2="1085.5" y2="322.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="670.0" y="340.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ register_password_user(db, user, pw) : RegisterResult</text>
+<text x="670.0" y="356.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ authenticate_password(db, user, pw) : LoginResult</text>
+<text x="670.0" y="372.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">  // Argon2id hash / verify (OpenSSL)</text>
+<rect x="660.0" y="392.0" width="498.5" height="100.0" rx="4" fill="#fff6f6" stroke="#9b2c2c" stroke-width="1.6"/>
+<path d="M660.0,436.0 L660.0,396.0 Q660.0,392.0 664.0,392.0 L1154.5,392.0 Q1158.5,392.0 1158.5,396.0 L1158.5,436.0 Z" fill="#f8d7d7" stroke="none"/>
+<rect x="660.0" y="392.0" width="498.5" height="100.0" rx="4" fill="none" stroke="#9b2c2c" stroke-width="1.6"/>
+<text x="909.2" y="408.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;utility&gt;&gt;</text>
+<text x="909.2" y="426.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">auth::session</text>
+<line x1="660.0" y1="436.0" x2="1158.5" y2="436.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="670.0" y="454.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ issue_session(db, signer, id, user, epoch, now) : SessionTokens</text>
+<text x="670.0" y="470.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ refresh_session(db, signer, refresh, now) : SessionTokens</text>
+<text x="670.0" y="486.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ logout_all(db, player_id) : bool</text>
+<rect x="1240.0" y="392.0" width="359.8" height="94.0" rx="4" fill="#fff6f6" stroke="#9b2c2c" stroke-width="1.6"/>
+<path d="M1240.0,422.0 L1240.0,396.0 Q1240.0,392.0 1244.0,392.0 L1595.8,392.0 Q1599.8,392.0 1599.8,396.0 L1599.8,422.0 Z" fill="#f8d7d7" stroke="none"/>
+<rect x="1240.0" y="392.0" width="359.8" height="94.0" rx="4" fill="none" stroke="#9b2c2c" stroke-width="1.6"/>
+<text x="1419.9" y="412.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">TokenSigner</text>
+<line x1="1240.0" y1="422.0" x2="1599.8" y2="422.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="1250.0" y="440.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- key_ : SecureBuffer  // 32 bytes</text>
+<line x1="1240.0" y1="446.0" x2="1599.8" y2="446.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="1250.0" y="464.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ issue_access(claims : AccessClaims) : string</text>
+<text x="1250.0" y="480.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ verify_access(jwt, now, out&amp;) : bool</text>
+<rect x="360.0" y="562.0" width="330.6" height="78.0" rx="4" fill="#fff6f6" stroke="#9b2c2c" stroke-width="1.6"/>
+<path d="M360.0,592.0 L360.0,566.0 Q360.0,562.0 364.0,562.0 L686.6,562.0 Q690.6,562.0 690.6,566.0 L690.6,592.0 Z" fill="#f8d7d7" stroke="none"/>
+<rect x="360.0" y="562.0" width="330.6" height="78.0" rx="4" fill="none" stroke="#9b2c2c" stroke-width="1.6"/>
+<text x="525.3" y="582.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">SupabaseVerifier</text>
+<line x1="360.0" y1="592.0" x2="690.6" y2="592.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="370.0" y="610.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- secret_ : SecureBuffer</text>
+<line x1="360.0" y1="616.0" x2="690.6" y2="616.0" stroke="#9b2c2c" stroke-width="1"/>
+<text x="370.0" y="634.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ verify(jwt, now, out&amp;) : bool  // Google</text>
+<rect x="40.0" y="702.0" width="337.9" height="142.0" rx="4" fill="#fff5fa" stroke="#97266d" stroke-width="1.6"/>
+<path d="M40.0,732.0 L40.0,706.0 Q40.0,702.0 44.0,702.0 L373.9,702.0 Q377.9,702.0 377.9,706.0 L377.9,732.0 Z" fill="#f6d5e8" stroke="none"/>
+<rect x="40.0" y="702.0" width="337.9" height="142.0" rx="4" fill="none" stroke="#97266d" stroke-width="1.6"/>
+<text x="208.9" y="722.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">SealedRegistry</text>
+<line x1="40.0" y1="732.0" x2="377.9" y2="732.0" stroke="#97266d" stroke-width="1"/>
+<text x="50.0" y="750.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- identity_ : const MlDsa65KeyPair&amp;</text>
+<text x="50.0" y="766.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- store_ : SealedKeyStore&amp;</text>
+<text x="50.0" y="782.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- required_ : set&lt;string&gt;</text>
+<line x1="40.0" y1="788.0" x2="377.9" y2="788.0" stroke="#97266d" stroke-width="1"/>
+<text x="50.0" y="806.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ require_sealed(type : string) : void</text>
+<text x="50.0" y="822.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ handle_seal_request(ip : string) : string</text>
+<text x="50.0" y="838.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ inspect(type, msg, out&amp;) : Outcome</text>
+<rect x="520.0" y="722.0" width="374.4" height="126.0" rx="4" fill="#fff5fa" stroke="#97266d" stroke-width="1.6"/>
+<path d="M520.0,752.0 L520.0,726.0 Q520.0,722.0 524.0,722.0 L890.4,722.0 Q894.4,722.0 894.4,726.0 L894.4,752.0 Z" fill="#f6d5e8" stroke="none"/>
+<rect x="520.0" y="722.0" width="374.4" height="126.0" rx="4" fill="none" stroke="#97266d" stroke-width="1.6"/>
+<text x="707.2" y="742.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">SealedKeyStore</text>
+<line x1="520.0" y1="752.0" x2="894.4" y2="752.0" stroke="#97266d" stroke-width="1"/>
+<text x="530.0" y="770.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- entries_ : map&lt;key_id, Entry&gt;</text>
+<text x="530.0" y="786.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- ttl_seconds_ : uint32_t = 120</text>
+<text x="530.0" y="802.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">- max_per_ip_ : size_t = 8</text>
+<line x1="520.0" y1="808.0" x2="894.4" y2="808.0" stroke="#97266d" stroke-width="1"/>
+<text x="530.0" y="826.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ issue(identity, ip, offer&amp;) : bool</text>
+<text x="530.0" y="842.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ consume(key_id, material&amp;) : bool  // one-time</text>
+<rect x="1000.0" y="727.0" width="191.9" height="100.0" rx="4" fill="#fff5fa" stroke="#97266d" stroke-width="1.6"/>
+<path d="M1000.0,771.0 L1000.0,731.0 Q1000.0,727.0 1004.0,727.0 L1187.9,727.0 Q1191.9,727.0 1191.9,731.0 L1191.9,771.0 Z" fill="#f6d5e8" stroke="none"/>
+<rect x="1000.0" y="727.0" width="191.9" height="100.0" rx="4" fill="none" stroke="#97266d" stroke-width="1.6"/>
+<text x="1096.0" y="743.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;value&gt;&gt;</text>
+<text x="1096.0" y="761.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">SealKeyMaterial</text>
+<line x1="1000.0" y1="771.0" x2="1191.9" y2="771.0" stroke="#97266d" stroke-width="1"/>
+<text x="1010.0" y="789.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ key_id : bytes[16]</text>
+<text x="1010.0" y="805.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ kem : MlKem768KeyPair</text>
+<text x="1010.0" y="821.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ ecc : X25519KeyPair</text>
+<rect x="520.0" y="942.0" width="396.3" height="84.0" rx="4" fill="#fff5fa" stroke="#97266d" stroke-width="1.6"/>
+<path d="M520.0,986.0 L520.0,946.0 Q520.0,942.0 524.0,942.0 L912.3,942.0 Q916.3,942.0 916.3,946.0 L916.3,986.0 Z" fill="#f6d5e8" stroke="none"/>
+<rect x="520.0" y="942.0" width="396.3" height="84.0" rx="4" fill="none" stroke="#97266d" stroke-width="1.6"/>
+<text x="718.1" y="958.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;utility&gt;&gt;</text>
+<text x="718.1" y="976.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">SealedEnvelopeService</text>
+<line x1="520.0" y1="986.0" x2="916.3" y2="986.0" stroke="#97266d" stroke-width="1"/>
+<text x="530.0" y="1004.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ mint(identity, expires, material&amp;, offer&amp;) : bool</text>
+<text x="530.0" y="1020.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ open(material, env, plaintext&amp;) : bool</text>
+<rect x="40.0" y="942.0" width="184.6" height="70.0" rx="4" fill="#fff5fa" stroke="#97266d" stroke-width="1.6"/>
+<path d="M40.0,972.0 L40.0,946.0 Q40.0,942.0 44.0,942.0 L220.6,942.0 Q224.6,942.0 224.6,946.0 L224.6,972.0 Z" fill="#f6d5e8" stroke="none"/>
+<rect x="40.0" y="942.0" width="184.6" height="70.0" rx="4" fill="none" stroke="#97266d" stroke-width="1.6"/>
+<text x="132.3" y="962.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">MlDsa65KeyPair</text>
+<line x1="40.0" y1="972.0" x2="224.6" y2="972.0" stroke="#97266d" stroke-width="1"/>
+<text x="50.0" y="990.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ sign(msg) : bytes</text>
+<text x="50.0" y="1006.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ public_key() : bytes</text>
+<rect x="1000.0" y="922.0" width="257.6" height="54.0" rx="4" fill="#fff5fa" stroke="#97266d" stroke-width="1.6"/>
+<path d="M1000.0,952.0 L1000.0,926.0 Q1000.0,922.0 1004.0,922.0 L1253.6,922.0 Q1257.6,922.0 1257.6,926.0 L1257.6,952.0 Z" fill="#f6d5e8" stroke="none"/>
+<rect x="1000.0" y="922.0" width="257.6" height="54.0" rx="4" fill="none" stroke="#97266d" stroke-width="1.6"/>
+<text x="1128.8" y="942.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">MlKem768KeyPair</text>
+<line x1="1000.0" y1="952.0" x2="1257.6" y2="952.0" stroke="#97266d" stroke-width="1"/>
+<text x="1010.0" y="970.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ decapsulate(ct) : SecureBuffer</text>
+<rect x="1300.0" y="737.0" width="286.8" height="54.0" rx="4" fill="#fff5fa" stroke="#97266d" stroke-width="1.6"/>
+<path d="M1300.0,767.0 L1300.0,741.0 Q1300.0,737.0 1304.0,737.0 L1582.8,737.0 Q1586.8,737.0 1586.8,741.0 L1586.8,767.0 Z" fill="#f6d5e8" stroke="none"/>
+<rect x="1300.0" y="737.0" width="286.8" height="54.0" rx="4" fill="none" stroke="#97266d" stroke-width="1.6"/>
+<text x="1443.4" y="757.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">X25519KeyPair</text>
+<line x1="1300.0" y1="767.0" x2="1586.8" y2="767.0" stroke="#97266d" stroke-width="1"/>
+<text x="1310.0" y="785.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ derive_shared(peer) : SecureBuffer</text>
+<rect x="520.0" y="1102.0" width="352.5" height="108.0" rx="4" fill="#fff5fa" stroke="#97266d" stroke-width="1.6"/>
+<path d="M520.0,1146.0 L520.0,1106.0 Q520.0,1102.0 524.0,1102.0 L868.5,1102.0 Q872.5,1102.0 872.5,1106.0 L872.5,1146.0 Z" fill="#f6d5e8" stroke="none"/>
+<rect x="520.0" y="1102.0" width="352.5" height="108.0" rx="4" fill="none" stroke="#97266d" stroke-width="1.6"/>
+<text x="696.2" y="1118.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">&lt;&lt;utility&gt;&gt;</text>
+<text x="696.2" y="1136.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">Aead</text>
+<line x1="520.0" y1="1146.0" x2="872.5" y2="1146.0" stroke="#97266d" stroke-width="1"/>
+<text x="530.0" y="1164.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">// AES-256-CTR + HMAC-SHA384, hand-written</text>
+<line x1="520.0" y1="1170.0" x2="872.5" y2="1170.0" stroke="#97266d" stroke-width="1"/>
+<text x="530.0" y="1188.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ derive_keys(master, context) : AeadKeys</text>
+<text x="530.0" y="1204.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">+ open(keys, nonce, aad, sealed, out&amp;) : bool</text>
+<path d="M1000,1082 L1548,1082 L1560,1094 L1560,1192 L1000,1192 Z" fill="#fffbea" stroke="#c9a227" stroke-width="1.2"/>
+<path d="M1548,1082 L1548,1094 L1560,1094" fill="none" stroke="#c9a227"/>
+<text x="1010.0" y="1102.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5c4813" text-anchor="start" xml:space="preserve">Security rules visible in this design</text>
+<text x="1010.0" y="1118.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5c4813" text-anchor="start" xml:space="preserve">- one-time keys: consume() deletes the key on first use</text>
+<text x="1010.0" y="1134.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5c4813" text-anchor="start" xml:space="preserve">- the routing action is inside the encrypted payload,</text>
+<text x="1010.0" y="1150.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5c4813" text-anchor="start" xml:space="preserve">  so a sealed register cannot be replayed as login</text>
+<text x="1010.0" y="1166.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5c4813" text-anchor="start" xml:space="preserve">- login_per_account limit answers invalid_credentials,</text>
+<text x="1010.0" y="1182.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5c4813" text-anchor="start" xml:space="preserve">  never rate_limited (no username enumeration)</text>
+<text x="40.0" y="1250.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Legend</text>
+<rect x="40" y="1260" width="16" height="12" rx="2" fill="#f8d7d7" stroke="#9b2c2c"/>
+<text x="62.0" y="1271.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Authentication</text>
+<rect x="230" y="1260" width="16" height="12" rx="2" fill="#f6d5e8" stroke="#97266d"/>
+<text x="252.0" y="1271.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Cryptography</text>
+<text x="820.0" y="1250.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Relationships</text>
+<path d="M820,1268 L870,1268" stroke="#4a5a6a" stroke-width="1.4" fill="none" marker-end="url(#tri)"/>
+<text x="880.0" y="1272.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">inheritance (IS-A) / implements</text>
+<path d="M1120,1268 L1170,1268" stroke="#4a5a6a" stroke-width="1.4" fill="none" marker-end="url(#open)"/>
+<text x="1180.0" y="1272.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">simple association (uses)</text>
+<path d="M820,1290 L870,1290" stroke="#4a5a6a" stroke-width="1.4" fill="none" marker-start="url(#dhollow)"/>
+<text x="880.0" y="1294.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">aggregation: part survives</text>
+<path d="M1120,1290 L1170,1290" stroke="#4a5a6a" stroke-width="1.4" fill="none" marker-start="url(#dfill)"/>
+<text x="1180.0" y="1294.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">composition: part dies with whole</text>
+<text x="820.0" y="1316.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Access: + public   # protected   - private      Multiplicity: 1   0..1   0..*   1..*</text>
+<text x="820.0" y="1336.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">&lt;&lt;interface&gt;&gt; = abstract class with only pure virtual methods;  &lt;&lt;abstract&gt;&gt; = has some.</text>
+</svg>

@@ -57,6 +57,8 @@ export class Session {
         this._refreshTimer = null;
         this._refreshRetryTimer = null;
         this._refreshInFlight = null;
+        this._sessionEpoch = 0;
+        this._cancelRefreshRequest = null;
 
         // A persisted refresh token means authentication is not yet known on
         // a hard reload. The router waits on this one-shot promise before it
@@ -101,6 +103,8 @@ export class Session {
      * google_auth. Persists refresh + identity, schedules the next refresh.
      */
     adopt(authOk) {
+        this._sessionEpoch++;
+        if (this._cancelRefreshRequest) this._cancelRefreshRequest();
         if (this._refreshRetryTimer) {
             clearTimeout(this._refreshRetryTimer);
             this._refreshRetryTimer = null;
@@ -178,6 +182,8 @@ export class Session {
     }
 
     _clear() {
+        this._sessionEpoch++;
+        if (this._cancelRefreshRequest) this._cancelRefreshRequest();
         this._access = null;
         this._refresh = null;
         this._identity = null;
@@ -236,13 +242,18 @@ export class Session {
 
     async _performRefreshNow() {
         if (!this._refresh) throw new Error('no refresh token');
+        const epoch = this._sessionEpoch;
         const attemptedRefresh = this._refresh;
         const result = await this._requestOnceDetailed(
             { type: 'refresh', refresh_token: attemptedRefresh },
             'auth_ok',
-            new Set(['invalid_refresh'])
+            new Set(['invalid_refresh', 'internal']),
+            true
         );
-        if (result.status === 'error') {
+        // Logout or a fresh login while this request was pending wins over
+        // its eventual response. Never resurrect or overwrite that session.
+        if (epoch !== this._sessionEpoch) return;
+        if (result.status === 'error' && result.code === 'invalid_refresh') {
             // Another tab may have rotated the shared token after this request
             // was sent (including browsers without Web Locks). If storage now
             // contains its successor, retry that credential before concluding
@@ -279,6 +290,8 @@ export class Session {
             this._refreshRetryTimer = null;
             if (this._refresh && this.socket.isConnected()) {
                 this._refreshNow().catch(() => {});
+            } else if (this._refresh) {
+                this._scheduleRefreshRetry();
             }
         }, REFRESH_RETRY_MS);
     }
@@ -298,7 +311,7 @@ export class Session {
      * `definitiveErrorCodes` is supplied, unrelated auth_error frames are
      * ignored instead of being allowed to sign the user out.
      */
-    _requestOnceDetailed(message, expect, definitiveErrorCodes = null) {
+    _requestOnceDetailed(message, expect, definitiveErrorCodes = null, waitForLateReply = false) {
         return new Promise((resolve) => {
             let settled = false;
             const cleanup = [];
@@ -308,6 +321,13 @@ export class Session {
                 for (const off of cleanup) { try { off(); } catch (_) {} }
                 resolve(v);
             };
+            if (waitForLateReply) {
+                const cancel = () => finish({ status: 'cancelled' });
+                this._cancelRefreshRequest = cancel;
+                cleanup.push(() => {
+                    if (this._cancelRefreshRequest === cancel) this._cancelRefreshRequest = null;
+                });
+            }
             cleanup.push(this.socket.on(expect, (m) =>
                 finish({ status: 'ok', data: m })));
             cleanup.push(this.socket.on('auth_error', (m) => {
@@ -318,7 +338,14 @@ export class Session {
             cleanup.push(this.socket.onState(state => {
                 if (state !== 'connected') finish({ status: 'disconnected' });
             }));
-            const t = setTimeout(() => finish({ status: 'timeout' }), REQUEST_TIMEOUT_MS);
+            const t = setTimeout(() => {
+                if (!waitForLateReply) { finish({ status: 'timeout' }); return; }
+                // Rotation may already have committed. Retrying on the SAME
+                // live stream supersedes its successor and misattributes late
+                // auth_ok replies. Keep the listener/in-flight lock until the
+                // reply or a disconnect establishes the next transport state.
+                console.warn('[session] refresh response delayed; waiting for the existing request');
+            }, REQUEST_TIMEOUT_MS);
             cleanup.push(() => clearTimeout(t));
             this.socket.send(message);
         });

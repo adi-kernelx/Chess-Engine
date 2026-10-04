@@ -21,6 +21,7 @@ import { Capability } from './net/capability.js';
 import { Outbound, Inbound } from './net/protocol.js';
 import { Session } from './net/session.js';
 import { CONFIG }  from './config.js';
+import { AuthClient } from './net/auth-client.js';
 import { SoundEngine } from './ui/sound.js';
 import { placeholder } from './screens/placeholder.js';
 import { BoardTestScreen } from './screens/board-test.js';
@@ -35,7 +36,7 @@ import { ProfileScreen }    from './screens/profile.js';
 import { LeaderboardScreen } from './screens/leaderboard.js';
 import { SpectateListScreen, SpectateWatchScreen } from './screens/spectate.js';
 import { ReplayListScreen, ReplayDetailScreen }    from './screens/replay.js';
-import { TournamentScreen }                        from './screens/tournament.js';
+import { TournamentScreen }                        from './screens/tournament.js?v=g28';
 
 function boot() {
     const store = new Store();
@@ -57,6 +58,7 @@ function boot() {
 
     // ── WebSocket + capability probe + session ──
     const socket     = new ChessSocket(CONFIG.wsUrl);
+    const authClient = new AuthClient(socket, { policy: CONFIG.authSealing, pinnedKeys: CONFIG.pinnedKeys });
     const capability = new Capability(socket);
     const session    = new Session(socket);
     const navAuth    = q('#nav-auth');
@@ -140,7 +142,7 @@ function boot() {
     const sound = new SoundEngine(store);
 
     // ── Ctx passed to every screen ──
-    const ctx = { store, bus, toast, modal, router: null, setConn, socket, capability, session, Outbound, Inbound, sound };
+    const ctx = { store, bus, toast, modal, router: null, setConn, socket, capability, session, authClient, Outbound, Inbound, sound };
 
     // Google-callback handler runs AFTER router is built (below); factored
     // out so the code that needs `router` is defined after it exists.
@@ -158,22 +160,22 @@ function boot() {
             history.replaceState(null, '', location.pathname + location.search + '#/login');
 
             oauthCallback = () => {
-                const kick = () => {
-                    socket.send(Outbound.googleAuth(supabaseJwt));
-                    const off = socket.on('auth_ok', (msg) => {
-                        off();
+                const kick = async () => {
+                    const result = await authClient.request(Outbound.googleAuth(supabaseJwt));
+                    if (result.ok) {
+                        const msg = Inbound.normalize(result.data);
                         session.adopt(msg);
                         toast.success(`Signed in as ${msg.username}`, { duration: 2600 });
                         ctx.router.go('/');
-                    });
-                    const offErr = socket.on('auth_error', (msg) => {
-                        offErr();
-                        toast.error('Google sign-in failed (' + (msg.code || 'error') + ').',
+                    } else {
+                        toast.error('Google sign-in failed (' + result.code + ').',
                                     { duration: 3600 });
-                    });
+                    }
                 };
                 if (socket.isConnected()) kick();
-                else socket.onState((s) => { if (s === 'connected') kick(); });
+                else {
+                    const off = socket.onState(s => { if (s === 'connected') { off(); kick(); } });
+                }
             };
         } catch (err) {
             console.error('[main] oauth callback prep:', err);

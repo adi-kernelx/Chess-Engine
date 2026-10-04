@@ -28,8 +28,10 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <tuple>
 
 #include "tournament/swiss.h"
+#include "storage/transaction.h"
 
 namespace chess {
 namespace tournament {
@@ -130,11 +132,12 @@ ManagerResult TournamentManager::join(int64_t tournament_id,
                                       int64_t player_id,
                                       int player_elo) {
     ManagerResult out;
+    auto operation = db_.acquire_operation();
 
     auto t = find_tournament(db_, tournament_id);
     if (!t) { out.error = "tournament_not_found"; return out; }
     if (t->status != "registration" || !t->registration_open
-        || clock_.unix_seconds() >= t->registration_deadline_unix) {
+        || clock_.unix_seconds() >= std::min(t->registration_deadline_unix, t->first_round_starts_at_unix - 90)) {
         out.error = "registration_closed";
         return out;
     }
@@ -149,10 +152,11 @@ ManagerResult TournamentManager::join(int64_t tournament_id,
 
 ManagerResult TournamentManager::leave(int64_t tournament_id, int64_t player_id) {
     ManagerResult out;
+    auto operation = db_.acquire_operation();
     auto t = find_tournament(db_, tournament_id);
     if (!t) { out.error = "tournament_not_found"; return out; }
     if (t->status != "registration" || !t->registration_open
-        || clock_.unix_seconds() >= t->registration_deadline_unix) {
+        || clock_.unix_seconds() >= std::min(t->registration_deadline_unix, t->first_round_starts_at_unix - 90)) {
         out.error = "registration_closed";
         return out;
     }
@@ -191,6 +195,7 @@ ManagerResult TournamentManager::set_registration(int64_t tournament_id,
                                                    int64_t initiator_id,
                                                    bool open) {
     ManagerResult out;
+    auto operation = db_.acquire_operation();
     auto t = find_tournament(db_, tournament_id);
     if (!t) { out.error = "tournament_not_found"; return out; }
     if (t->created_by != initiator_id) { out.error = "not_creator"; return out; }
@@ -199,6 +204,10 @@ ManagerResult TournamentManager::set_registration(int64_t tournament_id,
     }
     if (open && clock_.unix_seconds() >= t->registration_deadline_unix) {
         out.error = "registration_deadline_passed"; return out;
+    }
+    if (open && (clock_.unix_seconds() >= t->first_round_starts_at_unix - 90
+        || !get_pairings_for_round(db_, tournament_id, 1).empty())) {
+        out.error = "pairings_locked"; return out;
     }
     const int64_t now = clock_.unix_seconds();
     if (!set_registration_open(db_, tournament_id, open, now)) {
@@ -576,9 +585,36 @@ ManagerResult TournamentManager::maintenance_tick() {
     auto closed = db_.exec(
         "UPDATE tournaments SET registration_open=FALSE,status='scheduled', "
         " registration_closed_at=COALESCE(registration_closed_at,to_timestamp($1)) "
-        "WHERE status='registration' AND registration_deadline<=to_timestamp($1)",
+        "WHERE status='registration' AND LEAST(registration_deadline,first_round_starts_at-INTERVAL '90 seconds')<=to_timestamp($1)",
         {storage::Param::int64(now)});
     if (!closed.ok) { out.error = closed.error; return out; }
+
+    // Freeze round one before play, without opening a room or starting clocks.
+    // Row lock + transaction makes concurrent schedulers produce one set and
+    // rolls back partially inserted pairings if generation fails.
+    auto previews = db_.exec(
+        "SELECT t.id FROM tournaments t JOIN tournament_rounds tr ON tr.tournament_id=t.id AND tr.round=1 "
+        "WHERE t.status='scheduled' AND tr.status='scheduled' "
+        "AND tr.earliest_start_at<=to_timestamp($1)+INTERVAL '90 seconds' "
+        "AND NOT EXISTS (SELECT 1 FROM tournament_pairings p WHERE p.tournament_id=t.id AND p.round=1)",
+        {storage::Param::int64(now)});
+    if (!previews.ok) { out.error = previews.error; return out; }
+    for (const auto& row : previews.rows) {
+        const auto id = std::stoll(row.at(0));
+        storage::Transaction tx(db_);
+        if (!tx.ok()) { out.error = tx.error(); return out; }
+        auto locked = db_.exec("SELECT id FROM tournaments WHERE id=$1 FOR UPDATE", {storage::Param::int64(id)});
+        if (!locked.ok) { out.error = locked.error; return out; }
+        if (get_pairings_for_round(db_, id, 1).empty()) {
+            int active = 0;
+            for (const auto& p : get_participants(db_, id)) if (!p.withdrawn) ++active;
+            if (active >= 2) {
+                auto generated = generate_round_pairings(id, 1);
+                if (!generated.ok) return generated;
+            }
+        }
+        if (!tx.commit()) { out.error = "prepare_pairings_failed"; return out; }
+    }
 
     auto due = db_.exec(
         "SELECT tr.tournament_id,tr.round FROM tournament_rounds tr "
@@ -596,8 +632,12 @@ ManagerResult TournamentManager::maintenance_tick() {
     }
 
     auto expired = db_.exec(
-        "SELECT tournament_id,round FROM tournament_rounds "
-        "WHERE status='live' AND check_in_closes_at<=to_timestamp($1)",
+        "SELECT tr.tournament_id,tr.round FROM tournament_rounds tr "
+        "WHERE tr.status='live' AND tr.check_in_closes_at<=to_timestamp($1) "
+        "AND EXISTS (SELECT 1 FROM tournament_pairings p WHERE p.tournament_id=tr.tournament_id AND p.round=tr.round "
+        "AND p.result='pending' AND p.black_player_id IS NOT NULL "
+        "AND (NOT EXISTS (SELECT 1 FROM tournament_round_checkins c WHERE c.tournament_id=p.tournament_id AND c.round=p.round AND c.player_id=p.white_player_id) "
+        "OR NOT EXISTS (SELECT 1 FROM tournament_round_checkins c WHERE c.tournament_id=p.tournament_id AND c.round=p.round AND c.player_id=p.black_player_id)))",
         {storage::Param::int64(now)});
     if (!expired.ok) { out.error = expired.error; return out; }
     for (const auto& row : expired.rows) {
@@ -611,18 +651,29 @@ ManagerResult TournamentManager::maintenance_tick() {
 // ── get_state ────────────────────────────────────────────────────────
 
 std::optional<TournamentState> TournamentManager::get_state(int64_t tournament_id) {
-    auto t = find_tournament(db_, tournament_id);
-    if (!t) return std::nullopt;
+    auto snapshot = read_tournament_snapshot(db_, tournament_id);
+    if (!snapshot) return std::nullopt;
+    const auto* t = &snapshot->tournament;
 
     TournamentState st;
     st.tournament   = *t;
-    st.all_pairings = get_pairings(db_, tournament_id);
-    st.rounds       = get_rounds(db_, tournament_id);
+    st.all_pairings = std::move(snapshot->pairings);
+    st.rounds       = std::move(snapshot->rounds);
+    st.usernames = std::move(snapshot->usernames);
+    st.check_ins = std::move(snapshot->check_ins);
 
-    auto participants = get_participants(db_, tournament_id);
+    const auto& participants = snapshot->participants;
     auto buchholz     = compute_buchholz(participants, st.all_pairings);
     std::map<int64_t, int> wins, draws;
+    std::map<int64_t, int> reached_round;
+    std::set<int64_t> finalists;
     for (const auto& p : st.all_pairings) {
+        reached_round[p.white_player_id] = std::max(reached_round[p.white_player_id], p.round);
+        if (p.black_player_id) reached_round[*p.black_player_id] = std::max(reached_round[*p.black_player_id], p.round);
+        if (t->status == "completed" && p.round == t->current_round) {
+            if (p.result == "1-0" || p.result == "bye" || p.result == "1/2-1/2") finalists.insert(p.white_player_id);
+            if (p.black_player_id && (p.result == "0-1" || p.result == "1/2-1/2")) finalists.insert(*p.black_player_id);
+        }
         if (!p.black_player_id) continue; // a bye is advancement, not a won game
         if (p.result == "1-0") ++wins[p.white_player_id];
         else if (p.result == "0-1") ++wins[*p.black_player_id];
@@ -644,11 +695,16 @@ std::optional<TournamentState> TournamentManager::get_state(int64_t tournament_i
         st.standings.push_back(r);
     }
 
-    // Sort standings: score desc, Buchholz desc, elo desc, id asc.
+    // Placement follows advancement; wins only break a final-survivor tie.
+    const auto placement = [&](const StandingRow& p) {
+        const bool finalist = finalists.count(p.player_id) != 0;
+        return std::make_tuple(finalist, finalist ? t->current_round + 1 : reached_round[p.player_id],
+                               finalist ? p.round_wins : 0);
+    };
     std::sort(st.standings.begin(), st.standings.end(),
               [&](const StandingRow& a, const StandingRow& b) {
                   if (t->format == "winners_advance") {
-                      if (a.round_wins != b.round_wins) return a.round_wins > b.round_wins;
+                      if (placement(a) != placement(b)) return placement(a) > placement(b);
                       return a.player_id < b.player_id; // stable display, not a rank tiebreak
                   }
                   if (a.score       != b.score)       return a.score       > b.score;
@@ -659,7 +715,7 @@ std::optional<TournamentState> TournamentManager::get_state(int64_t tournament_i
     for (size_t i = 0; i < st.standings.size(); ++i) {
         st.standings[i].rank = static_cast<int>(i + 1);
         if (t->format == "winners_advance" && i > 0
-            && st.standings[i].round_wins == st.standings[i - 1].round_wins)
+            && placement(st.standings[i]) == placement(st.standings[i - 1]))
             st.standings[i].rank = st.standings[i - 1].rank;
     }
     return st;

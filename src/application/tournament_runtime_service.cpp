@@ -21,7 +21,7 @@ TournamentRuntimeService::TournamentRuntimeService(
 
 ports::TournamentCheckInResult TournamentRuntimeService::check_in_and_bind(
         int64_t tournament_id, int round,
-        const AuthenticatedIdentity& actor, int connection_fd) {
+        const AuthenticatedIdentity& actor, int connection_fd, uint64_t generation) {
     ports::TournamentCheckInResult out;
     if (!db_) { out.error = "Tournaments require a database"; return out; }
     tournament::TournamentManager manager(*db_, clock_);
@@ -30,22 +30,34 @@ ports::TournamentCheckInResult TournamentRuntimeService::check_in_and_bind(
 
     {
         std::lock_guard<std::mutex> lock(pending_mutex_);
-        pending_seats_[{tournament_id, round, actor.player_id}] =
-            PendingSeat{actor.player_id, connection_fd};
+        auto& seat = pending_seats_[{tournament_id, round, actor.player_id}];
+        if (generation < seat.generation) { out.error = "connection_replaced"; return out; }
+        seat = PendingSeat{actor.player_id, connection_fd, generation};
     }
     rooms_.reserve_tournament_player(actor.player_id);
 
-    ensure_live_rooms();
     auto pairing_rows = tournament::get_pairings_for_round(*db_, tournament_id, round);
+    // Early check-in records attendance only. Pairing visibility does not
+    // authorize entering a game or starting its clocks before the start.
+    bool due = false;
+    for (const auto& scheduled : tournament::get_rounds(*db_, tournament_id)) {
+        if (scheduled.round == round && scheduled.status == "live"
+            && clock_.unix_seconds() >= scheduled.earliest_start_at_unix) due = true;
+    }
+    if (!due) { out.ok = true; return out; }
     for (const auto& pairing : pairing_rows) {
         if (pairing.result != "pending" || !pairing.black_player_id) continue;
         if (pairing.white_player_id != actor.player_id
             && *pairing.black_player_id != actor.player_id) continue;
         auto room = rooms_.find_room_by_pairing(pairing.id);
+        if (!room) {
+            ensure_live_rooms();
+            room = rooms_.find_room_by_pairing(pairing.id);
+        }
         if (!room) break;
         (void)room->allow_reserved_player(actor.player_id);
         auto bound = room->bind_reserved_player(actor.player_id,
-            static_cast<chess::PlayerId>(actor.player_id), connection_fd);
+            static_cast<chess::PlayerId>(actor.player_id), connection_fd, true, generation);
         if (!bound.ok) { out.error = bound.error; return out; }
         out.room_ready = true;
         out.game_started = room->get_state() == game::RoomState::IN_PROGRESS;
@@ -71,7 +83,7 @@ void TournamentRuntimeService::bind_pending(
     }
     for (const auto& seat : seats) {
         (void)room->bind_reserved_player(seat.player_id,
-            static_cast<chess::PlayerId>(seat.player_id), seat.fd);
+            static_cast<chess::PlayerId>(seat.player_id), seat.fd, false, seat.generation);
     }
 }
 
@@ -99,21 +111,22 @@ void TournamentRuntimeService::notify_room(
         ready_sender_(fd, message.dump());
     }
     if (started && db_) {
-        auto pairing = tournament::find_pairing(*db_, room->pairing_id());
-        if (pairing) {
-            std::lock_guard<std::mutex> lock(pending_mutex_);
-            pending_seats_.erase({pairing->tournament_id, pairing->round,
-                                  pairing->white_player_id});
-            if (pairing->black_player_id) {
-                pending_seats_.erase({pairing->tournament_id, pairing->round,
-                                      *pairing->black_player_id});
-            }
+        const auto tid = room->tournament_id();
+        const auto white = room->get_db_player_id(chess::Color::WHITE);
+        const auto black = room->get_db_player_id(chess::Color::BLACK);
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        for (auto it = pending_seats_.begin(); it != pending_seats_.end();) {
+            const auto [tournament_id, round, player_id] = it->first;
+            (void)round;
+            if (tournament_id == tid && (player_id == white || player_id == black)) it = pending_seats_.erase(it);
+            else ++it;
         }
     }
 }
 
 void TournamentRuntimeService::ensure_live_rooms() {
     if (!db_) return;
+    std::lock_guard<std::mutex> materialize(materialization_mutex_);
     rooms_.ensure_next_id_above(tournament::max_pairing_game_id(*db_));
     for (const auto& pairing : tournament::get_live_pending_pairings(*db_)) {
         auto room = rooms_.find_room_by_pairing(pairing.id);
@@ -205,9 +218,15 @@ void TournamentRuntimeService::run_maintenance_locked() {
     }
     // Covers delayed ticks where the no-show decision happened before a room
     // could be materialized.
-    std::lock_guard<std::mutex> lock(pending_mutex_);
-    for (auto it = pending_seats_.begin(); it != pending_seats_.end();) {
-        const auto [tournament_id, round, player_id] = it->first;
+    std::map<CheckInKey, PendingSeat> pending;
+    {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        pending = pending_seats_;
+    }
+    // Never hold the seat mutex across remote SQL: concurrent check-ins and
+    // disconnect callbacks need it, even while storage is slow.
+    for (const auto& [key, seat] : pending) {
+        const auto [tournament_id, round, player_id] = key;
         bool terminal = false;
         for (const auto& pairing : tournament::get_pairings_for_round(*db_, tournament_id, round)) {
             if (pairing.white_player_id == player_id
@@ -217,9 +236,13 @@ void TournamentRuntimeService::run_maintenance_locked() {
             }
         }
         if (terminal) {
-            rooms_.release_tournament_player(player_id);
-            it = pending_seats_.erase(it);
-        } else ++it;
+            std::lock_guard<std::mutex> lock(pending_mutex_);
+            auto it = pending_seats_.find(key);
+            if (it != pending_seats_.end() && it->second.fd == seat.fd) {
+                rooms_.release_tournament_player(player_id);
+                pending_seats_.erase(it);
+            }
+        }
     }
 }
 

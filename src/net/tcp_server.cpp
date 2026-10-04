@@ -369,10 +369,10 @@ void TcpServer::send_text(int fd, const std::string& frame) {
     }
 }
 
-void TcpServer::run() {
+void TcpServer::run(std::function<bool()> stop_requested) {
     struct epoll_event events[MAX_EVENTS];
 
-    while (running_) {
+    while (running_ && (!stop_requested || !stop_requested())) {
         // Wake periodically even when no socket has traffic so game deadlines
         // are enforced server-side.
         int num_events = epoll_wait(epoll_fd_, events, MAX_EVENTS, 250);
@@ -428,6 +428,7 @@ void TcpServer::run() {
             }
         }
     }
+    running_ = false;
     if (maintenance_task_.valid()) maintenance_task_.get();
 }
 

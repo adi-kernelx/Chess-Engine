@@ -19,6 +19,10 @@
  */
 
 #include <algorithm>
+#include <atomic>
+#include <future>
+#include <nlohmann/json.hpp>
+#include "application/tournament_service.h"
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -505,6 +509,92 @@ int main() {
             && t->created_by == alice_id;
     });
 
+    run_test("normalized duplicate tournament names are rejected across creators", [&] {
+        const auto exact = create_tournament(db, "Repo Test", 1, 60000, 0, bob_id);
+        const auto folded = create_tournament(db, "  rEpO tEsT  ", 1, 60000, 0, bob_id);
+        return !exact.ok && !folded.ok && exact.error == "tournament_name_taken"
+            && folded.error == "tournament_name_taken";
+    });
+
+    run_test("duplicate-name creation exposes friendly service feedback", [&] {
+        struct Sink final : application::MessageSink {
+            std::string frame;
+            bool send(std::string value) override { frame = std::move(value); return true; }
+        } sink;
+        application::TournamentService service(&db);
+        service.create_tournament({}, bob_id, "repo test", 1, 60, 0, 2000000000, 2000000200, 60, sink);
+        const auto reply = nlohmann::json::parse(sink.frame);
+        return reply.at("type") == "error" && reply.at("message") ==
+            "A tournament with this name already exists. Choose a different name.";
+    });
+
+    run_test("concurrent creators get exactly one tournament for the same normalized name", [&] {
+        Database other;
+        std::string error;
+        if (!other.connect_from_env(error)) return false;
+        std::atomic<int> ready{0};
+        auto create = [&](Database& connection, const std::string& name) {
+            ready.fetch_add(1);
+            while (ready.load() != 2) std::this_thread::yield();
+            return create_tournament(connection, name, 1, 60000, 0, alice_id);
+        };
+        auto first = std::async(std::launch::async, [&] { return create(db, "Concurrent Name"); });
+        auto second = std::async(std::launch::async, [&] { return create(other, " concurrent NAME "); });
+        const auto a = first.get(), b = second.get();
+        return a.ok != b.ok && (a.ok ? b.error : a.error) == "tournament_name_taken";
+    });
+
+    run_test("public tournament state uses one SQL snapshot for 200 concurrent readers", [&] {
+        struct Sink final : application::MessageSink {
+            std::string frame;
+            bool send(std::string value) override { frame = std::move(value); return true; }
+        };
+        application::TournamentService service(&db);
+        const auto load_event = create_tournament(db, "200 Reader Fixture", 1, 60000, 0, alice_id);
+        if (!load_event.ok) return false;
+        std::vector<int64_t> load_players;
+        for (int i = 0; i < 200; ++i) {
+            const auto player = insert_player(db, "LoadReader" + std::to_string(i), 1000 + i);
+            if (player <= 0 || !add_participant(db, load_event.id, player, 1000 + i).ok) return false;
+            load_players.push_back(player);
+        }
+        for (int i = 0; i < 200; i += 2)
+            if (!insert_pairing(db, load_event.id, 1, load_players[i], load_players[i + 1], "pending").ok) return false;
+        const auto before = db.query_count();
+        std::vector<std::future<bool>> reads;
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < 200; ++i) reads.push_back(std::async(std::launch::async, [&] {
+            Sink sink;
+            service.tournament_state({}, true, load_event.id, sink);
+            const auto state = nlohmann::json::parse(sink.frame);
+            return state.at("type") == "tournament_state" && state.at("tournament").at("id") == load_event.id
+                && state.at("standings").size() == 200 && state.at("pairings").size() == 100;
+        }));
+        bool ok = true;
+        for (auto& read : reads) ok = read.get() && ok;
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        const auto queries = db.query_count() - before;
+        std::cout << "[200 concurrent state readers: " << ms << "ms, " << queries << " SQL statement(s)] ";
+        if (!ok || queries != 1) return false;
+        Sink joined;
+        service.join_tournament({}, bob_id, 1400, true, load_event.id, joined);
+        if (nlohmann::json::parse(joined.frame).at("type") != "tournament_joined") return false;
+        const auto before_reload = db.query_count();
+        Sink reloaded;
+        service.tournament_state({}, true, load_event.id, reloaded);
+        if (db.query_count() != before_reload + 1
+            || nlohmann::json::parse(reloaded.frame).at("standings").size() != 201) return false;
+        // Background completion/maintenance bypasses the service write hook;
+        // its committed state must still replace the cache at bounded expiry.
+        if (!set_tournament_status(db, load_event.id, "scheduled")) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(550));
+        const auto before_expiry = db.query_count();
+        Sink expired;
+        service.tournament_state({}, true, load_event.id, expired);
+        return db.query_count() == before_expiry + 1
+            && nlohmann::json::parse(expired.frame).at("tournament").at("status") == "scheduled";
+    });
+
     run_test("add_participant is idempotent on duplicate join", [&] {
         auto a = add_participant(db, created_tid, alice_id, 1500);
         auto b = add_participant(db, created_tid, alice_id, 1500);
@@ -737,6 +827,33 @@ int main() {
         return !reopen.ok && reopen.error == "registration_deadline_passed";
     });
 
+    run_test("registration close is idempotent and round-one pairings freeze at T-90", [&] {
+        application::ports::FakeClock clock(application::ports::Clock::SteadyPoint{},
+            application::ports::Clock::SystemPoint(std::chrono::seconds(1000)));
+        TournamentManager manager(db, clock);
+        auto cr = create_tournament(db, "Preview Cup", 1, 60000, 0, creator, 1170, 1200, 60);
+        if (!cr.ok || !manager.join(cr.id, creator, 1500).ok
+            || !manager.join(cr.id, players[1], 1400).ok) return false;
+        if (!manager.set_registration(cr.id, creator, false).ok
+            || !manager.set_registration(cr.id, creator, false).ok
+            || !manager.set_registration(cr.id, creator, true).ok) return false;
+        clock.advance(std::chrono::seconds(109));
+        if (!manager.maintenance_tick().ok || !get_pairings(db, cr.id).empty()) return false;
+        clock.advance(std::chrono::seconds(1));
+        if (!manager.maintenance_tick().ok || !manager.maintenance_tick().ok) return false;
+        const auto pairings = get_pairings(db, cr.id);
+        if (pairings.size() != 1 || pairings[0].game_id
+            || get_rounds(db, cr.id)[0].status != "scheduled") return false;
+        if (manager.set_registration(cr.id, creator, true).error != "pairings_locked"
+            || set_registration_open(db, cr.id, true, 1110)
+            || add_participant(db, cr.id, players[2], 1300, 1110).ok
+            || remove_participant(db, cr.id, creator, 1110).ok) return false;
+        clock.advance(std::chrono::seconds(90));
+        return manager.maintenance_tick().ok && get_pairings(db, cr.id).size() == 1
+            && get_pairings(db, cr.id)[0].id == pairings[0].id
+            && get_rounds(db, cr.id)[0].status == "live";
+    });
+
     run_test("scheduled round starts once and single arrival wins by forfeit", [&] {
         auto cr = create_tournament(db, "No-show Cup", 1, 60000, 0, creator,
                                     300, 400, 60);
@@ -863,7 +980,7 @@ int main() {
         const auto ranked = restarted.get_state(cr.id);
         if (!ranked || ranked->standings.size() != 3 || ranked->standings[0].round_wins != 1
             || ranked->standings[0].rank != 1 || ranked->standings[1].round_wins != 0
-            || ranked->standings[1].rank != 2 || ranked->standings[2].rank != 2) return false;
+            || ranked->standings[1].rank != 2 || ranked->standings[2].rank != 3) return false;
         return final && final->status == "completed" && final->rounds == 3
             && get_rounds(db, cr.id).size() == 3
             && restarted.override_result(third[0].id, creator, "1-0", "too late").error == "advancement_already_locked";
@@ -926,6 +1043,48 @@ int main() {
             }
         }
         return games == 1 && byes == 2 && seen.size() == 4;
+    });
+
+    run_test("final winner outranks a runner-up with more decisive wins", [&] {
+        application::ports::FakeClock clock(application::ports::Clock::SteadyPoint{},
+            application::ports::Clock::SystemPoint(std::chrono::seconds(3000)));
+        TournamentManager manager(db, clock);
+        auto cr = create_tournament(db, "Advancement Ranking", 0, 60000, 0, creator, 3100, 3200, 60, "winners_advance");
+        if (!cr.ok) return false;
+        for (int i = 0; i < 6; ++i) if (!manager.join(cr.id, players[i], 1600 - i * 100).ok) return false;
+        if (!manager.start(cr.id, creator).ok) return false;
+        int64_t champion = 0, runner = 0;
+        for (int round = 1; round <= 4; ++round) {
+            clock.advance(std::chrono::seconds(round == 1 ? 200 : 60));
+            if (!manager.maintenance_tick().ok) return false;
+            const auto pairs = get_pairings_for_round(db, cr.id, round);
+            if (pairs.empty()) return false;
+            for (size_t i = 0; i < pairs.size(); ++i) {
+                const auto& p = pairs[i];
+                if (!p.black_player_id) { champion = p.white_player_id; continue; }
+                std::string result = "1-0";
+                if (round == 1 && i == 0) result = "1/2-1/2";
+                if (round == 2) {
+                    const auto history = get_pairings_for_round(db, cr.id, 1);
+                    for (const auto& old : history) if (old.result == "1/2-1/2"
+                        && PlayerPair(old.white_player_id,*old.black_player_id) == PlayerPair(p.white_player_id,*p.black_player_id)) result = "1/2-1/2";
+                }
+                if (round == 3) {
+                    const auto st = manager.get_state(cr.id);
+                    const auto w = std::find_if(st->standings.begin(), st->standings.end(), [&](const auto& s) { return s.player_id == p.white_player_id; });
+                    const auto b = std::find_if(st->standings.begin(), st->standings.end(), [&](const auto& s) { return s.player_id == *p.black_player_id; });
+                    result = w->round_wins >= b->round_wins ? "1-0" : "0-1";
+                    runner = result == "1-0" ? p.white_player_id : *p.black_player_id;
+                }
+                if (round == 4) result = p.white_player_id == champion ? "1-0" : "0-1";
+                if (!manager.record_game_result(p.id,result).ok) return false;
+            }
+        }
+        const auto state = manager.get_state(cr.id);
+        const auto finalist = std::find_if(state->standings.begin(), state->standings.end(), [&](const auto& p) { return p.player_id == runner; });
+        return state->tournament.status == "completed" && state->standings[0].player_id == champion
+            && state->standings[0].rank == 1 && state->standings[0].round_wins == 1
+            && finalist != state->standings.end() && finalist->rank == 2 && finalist->round_wins == 3;
     });
 
     run_test("all surviving pairs reaching two draws finish as joint winners", [&] {

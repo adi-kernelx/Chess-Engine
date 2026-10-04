@@ -522,7 +522,7 @@ void GameplayService::get_pending_rematch(const RequestContext& ctx,
     // Navigation can replace the game screen without closing the WebSocket;
     // a refresh can also replace the descriptor. Authenticated durable
     // identity safely restores the finished-room seat for this response.
-    if (!selected->on_reconnect_db_player(actor.player_id, ctx.caller.fd)) {
+    if (!selected->on_reconnect_db_player(actor.player_id, ctx.caller.fd, ctx.caller.generation)) {
         response["offer"] = nullptr;
         caller_sink.send(response.dump());
         return;
@@ -554,7 +554,7 @@ void GameplayService::game_state(const RequestContext&                    ctx,
                 room->get_db_player_id(chess::Color::WHITE) == ctx.identity->player_id
                     ? chess::Color::WHITE : chess::Color::BLACK);
             const bool bound = room->on_reconnect_db_player(
-                ctx.identity->player_id, ctx.caller.fd);
+                ctx.identity->player_id, ctx.caller.fd, ctx.caller.generation);
             // An idempotent request on the current socket is not a reconnect
             // event and must not repeatedly notify the opponent.
             reconnected = bound && prior_fd != ctx.caller.fd;
@@ -636,7 +636,7 @@ void GameplayService::get_active_game(const RequestContext& ctx,
     // Discovery and recovery are intentionally one atomic user-level action:
     // if the browser reached Replays/Game through a replaced WebSocket, merely
     // reporting the room would leave its seat bound to the dead descriptor.
-    if (!room->on_reconnect_db_player(actor.player_id, ctx.caller.fd)) {
+    if (!room->on_reconnect_db_player(actor.player_id, ctx.caller.fd, ctx.caller.generation)) {
         response["game"] = nullptr;
         caller_sink.send(response.dump());
         return;

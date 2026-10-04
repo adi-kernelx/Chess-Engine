@@ -14,31 +14,27 @@
  * Supabase projects come in two JWT flavours:
  *
  *   HS256 — a shared secret you paste into `$SUPABASE_JWT_SECRET`. This is
- *   the legacy/default configuration for most existing projects and it is
- *   what this file implements. Verification is one HMAC-SHA-256 with no
- *   network call, which is the whole reason this project uses Supabase as
- *   Google's proxy in the first place (see §7.4's rationale: a C++ HTTP
- *   client just for JWKS fetching would be a substantial dependency).
+ *   a legacy compatibility mode. Verification uses HMAC-SHA-256 without
+ *   a network call.
  *
- *   ES256/RS256 with JWKS — the new-project default. Verification requires
- *   fetching a public-key set from Supabase and caching it. Not implemented
- *   here; the `SupabaseVerifier` interface has the right shape so an
- *   ES256 backend can slot in later without touching callers.
+ *   ES256 with JWKS — verifies P-256 signatures using public keys fetched
+ *   over certificate-verified HTTPS and cached for five minutes. No shared
+ *   Supabase secret is required. RS256 is not supported.
  *
  * WHICH ONE YOUR PROJECT USES is a Supabase-dashboard setting. Keep the
- * project on HS256 for §7.8 and revisit if that setting changes.
+ * algorithm explicitly selected using SUPABASE_JWT_ALGORITHM.
  *
  * THE ALGORITHM-CONFUSION RULE STILL APPLIES
  *
- * The verifier accepts one algorithm only — HS256, in the fixed form
- * `{"alg":"HS256","typ":"JWT"}`. An attacker who observed an ES256 public
+ * The verifier accepts only its configured algorithm; ES256 never falls
+ * back to HS256. An attacker who observed an ES256 public
  * key (which is public!) could otherwise sign an HS256 token with it and
  * we would happily HMAC against the public key. Same reasoning as
  * token.h's HS384-only rule.
  *
  * WHAT WE CHECK
  *
- *   1. Signature      — HMAC-SHA-256 constant-time compare.
+ *   1. Signature      — ES256 public-key verification or legacy HS256.
  *   2. iss            — must match the configured Supabase project URL.
  *   3. aud            — must be "authenticated".
  *   4. exp            — must be in the future.
@@ -75,6 +71,7 @@
 #pragma once
 
 #include "auth/token.h"
+#include "auth/jwks_verifier.h"
 #include "crypto/secure_buffer.h"
 #include "storage/database.h"
 
@@ -113,15 +110,20 @@ public:
                                  std::string issuer,
                                  std::string audience,
                                  std::string provider);
+    static SupabaseVerifier make_es256(std::string issuer, std::string audience,
+                                      std::string provider,
+                                      Es256JwksVerifier::Fetch fetch = {},
+                                      Es256JwksVerifier::Clock clock = {});
 
     /**
-     * Read the HS256 secret from `$SUPABASE_JWT_SECRET` (base64 or raw text),
-     * plus `$SUPABASE_ISSUER`, `$SUPABASE_AUDIENCE`. `$SUPABASE_PROVIDER`
-     * defaults to "google" when unset.
+     * Read issuer, audience and algorithm from the environment. Provider
+     * defaults to google. ES256 needs no secret; legacy HS256 requires
+     * SUPABASE_JWT_SECRET. With no explicit algorithm, an existing secret
+     * selects legacy HS256; otherwise ES256 is selected.
      */
     static SupabaseVerifier from_env(std::string& out_error);
 
-    bool valid() const { return !secret_.empty(); }
+    bool valid() const { return jwks_ ? jwks_->valid() : !secret_.empty(); }
 
     /**
      * Verify signature + iss/aud/exp/iat/email_verified/provider.
@@ -137,6 +139,7 @@ private:
           audience_(std::move(a)), provider_(std::move(p)) {}
 
     crypto::SecureBuffer secret_;
+    std::shared_ptr<Es256JwksVerifier> jwks_;
     std::string          issuer_;
     std::string          audience_;
     std::string          provider_;

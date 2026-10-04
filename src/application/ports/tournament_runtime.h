@@ -22,7 +22,7 @@ public:
     virtual ~TournamentRuntime() = default;
     virtual TournamentCheckInResult check_in_and_bind(
         int64_t tournament_id, int round,
-        const AuthenticatedIdentity& actor, int connection_fd) = 0;
+        const AuthenticatedIdentity& actor, int connection_fd, uint64_t generation = 0) = 0;
 };
 
 } // namespace chess::application::ports

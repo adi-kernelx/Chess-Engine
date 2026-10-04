@@ -37,10 +37,11 @@
 #include "application/result.h"
 #include "auth/token.h"
 #include "storage/database.h"
+#include "storage/database_pool.h"
 
 namespace chess::application::auth {
 
-/// The wire error code emitted on every failure branch. Kept as a
+/// The wire error code emitted for rejected credentials (not SQL failure). Kept as a
 /// constant so both the extractor and any consumer that composes an
 /// error frame agree on the string.
 inline constexpr const char* kAuthRequiredCode = "auth_required";
@@ -56,7 +57,8 @@ public:
                       chess::auth::TokenSigner* signer,
                       /// Injected clock in unix seconds. Defaults to
                       /// `std::time(nullptr)`; the fake in tests pins it.
-                      int64_t (*now_unix)() = nullptr);
+                      int64_t (*now_unix)() = nullptr,
+                      chess::storage::DatabasePool* read_pool = nullptr);
 
     /// Extract the caller's identity from the message's `access_token`
     /// field. Success returns an `AuthenticatedIdentity`; failure
@@ -68,6 +70,7 @@ private:
     chess::storage::Database* db_     = nullptr;
     chess::auth::TokenSigner* signer_ = nullptr;
     int64_t (*now_unix_)()            = nullptr;
+    chess::storage::DatabasePool* read_pool_ = nullptr;
 };
 
 } // namespace chess::application::auth

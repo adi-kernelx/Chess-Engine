@@ -20,13 +20,17 @@
  * as printed by `tools/gen_server_identity`. Multiple entries are allowed so
  * a rotation is possible without a client-side flag day: publish new + old,
  * cut over servers, then remove the old entry on the next frontend deploy.
- * An empty array means "any key is accepted" — safe for local dev, NEVER
- * acceptable in production.
+ * An empty array rejects every sealed offer, never trusts an arbitrary key.
+ * Loopback uses the explicit unsealed development profile instead; production
+ * requires a configured pin and fails closed when the list is empty.
  */
 
 const IS_LOCAL = /^(localhost|127(\.\d+){3}|\[::1\])$/.test(location.hostname);
 
 export const CONFIG = {
+    // Production never falls back to clear authentication. Local loopback
+    // preserves the existing explicitly unsealed development server profile.
+    authSealing: IS_LOCAL ? 'local-unsealed' : 'required',
     // WebSocket URL for the chess backend.
     //
     // Local: the C++ server on 9000 over ws:// (no TLS locally — the browser
@@ -41,9 +45,10 @@ export const CONFIG = {
 
     // Server ML-DSA-65 identity fingerprints. Compare bytewise to
     // base64(SHA-384(offer.identity_pk)) received in `seal_key`.
-    // Populate at first production deploy; empty until then.
+    // Production identity prepared locally; install its matching private key
+    // through Secret Manager, never in the image or repository.
     pinnedKeys: IS_LOCAL ? [] : [
-        // 'base64-sha384-pin-goes-here',
+        '0Bh+A9rKUcKQCna6lkJT4kXHwRJ8pKNUH3RxuLk7hnUEZ91xn/jST6B3eWKv7JWN',
     ],
 
     // Supabase project used for Google Sign-In. The OAuth flow is a plain
@@ -53,7 +58,7 @@ export const CONFIG = {
     //
     // If supabaseUrl is empty, the Google option remains visible but explains
     // that it becomes active after cloud deployment.
-    supabaseUrl:      IS_LOCAL ? '' : 'https://<supabase-project>.supabase.co',
+    supabaseUrl:      'https://hpukcrhxpzyeidoxwqvi.supabase.co',
     supabaseAnonKey:  IS_LOCAL ? '' : '<supabase-anon-key>',
 
     // Where Supabase redirects the browser after Google consent. Must be

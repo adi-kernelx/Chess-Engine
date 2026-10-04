@@ -17,6 +17,7 @@ find_package(Threads REQUIRED)
 # Ubuntu 26.04 LTS ships 3.5.5, so no OPENSSL_ROOT_DIR override or source build
 # is needed. Ubuntu 22.04's 3.0.2 had none of these — see CLAUDE.md.
 find_package(OpenSSL 3.5 REQUIRED)
+find_package(CURL REQUIRED)
 message(STATUS "OpenSSL ${OPENSSL_VERSION} at ${OPENSSL_INCLUDE_DIR}")
 
 # libpq — Phase 7.5. Postgres via Supabase (Cloud Run's filesystem is ephemeral,
@@ -75,6 +76,7 @@ set(SOURCES
     src/crypto/aead.cpp
     src/crypto/kem.cpp
     src/crypto/signature.cpp
+    src/crypto/identity_file.cpp
     src/crypto/x25519.cpp
     src/crypto/base64.cpp
     src/crypto/sealed_envelope.cpp
@@ -94,6 +96,7 @@ set(SOURCES
     src/storage/transaction.cpp
     # Phase 7.8 — Google Sign-In via Supabase Auth
     src/auth/oauth_verify.cpp
+    src/auth/jwks_verifier.cpp
     # Phase 7.9 — rate limiter + safe match_found builder
     src/auth/rate_limiter.cpp
     src/game/match_notify.cpp
@@ -117,7 +120,7 @@ set(SOURCES
 
 # Executable
 add_executable(chess_server ${SOURCES})
-target_link_libraries(chess_server PRIVATE Threads::Threads OpenSSL::SSL OpenSSL::Crypto PostgreSQL::PostgreSQL)
+target_link_libraries(chess_server PRIVATE Threads::Threads OpenSSL::SSL OpenSSL::Crypto PostgreSQL::PostgreSQL CURL::libcurl)
 
 # Test: Board logic (Phase 3.1)
 add_executable(test_board
@@ -406,6 +409,15 @@ add_executable(gen_server_identity
 target_include_directories(gen_server_identity PRIVATE src)
 target_link_libraries(gen_server_identity PRIVATE OpenSSL::Crypto)
 
+add_executable(test_identity_file
+    tests/test_identity_file.cpp
+    src/crypto/identity_file.cpp
+    src/crypto/signature.cpp
+    src/crypto/sha512.cpp
+)
+target_include_directories(test_identity_file PRIVATE src)
+target_link_libraries(test_identity_file PRIVATE OpenSSL::Crypto)
+
 # Test: libpq wrapper (Phase 7.5)
 # Only runs when $DATABASE_URL is set; regress.sh boots an ephemeral local
 # Postgres and points it there. Skipped otherwise — the C++ tests must still
@@ -440,6 +452,15 @@ add_executable(test_transaction
 target_include_directories(test_transaction PRIVATE src)
 target_link_libraries(test_transaction PRIVATE PostgreSQL::PostgreSQL)
 
+add_executable(test_database_pool tests/test_database_pool.cpp
+    src/storage/database.cpp src/storage/transaction.cpp)
+target_include_directories(test_database_pool PRIVATE src tests)
+target_link_libraries(test_database_pool PRIVATE PostgreSQL::PostgreSQL Threads::Threads)
+
+add_executable(bench_identity_reads tools/bench_identity_reads.cpp src/storage/database.cpp)
+target_include_directories(bench_identity_reads PRIVATE src)
+target_link_libraries(bench_identity_reads PRIVATE PostgreSQL::PostgreSQL Threads::Threads)
+
 # Test: Argon2id, username validation, auth service (Phase 7.6)
 # Purely-crypto tests always run; service tests require $DATABASE_URL, which
 # regress.sh provides via the ephemeral local Postgres from Phase 7.5.
@@ -471,10 +492,12 @@ target_include_directories(test_token PRIVATE src third_party)
 target_compile_definitions(test_token PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_token PRIVATE OpenSSL::Crypto PostgreSQL::PostgreSQL)
 
-# Test: Google Sign-In via Supabase Auth — HS256 verifier + service (Phase 7.8)
+# Test: Google Sign-In — ES256/JWKS and legacy HS256 verifiers + account service.
 add_executable(test_oauth
     tests/test_oauth.cpp
+    tests/test_es256.cpp
     src/auth/oauth_verify.cpp
+    src/auth/jwks_verifier.cpp
     src/auth/username.cpp
     src/auth/password.cpp
     src/auth/service.cpp
@@ -487,7 +510,7 @@ add_executable(test_oauth
 )
 target_include_directories(test_oauth PRIVATE src third_party)
 target_compile_definitions(test_oauth PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-target_link_libraries(test_oauth PRIVATE OpenSSL::Crypto PostgreSQL::PostgreSQL)
+target_link_libraries(test_oauth PRIVATE OpenSSL::Crypto PostgreSQL::PostgreSQL CURL::libcurl Threads::Threads)
 
 # Test: rate limiter + WS frame-size cap (Phase 7.9)
 add_executable(test_rate_limiter
@@ -901,7 +924,9 @@ target_link_libraries(test_request_pipeline PRIVATE Threads::Threads OpenSSL::Cr
 # unconditionally; DB layers skip cleanly without DATABASE_URL.
 add_executable(test_tournament
     tests/test_tournament.cpp
+    src/application/tournament_service.cpp
     src/storage/database.cpp
+    src/storage/transaction.cpp
     src/tournament/swiss.cpp
     src/tournament/tournament_repo.cpp
     src/tournament/tournament_manager.cpp
@@ -1009,6 +1034,7 @@ target_link_libraries(test_analysis_service PRIVATE Threads::Threads PostgreSQL:
 # the real cluster.
 add_executable(test_tournament_service
     tests/test_tournament_service.cpp
+    src/storage/transaction.cpp
     src/core/logger.cpp
     src/application/tournament_service.cpp
     src/tournament/swiss.cpp
@@ -1023,6 +1049,7 @@ target_link_libraries(test_tournament_service PRIVATE Threads::Threads PostgreSQ
 # persistence-driven pairing completion, recovery, and idempotency.
 add_executable(test_tournament_runtime
     tests/test_tournament_runtime.cpp
+    src/storage/transaction.cpp
     src/core/logger.cpp
     src/core/uuid.cpp
     src/chess/zobrist.cpp

@@ -1,186 +1,165 @@
 # Multiplayer Chess Platform
 
-A production-grade multiplayer chess platform written from near-scratch in C++17. Real-time online play, spectating, replay, engine analysis, Swiss tournaments, and a from-scratch chess engine — all built on infrastructure that is largely hand-written, backed only by a small set of well-justified libraries (OpenSSL for CSPRNG and lattice crypto, `nlohmann/json`, `libpq`).
+A C++17 multiplayer chess platform with server-authoritative rules and clocks, a static browser client, Supabase PostgreSQL persistence and password/Google authentication.
 
-This project was built as an educational systems exercise: **anything I have formally studied is hand-written**; a library is used only where from-scratch would be genuinely unsafe or disproportionate.
+Built as an educational systems project: networking, concurrency, chess rules, search and selected cryptographic primitives are implemented in the repository. OpenSSL supplies sensitive primitives such as password hashing, randomness and lattice cryptography; libpq, libcurl and nlohmann/json provide database, HTTPS and JSON support.
 
-- **Deep documentation**: [ARCHITECTURE.md](docs/ARCHITECTURE.md) · [PROTOCOL.md](docs/PROTOCOL.md) · [SECURITY.md](docs/SECURITY.md) · [BENCHMARKS.md](docs/BENCHMARKS.md)
-- **Implementation plan**: [implementation_plan.md](implementation_plan.md)
-- **Phase-7 detail (identity + crypto)**: [implementation_phase_7.md](implementation_phase_7.md)
+**Release candidate:** locally tested; not yet deployed. Production OAuth, session recovery and capacity still require validation on the hosted environment.
 
----
+## Features
 
-## What it does
+- Online rooms, rating-band matchmaking and bounded-difficulty AI play.
+- Shared Canvas board with SVG pieces, drag/tap input and responsive layouts.
+- Resignation, draw offers and ordinary-game rematches.
+- Authenticated read-only spectating and saved-game replays.
+- Profile, rating, leaderboard and game-history queries.
+- Scheduled **Swiss** and **Winners Advance** tournaments: registration locks, check-in, start gates, byes, no-shows and automatic results.
+- Advancement-based Winners Advance placement, reversed-color draw replay and a two-draw same-pair cap.
+- Password accounts and Google sign-in through Supabase identity verification.
+- Single-use post-quantum hybrid sealed authentication alongside production TLS.
+- Engine analysis and statistical anti-cheat reports for review, not automatic bans.
+- Invite/result sharing, daily bundled puzzles, local streaks and named bot choices.
 
-- Two players can play a full game of chess over WebSocket, with a **server-authoritative** rules engine.
-- Quick-play matchmaking finds an opponent within an **ELO band** that widens if no match arrives.
-- Spectators can join any live game read-only; fan-out is non-blocking.
-- Completed games are **persisted** in Postgres and can be replayed move-by-move in the browser with optional engine evaluation at each ply.
-- Anyone can play against the built-in **chess engine** — alpha-beta + iterative deepening + Zobrist transposition table + MVV-LVA move ordering.
-- Full authenticated identity: password + Argon2id, or **Google Sign-In via Supabase Auth**. Password-carrying messages travel inside a **post-quantum sealed envelope** (ML-KEM-768 + X25519 + ML-DSA-65 + AES-256-CTR + HMAC-SHA-384).
-- **Scheduled Swiss tournaments** with registration deadlines, round check-in,
-  reserved live games, automatic results, no-show handling, and live standings.
-- Statistical **anti-cheat** analysis of persisted games based on move-time correlation with position complexity.
+### Tournament formats
 
----
+| Format | Progression | Placement |
+| --- | --- | --- |
+| Swiss | Creator selects a fixed round count; odd fields receive a bye, never a bot | Score and Buchholz |
+| Winners Advance | Winners and bye recipients advance through automatic stages; a first draw replays with reversed colors, and two draws prohibit another game between that pair | Advancement/elimination stage first; wins break ties among final survivors |
+
+Both formats reuse ordinary gameplay, names, clocks, Resign and Offer draw. Check-in never bypasses the scheduled start. Equal final-survivor wins can produce joint champions; a bye does not count as a played win.
+
+## Documentation
+
+| Document | Purpose |
+| --- | --- |
+| [Implementation plan](implementation_plan.md) | Completed phases, release gates and major additions |
+| [Frontend implementation plan](frontend_implementation_plan.md) | Consolidated browser roadmap and remaining UX work |
+| [Architecture](docs/ARCHITECTURE.md) | Services, ownership, concurrency and deployment limits |
+| [Protocol](docs/PROTOCOL.md) | Messages, authorization and lifecycle invariants |
+| [Security](docs/SECURITY.md) | Identity, sealing, database isolation and secret handling |
+| [Sequences](docs/SEQUENCES.md) | Request order, locks, commit points and recovery |
+| [Benchmarks](docs/BENCHMARKS.md) | Measured results and reproduction boundaries |
+| [UML diagrams](UML/README.md) | Server and browser class/lifecycle views |
 
 ## Architecture at a glance
 
-```
-Browser ──ws──► epoll loop (main thread)
-                    │  reads bytes into per-Connection buffer
-                    └─► ThreadPool::submit(...)
-                            │
-                            ▼
-                       Worker thread
-                            │
-              parse HTTP upgrade OR WebSocket frame
-                            │
-                            ▼
-                    MessageRouter.route(json)
-                            │
-                            ▼
-                    GameHandler / AuthHandler
-                            │
-                            ▼
-                     GameRoom (per-room mutex)
-                        ├─ Board  (validate move)
-                        ├─ Clock  (steady_clock)
-                        └─ Broadcast to both seats + spectators
-```
+The backend is a modular monolith: transport and a structural JSON request pipeline dispatch to application services, which use domain objects and narrow persistence/delivery ports.
 
-Full design rationale — why mailbox not bitboards, why mutex+CV not lock-free, why the sealed envelope is one-shot not persistent, why Postgres not SQLite — lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+![Architecture overview](UML/01-architecture-overview.svg)
 
----
+Room state is protected independently, notifications run after room locks are released, and bounded identity-read pooling overlaps database waits without interleaving transactions on one connection.
 
-## Build & run
+## Build and run
 
-Development happens inside **WSL2 (Ubuntu 26.04 LTS)** on Windows, or any recent Linux. The code needs POSIX sockets, `epoll`, and pthreads — it does not build natively on Windows.
+Use Linux or WSL2; the server needs POSIX sockets, epoll and pthreads. The local reference toolchain uses Ubuntu 26.04, GCC 15.2 and OpenSSL 3.5.5.
 
-**Toolchain requirements**: GCC 15.2+, CMake 3.16+, OpenSSL 3.5+ (for ML-KEM-768, ML-DSA-65, Argon2id in the default provider — earlier versions do not have these), `libpq`, `nlohmann/json` (vendored).
+Dependencies: CMake 3.16+, C++17 compiler, OpenSSL 3.5+, PostgreSQL/libpq development headers, libcurl development headers and the vendored JSON header.
 
 ```bash
-# Fresh Release build
-mkdir -p build_release && cd build_release
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j"$(nproc)"
-
-# Run the server
-./chess_server           # listens on ws://0.0.0.0:${PORT:-9000}
+cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release
+cmake --build build_release --parallel 2
+./build_release/chess_server
 ```
 
-The frontend is entirely static. Serve `frontend/` with any HTTP server:
+The listener defaults to port 9000, overridable with PORT. Supply configuration securely through the process environment; the executable does not automatically load environment files.
+
+Serve the static frontend separately:
 
 ```bash
-cd frontend && python3 -m http.server 8000
-# open http://localhost:8000
+python3 -m http.server 8000 --directory frontend
 ```
 
-**Warning about `-O`.** `CMakeLists.txt` intentionally sets no default build type — a bare `cmake ..` compiles at `-O0` with `-Wall -Wextra -Wpedantic -Werror`. That is fine for development and debugging but ~5× slower than Release. Every performance number in this repo assumes `-DCMAKE_BUILD_TYPE=Release`.
+Open http://localhost:8000. Required runtime browser assets—including the vendored crypto bundle, integrity manifest and licenses—must accompany the frontend.
 
-### Environment variables
+A bare CMake configuration has no default Release optimization. Use Release for benchmarks.
 
-`chess_server` reads a handful of environment variables at startup. Most are optional; the server logs which features it disabled and why.
+### Docker
 
-| Variable                     | Purpose                                         | Required for |
-|------------------------------|-------------------------------------------------|--------------|
-| `PORT`                       | Listen port (default 9000)                      | Cloud Run |
-| `DATABASE_URL`               | `postgresql://…` connection string              | Auth, persistence |
-| `JWT_SIGNING_KEY`            | Base64-encoded 32-byte key for HS384 access-token signing | Auth |
-| `SERVER_IDENTITY_KEY_PATH`   | Path to the ML-DSA-65 private key file          | Sealed-envelope register/login |
-| `SUPABASE_JWT_SECRET`        | Supabase project's legacy HS256 secret          | Google Sign-In |
-
-Local Google OAuth setup and the current HS256/JWKS compatibility boundary are
-documented in [`docs/SUPABASE_GOOGLE_AUTH_SETUP.md`](docs/SUPABASE_GOOGLE_AUTH_SETUP.md).
-
----
-
-## Tests
-
-Every phase has its own custom test binary. After `make`:
+Build the backend image from the repository root:
 
 ```bash
-./test_move_gen                # perft to depth 5 — the correctness ground truth
-./test_engine                  # alpha-beta search + eval
-./test_transposition_table     # Zobrist hashing + TT
-./test_hash                    # SHA-256/384/512 + HMAC + HKDF vs FIPS/RFC vectors + OpenSSL diff
-./test_aes                     # AES-256, CTR, AEAD
-./test_pqc                     # ML-KEM / ML-DSA / X25519 wrappers
-./test_sealed_envelope         # PQC-hybrid one-shot sealer
-./test_token                   # JWT HS384 + refresh rotation + logout_all
-./test_password                # Argon2id + username validation
-./test_auth_required           # every game command rejects unauth'd callers
-./test_spectator               # broadcast fan-out + disconnect sweep
-./test_replay                  # persisted game replay round-trip
-./test_anti_cheat              # statistical move-time analyser
-./test_tournament              # Swiss pairings + full 8-player run
-# and more — see CMakeLists.txt for the full list
+docker build --tag chess-engine:local .
 ```
 
-DB-backed tests skip cleanly when `DATABASE_URL` is not set. A single documented Release-mode flake (`test_engine` "Start pos near 0", CLAUDE.md §Build & Run) is the visible symptom of missing quiescence search, not a regression.
+The multi-stage image runs the server as a non-root user. It does not include the static frontend or deployment secrets. Supply the runtime environment and private identity file separately; expose the port selected by PORT. Without authenticated configuration, a local compatibility startup is not a full release smoke test.
 
----
+Database-backed features require the matching schema migrations. Review migration prerequisites and use a disposable database for tests; do not blindly run benchmark/test provisioning against the hosted application database.
 
-## Headline benchmarks
+## Configuration
 
-Measured on AMD Ryzen 5 5600H (6c/12t) under WSL2 Ubuntu 26.04, Release `-O2`, 17 September 2026. Medians of three warm runs — see [BENCHMARKS.md](docs/BENCHMARKS.md) for full methodology and raw runs.
+| Setting | Purpose |
+| --- | --- |
+| PORT | Listener port; injected by the cloud runtime |
+| DATABASE_URL | Secret PostgreSQL connection URI; required for accounts/persistence/tournaments |
+| JWT_SIGNING_KEY | Secret base64 encoding of exactly 32 random bytes |
+| SERVER_IDENTITY_KEY_PATH | Mounted private ML-DSA identity file |
+| AUTH_SEAL_REQUIRED | Set 1 for fail-closed production sealing |
+| SUPABASE_JWT_ALGORITHM | ES256 for Google identity using P-256 public keys |
+| SUPABASE_ISSUER | Public Supabase issuer ending in /auth/v1 |
+| SUPABASE_AUDIENCE | authenticated |
+| AUTH_READ_POOL_SIZE | Identity-read pool size 0–4; default 2 |
+| SERVER_WORKER_THREADS | Worker count 1–8; default 4 |
 
-### Chess engine (`bench_engine`)
+ES256 uses verified HTTPS public JWKS; no Supabase private signing key/shared JWT secret is needed. See [Security](docs/SECURITY.md) for legacy compatibility and operational details.
 
-| Position    | 2 s budget | 5 s budget | 10 s budget |
-|-------------|-----------:|-----------:|------------:|
-| startpos    | depth 6, 390 K NPS | depth 7, 386 K NPS | depth 7, 385 K NPS |
-| kiwipete    | depth 6, 325 K NPS | depth 7, 330 K NPS | depth 8, 316 K NPS |
-| middlegame  | depth 6, 386 K NPS | depth 7, 388 K NPS | depth 7, 385 K NPS |
+Without database/auth configuration the server may start with disabled/null adapters in a local compatibility profile. That is not an authenticated release configuration. Required production sealing rejects missing authentication or invalid identity configuration.
 
-### Multiplayer server (`load_test.py`, WSL2 loopback)
+## Tests and benchmarks
 
-| Concurrent games | WS clients | Wall clock | Moves/s | RTT p50 | RTT p99 | Completed |
-|-----------------:|-----------:|-----------:|--------:|--------:|--------:|:---------:|
-| 50               | 100        | 1.94 s     | 515     | 6.7 ms  |  89 ms  | 100 / 100 |
-| 100              | 200        | 3.31 s     | 604     | 15 ms   | 118 ms  | 200 / 200 |
-| 250              | 500        | 7.37 s     | 678     | 36 ms   | 180 ms  | 500 / 500 |
+CMake declares core test executables alongside the server. Keep test sources and shared fixtures available even when building only chess_server.
 
-Steady-state RSS after the 500-client run: **27 MB**; peak during the run: **916 MB** (nlohmann::json transient allocation across 12 worker threads).
+Representative checks:
 
-The plan's aspirational "500 K NPS" and "sub-50 ms p99 at 500 games" targets are not met — those would require quiescence search and less-JSON-heavy hot paths respectively. See [BENCHMARKS.md](docs/BENCHMARKS.md) §Optimization attempt for the honest write-up.
-
----
-
-## Project status
-
-All ten phases of the original implementation plan are complete:
-
-- **Phases 1–2** — epoll TCP server, thread pool, WebSocket RFC 6455, JSON router.
-- **Phase 3** — perft-verified chess rules engine (all depths 1–5 match published counts).
-- **Phase 4** — online multiplayer, matchmaking, Fischer clock.
-- **Phase 5** — dark-theme browser frontend, HTML5 Canvas board, WebSocket client.
-- **Phase 6** — alpha-beta engine with Zobrist TT.
-- **Phase 7** — password + JWT + sealed-envelope + Google Sign-In (via Supabase Auth).
-- **Phase 8** — Postgres persistence (games, ELO transactions, indexed history).
-- **Phase 9** — spectator mode, replay, statistical anti-cheat, Swiss tournaments.
-- **Phase 10** — benchmarking + documentation (this pass).
-
-Deferred future work is listed in [docs/BENCHMARKS.md](docs/BENCHMARKS.md) §Where real NPS gains would come from and in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §What is deliberately not here.
-
----
-
-## Layout
-
+```bash
+./build_release/test_move_gen
+./build_release/test_engine
+./build_release/test_hash
+./build_release/test_aes
+./build_release/test_pqc
+./build_release/test_sealed_envelope
+./build_release/test_tournament
+./build_release/test_tournament_runtime
+node tests/test_frontend_game.mjs
+node tests/test_frontend_session.mjs
+node tests/test_frontend_tournament.mjs
 ```
+
+Use a deliberately selected disposable local database for DB-backed suites. A skipped database suite is not a verified pass. Some developer tooling assumes a local database/user; inspect its setup before execution.
+
+The newer warm hosted-read comparison measured four concurrent identity reads at **632 ms with one connection versus 308 ms with two**. Short local mixed move/tournament-read probes passed up to 60 active accounts; these exclude sustained production, login storms and AI load.
+
+See [Benchmarks](docs/BENCHMARKS.md) for CPU restrictions, percentiles and caveats. No production simultaneous-player limit has been measured.
+
+## Release status and limitations
+
+Core release features, reported local tournament acceptance sets and constrained local container smoke checks are complete. Cloud deployment and production session/OAuth/reconnect validation remain pending.
+
+Live rooms are process-local. Saved results persist in PostgreSQL, but an in-progress board is not transparently restored after a backend process restart or shared between instances. The intended first release uses one backend instance.
+
+Min-zero/max-one permits cold starts; it does not guarantee zero billing. Deployment configuration and capacity need verification on the actual hosted workload.
+
+The frontend, public identity pins and vendor licenses can be published. Database credentials, application signing keys and private identity files must remain outside source control and container layers. Reported local test success is not an independent security audit.
+
+## Repository layout
+
+```text
 src/
-  core/        types, Result<T,E>, logger
-  net/         TCP + epoll, Connection, WebSocket, MessageRouter
-  concurrent/  thread pool, task queue
-  chess/       board, move_gen, notation, zobrist, TT, evaluator, engine
-  game/        rooms, matchmaking, handler, AI player
-  crypto/      hand-written SHA/HMAC/HKDF/AES/AEAD/base64; RAII around ML-KEM/ML-DSA/X25519
-  auth/        password, JWT, sessions, OAuth verifier, rate limiter
-  storage/     libpq wrapper, repositories, schema, migrations
-  analysis/    Phase 9.3 anti-cheat
-  tournament/  Phase 9.4 Swiss + persistence
-frontend/      vanilla JS + HTML5 Canvas, no framework
-tools/         bench_engine, bench_provision, load_test.py, key generators
-tests/         one binary per phase, no test framework, plain assertions
-docs/          ARCHITECTURE, PROTOCOL, SECURITY, BENCHMARKS
+  core/          types, result handling and logging
+  net/           sockets, epoll, WebSocket and delivery
+  concurrent/    worker pool and task queue
+  protocol/      codecs, route policy and request pipeline
+  application/   services and ports
+  chess/         board, rules, notation, evaluation and search
+  game/          rooms, handlers, matchmaking and AI integration
+  auth/          passwords, tokens, sessions and Google verification
+  crypto/        primitives, sealing and identity loading
+  storage/       libpq adapters, repositories, pooling and migrations
+  tournament/    pairing, progression, lifecycle and storage
+  analysis/      statistical review tools
+frontend/        static HTML/CSS/JavaScript and runtime assets
+tests/           correctness, security, service and browser regressions
+tools/           reusable utilities and benchmarks
+docs/            architecture, protocol, security, sequences and benchmarks
+UML/             published SVG diagrams
 ```

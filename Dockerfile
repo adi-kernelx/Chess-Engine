@@ -24,7 +24,8 @@
 # * `--set-secrets` mounts secrets as files:
 #     JWT_SIGNING_KEY=projects/…/secrets/jwt-signing-key/versions/latest
 #     SERVER_IDENTITY_KEY_PATH=/secrets/server_identity.key
-#     …plus SUPABASE_JWT_SECRET, SUPABASE_ISSUER, SUPABASE_AUDIENCE.
+#     SUPABASE_JWT_ALGORITHM=ES256, SUPABASE_ISSUER, SUPABASE_AUDIENCE
+#     are public environment settings; ES256 needs no Supabase shared secret.
 # * DATABASE_URL is passed via `--set-secrets` too (postgres://... string).
 # * See docs/SECURITY.md for the full env-var contract and rotation procedure.
 #
@@ -42,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         cmake \
         libssl-dev \
         libpq-dev \
+        libcurl4-openssl-dev \
         nlohmann-json3-dev \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -65,6 +67,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl3 \
         libpq5 \
+        libcurl4t64 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --user-group --no-create-home chess

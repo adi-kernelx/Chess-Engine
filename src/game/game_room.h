@@ -83,6 +83,7 @@ struct TimeControl {
 
 struct PlayerSlot {
     int         connection_fd  = -1;       // File descriptor (-1 = empty slot)
+    uint64_t    connection_generation = 0; // Prevent an older request reclaiming a refreshed seat
     PlayerId    player_id      = 0;        // Unique player identifier (local atomic counter)
     int64_t     db_player_id   = 0;        // Real database ID (0 = unauthenticated)
     std::string username;                  // Display name
@@ -160,7 +161,9 @@ public:
     };
     ReservedBindResult bind_reserved_player(int64_t db_player_id,
                                             PlayerId local_player_id,
-                                            int connection_fd);
+                                            int connection_fd,
+                                            bool replace_existing = false,
+                                            uint64_t generation = 0);
     bool allow_reserved_player(int64_t db_player_id);
     /// Mark the scheduled start as reached. Idempotent; starts exactly once
     /// when both reserved seats are connected.
@@ -230,7 +233,7 @@ public:
     /// Active rooms use this for game recovery; finished rooms use it only so
     /// a still-pending rematch can be answered after navigation/reconnection.
     /// Local PlayerId values are process-only and never known by the browser.
-    bool on_reconnect_db_player(int64_t db_player_id, int new_fd);
+    bool on_reconnect_db_player(int64_t db_player_id, int new_fd, uint64_t generation = 0);
 
     /// Finish the game when the oldest disconnected seat has exceeded the
     /// grace period. Returns true exactly once, on the terminal transition.

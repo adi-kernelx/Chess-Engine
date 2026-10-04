@@ -1,332 +1,95 @@
-# Sequence Diagrams — LLD-7 documentation deliverable
+# Request and Lifecycle Sequences
 
-Four flows the plan §LLD-7 asked to draw explicitly, showing lock
-boundaries and DB commit points. Text-based (ASCII); a picture would
-add nothing over what the arrows convey.
+Execution order, ownership boundaries and commit points for the shipping architecture. See [Architecture](ARCHITECTURE.md) and the [UML overview](../UML/README.md).
 
-For the containing shapes and dependency directions see
-[ARCHITECTURE.md §7](ARCHITECTURE.md#7-the-lld-refactor-2026-09-lld-0-through-lld-7).
+## 1. Accepted move
 
-Notation:
+1. TcpServer schedules the connection's input onto a worker.
+2. RequestPipeline identifies/decodes the route and applies its authorization policy.
+3. GameplayService resolves the caller's room/seat and submits the move.
+4. Under the room mutex, GameRoom verifies turn/legality and updates position, history, clocks and revision.
+5. The room records move/completion events and builds any final snapshot.
+6. The room lock is released before listener callbacks deliver replies/broadcasts.
+7. Players and spectators receive the authoritative state. The browser interpolates clocks for display only.
 
-* `━━━` a call that RETURNS to the caller before continuing
-* `─▶` a fire-and-forget or a downstream call whose response is not
-  awaited by this arrow
-* `[lock: X]` a critical section holding lock `X`
-* `⋯` boundary between synchronous processing and a later event
-* `┃` process-wide continuation of the same actor
+An illegal move does not update the board or produce opponent/spectator move broadcasts. A finished room cannot accept another move. Slow database work is not performed under the room/transport-wide lock.
 
----
+## 2. Durable completion and retry
 
-## 1. Move acceptance / rejection
+1. GameRoom transitions to finished under its mutex.
+2. It constructs an immutable final snapshot with a completion identity.
+3. GameCompletionService receives the event after the room unlocks.
+4. The persistence adapter checks/inserts that completion in a transaction.
+5. Game, timings and applicable player statistics/ratings commit atomically.
+6. The durable game ID is returned and associated with the tournament pairing when applicable.
+7. Repeated delivery recognizes the completion rather than creating a second game or rating change.
 
-```
-Client       Router        Pipeline           GameplayService     GameRoom
-  │            │              │                     │                │
-  │  frame     │              │                     │                │
-  ├──ws──────▶│              │                     │                │
-  │            │  route(fd,   │                     │                │
-  │            │   type)      │                     │                │
-  │            ├────────────▶│                     │                │
-  │            │              │ SealOpen (nop for   │                │
-  │            │              │   make_move)        │                │
-  │            │              │ ParseJson           │                │
-  │            │              │ (no auth on         │                │
-  │            │              │   make_move — seat  │                │
-  │            │              │   is implied by fd) │                │
-  │            │              │ decode_make_move    │                │
-  │            │              │                     │                │
-  │            │              │ make_move(ctx, req, sink)             │
-  │            │              ├───────────────────▶│                │
-  │            │              │                     │  submit_move   │
-  │            │              │                     ├──────────────▶│
-  │            │              │                     │                │ [lock: room mutex_]
-  │            │              │                     │                │  revision_++
-  │            │              │                     │                │  check turn / clock
-  │            │              │                     │                │  make_move (chess/board.cpp)
-  │            │              │                     │                │  switch Fischer clock
-  │            │              │                     │                │  status = ONGOING?
-  │            │              │                     │                │    │
-  │            │              │                     │                │    ├─ yes: return MoveResult{ok}
-  │            │              │                     │                │    └─ terminal: build_snapshot_locked
-  │            │              │                     │                │       queue GameCompleted
-  │            │              │                     │                │ [unlock] + LockAndDrain fires
-  │            │              │                     │                │   on_game_completed on listeners
-  │            │              │                     │◀───────────────┤   (GameCompletionService, see §2)
-  │            │              │                     │                │
-  │            │              │  encode move_made   │                │
-  │            │              │◀────────────────────┤                │
-  │◀───ws──────┤              │  caller_sink.send   │                │
-  │            │              │  send to opponent   │                │
-  │◀───ws──────┤              │  spec broadcast     │                │
-  │            │              │                     │                │
-  │            │              │  (game_over frame   │                │
-  │            │              │   if terminal)      │                │
-  │◀───ws──────┤              │                     │                │
+The database COMMIT is the durable boundary. A final snapshot held only in memory can still be lost on process failure before successful persistence. Retry is not a durable outbox.
 
-REJECTION variant:
-  If Board::make_move refuses (not legal), the GameRoom
-  returns MoveResult{success=false, error="..."} still under
-  its lock; the service maps to a move_rejected frame and
-  only the caller sees it. No opponent broadcast, no
-  spectator broadcast, no completion event.
-```
+Failure is reported and retained for retry; it is not represented as a completed durable save. Live room ID and replay game ID must never be substituted for one another.
 
-Lock scope: room mutex covers only `submit_move` itself. The caller
-sink and any foreign-fd sends happen after `LockAndDrain` releases.
-No listener callback runs with the room mutex held.
+## 3. Sealed login or Google exchange
 
----
+1. Browser sends seal_request.
+2. Auth handling rate-limits issuance and obtains fresh one-time ML-KEM/X25519 public material with expiry/key ID.
+3. Server signs the offer with its private ML-DSA identity.
+4. Browser checks the public identity pin and signature.
+5. Browser encapsulates/agrees on hybrid shared material and derives payload keys with HKDF.
+6. It encrypts/authenticates the payload, including the inner action.
+7. SealedRegistry consumes the identified offer once, authenticates/decrypts and checks the action.
+8. AuthHandler verifies password or the Google identity token.
+9. A database transaction creates the application session; browser receives application access/refresh tokens.
 
-## 2. Game completion with failed save + retry
+No master secret is sent in the offer. Invalid identity, signature, provider, ciphertext, action or reused/expired offer fails without plaintext fallback. See [Security](SECURITY.md).
 
-```
-GameRoom            Listener list       GameCompletionService     PostgresGameStore     Postgres
-  │ (see §1)           │                        │                        │                  │
-  │ finish_game        │                        │                        │                  │
-  │ build_snapshot_    │                        │                        │                  │
-  │  locked            │                        │                        │                  │
-  │   (stamps          │                        │                        │                  │
-  │    completion_uuid │                        │                        │                  │
-  │    + revision)     │                        │                        │                  │
-  │ queue GameCompleted│                        │                        │                  │
-  │ [unlock]           │                        │                        │                  │
-  │                    │                        │                        │                  │
-  │  on_game_completed(ev) — snapshot by const& │                        │                  │
-  ├───────────────────▶├──────────────────────▶│                        │                  │
-  │                    │                        │ ai / unauth / !capable │                  │
-  │                    │                        │   short-circuit        │                  │
-  │                    │                        │                        │                  │
-  │                    │                        │ save_completed_game(   │                  │
-  │                    │                        │   snapshot)            │                  │
-  │                    │                        ├──────────────────────▶│                  │
-  │                    │                        │                        │ SELECT id        │
-  │                    │                        │                        │ WHERE            │
-  │                    │                        │                        │ completion_uuid  │
-  │                    │                        │                        │  = $1            │
-  │                    │                        │                        ├────────────────▶│
-  │                    │                        │                        │◀────────────────┤ empty
-  │                    │                        │                        │                  │
-  │                    │                        │                        │ BEGIN            │
-  │                    │                        │                        │ INSERT games,    │
-  │                    │                        │                        │        move_times│
-  │                    │                        │                        │ UPDATE players   │
-  │                    │                        │                        │  (ELO+stats)     │
-  │                    │                        │                        │                  │ ─ ✗ DB down ─
-  │                    │                        │                        │◀────────────────┤ ROLLBACK
-  │                    │                        │                        │ StorageError::   │
-  │                    │                        │                        │  Disconnected    │
-  │                    │                        │                        │                  │
-  │                    │                        │◀───────────────────────┤                  │
-  │                    │                        │ log line names typed   │                  │
-  │                    │                        │  StorageError code     │                  │
-  │                    │                        │  (LLD-3.1 classify)    │                  │
-  │                    │                        │                        │                  │
-  │  Game stays FINISHED in-memory. Client already saw game_over.        │                  │
-  │  No automatic retry today — that would require a durable outbox     │                  │
-  │  (plan §6.1: "no promise of crash-durable retries without           │                  │
-  │  durable storage/outbox").                                          │                  │
-                                                                                     ⋯
+## 4. Refresh and route restoration
 
-RETRY BY OPERATOR (later):
-  Second call to save_completed_game with the SAME snapshot.
-  Idempotency plays out here:
-  ┃                                                                     │                  │
-  ┃                                                                     │ SELECT id        │
-  ┃                                                                     │ WHERE            │
-  ┃                                                                     │ completion_uuid  │
-  ┃                                                                     ├────────────────▶│
-  ┃  first run  ─ empty ─ INSERT proceeds ─ COMMIT ─────────────────────┤◀────────── row  │
-  ┃  second run ─ hit ─ short-circuit ────────────────────────────────▶│ already_persisted│
-  ┃                                                                     │                  │
-  ┃  Concurrent race: two workers with the same uuid both pass SELECT,  │                  │
-  ┃  one wins INSERT, the loser hits the partial-unique-index violation │                  │
-  ┃  on completion_uuid, catches UniqueViolation, re-runs SELECT which  │                  │
-  ┃  now hits, returns already_persisted=true. Net: one row, one ELO    │                  │
-  ┃  update — regardless of order.                                      │                  │
-```
+1. Reload creates a new socket and begins session restoration from the saved refresh token.
+2. Refresh is correlated with its pending operation; route changes do not imply authentication failure.
+3. The server validates/rotates the token transactionally.
+4. Bounded rotation recovery handles eligible rapid refresh races.
+5. Client replaces the refresh token and restores access identity.
+6. Current screen requests its game, tournament or saved replay state.
 
-Persistence commit is the DB `COMMIT`. Between snapshot construction
-and that commit, the game is durable *in memory* only. This is
-documented in the log as an explicit deferral of durable-outbox
-work.
+A timeout, unavailable identity read or pending connection is distinct from a definitively revoked/invalid session. Session restoration cannot revive a live room lost to a process restart.
 
----
+## 5. Scheduled tournament and check-in
 
-## 3. Sealed login
+1. Creator submits format, time control and schedule; server validates and persists it.
+2. Players register while allowed.
+3. Registration closes at the deadline or first-round pairing lock, whichever occurs first.
+4. At the first-round 90-second lock, pairings are prepared and reopening is denied.
+5. Authenticated participants check in independently; early check-in reserves their seats.
+6. At scheduled start, eligible occupied rooms become playable. Missing-seat rooms wait without running chess clocks.
+7. Check-in expiry resolves remaining no-shows as single/double forfeits.
+8. Finished played games persist and attach their own replay IDs.
+9. Once every current pairing resolves, the manager schedules the next stage or completes the tournament.
 
-```
-Client         TcpServer/Router      Pipeline         SealedRegistry     AuthHandler        Postgres
-  │                 │                   │                   │                 │                │
-  │ 1. seal_request │                   │                   │                 │                │
-  ├──ws───────────▶│                   │                   │                 │                │
-  │                 │ route→pipeline    │                   │                 │                │
-  │                 ├──────────────────▶│                   │                 │                │
-  │                 │                   │ SealOpen (nop —   │                 │                │
-  │                 │                   │  seal_request     │                 │                │
-  │                 │                   │  is not sealed)   │                 │                │
-  │                 │                   │ raw route:        │                 │                │
-  │                 │                   │  handle_seal_req  │                 │                │
-  │                 │                   ├──────────────────────────────────▶│                │
-  │                 │                   │                   │                 │ rate-limit    │
-  │                 │                   │                   │                 │  seal-req/IP  │
-  │                 │                   │                   │◀────────────────┤ handle_seal_  │
-  │                 │                   │                   │                 │  request(ip)  │
-  │                 │                   │                   │ mint fresh      │                │
-  │                 │                   │                   │  ML-KEM-768 KP  │                │
-  │                 │                   │                   │  + X25519 KP    │                │
-  │                 │                   │                   │  + ML-DSA-65    │                │
-  │                 │                   │                   │  signature over │                │
-  │                 │                   │                   │  the offer      │                │
-  │                 │                   │                   │  bytes          │                │
-  │                 │                   │                   │  store one-time │                │
-  │                 │                   │                   │  key by key_id  │                │
-  │                 │                   │                   │◀ reply JSON ────┤                │
-  │◀ seal_key ──────┤                   │                   │                 │                │
-  │  (contains      │                   │                   │                 │                │
-  │   master_b64,   │                   │                   │                 │                │
-  │   expires_in,   │                   │                   │                 │                │
-  │   offer_sig,    │                   │                   │                 │                │
-  │   identity_pk)  │                   │                   │                 │                │
-  │                 │                   │                   │                 │                │
-  │ 2. compose:     │                   │                   │                 │                │
-  │  * verify_offer_signature(offer, identity_pk)             │                 │                │
-  │  * derive AEAD key from master_b64                        │                 │                │
-  │  * AES-CTR-256 + HMAC-SHA-384 over                        │                 │                │
-  │    {type:"login", username, password}                     │                 │                │
-  │  * wrap into sealed envelope with key_id                  │                 │                │
-  │                 │                   │                   │                 │                │
-  │ 3. sealed login │                   │                   │                 │                │
-  ├──ws───────────▶│                   │                   │                 │                │
-  │                 │ route→pipeline    │                   │                 │                │
-  │                 ├──────────────────▶│                   │                 │                │
-  │                 │                   │ SealOpen calls    │                 │                │
-  │                 │                   │ inspect(type,     │                 │                │
-  │                 │                   │  raw)             │                 │                │
-  │                 │                   ├──────────────────▶│                 │                │
-  │                 │                   │                   │ look up key_id  │                │
-  │                 │                   │                   │ (consume once)  │                │
-  │                 │                   │                   │ decrypt AEAD    │                │
-  │                 │                   │                   │ check HMAC      │                │
-  │                 │                   │                   │ Outcome::Opened │                │
-  │                 │                   │◀──────────────────┤ plaintext:      │                │
-  │                 │                   │                   │  {type:"login", │                │
-  │                 │                   │                   │   username,     │                │
-  │                 │                   │                   │   password}     │                │
-  │                 │                   │ raw route:        │                 │                │
-  │                 │                   │  handle_login     │                 │                │
-  │                 │                   ├───────────────────────────────────▶│                │
-  │                 │                   │                   │                 │ rate-limit    │
-  │                 │                   │                   │                 │  login/IP     │
-  │                 │                   │                   │                 │  parse JSON   │
-  │                 │                   │                   │                 │  rate-limit   │
-  │                 │                   │                   │                 │   login/acct  │
-  │                 │                   │                   │                 │  authenticate │
-  │                 │                   │                   │                 ├──────────────▶│
-  │                 │                   │                   │                 │ Argon2id      │
-  │                 │                   │                   │                 │  verify       │
-  │                 │                   │                   │                 │  (dummy hash  │
-  │                 │                   │                   │                 │   defence     │
-  │                 │                   │                   │                 │   on miss)    │
-  │                 │                   │                   │                 │◀─ok/no ──────│
-  │                 │                   │                   │                 │ issue_session │
-  │                 │                   │                   │                 │  → JWT access │
-  │                 │                   │                   │                 │  + opaque     │
-  │                 │                   │                   │                 │    refresh    │
-  │                 │                   │                   │                 ├──────────────▶│
-  │                 │                   │                   │                 │◀─ ok ────────│
-  │◀ auth_ok ───────┤                   │                   │                 │                │
-  │   username, elo, access_token, refresh_token             │                 │                │
-  │                                                                                            │
-  │  If any step failed → auth_error{code: invalid_credentials|rate_limited|internal}.        │
-  │  If the message arrived UNSEALED → SealedRegistry::Outcome::Rejected                     │
-  │  → pipeline drops silently, handle_login never runs.                                     │
-```
+Unregistered/eliminated users may spectate a live game but cannot take a reserved seat. Bye/unplayed pairings do not create unrelated replay links.
 
-The three pieces that make this secure:
+## 6. Winners Advance progression
 
-1. `require_sealed("login")` at startup — an attacker who strips the
-   envelope hits `Rejected`, not `Continue`.
-2. The one-time key store — each `seal_key` reply mints fresh KPs;
-   the key id is consumed on first successful open.
-3. ML-DSA-65 signature over the offer bytes — the client can prove
-   the reply came from the server identity key on disk before
-   trusting it enough to bind a password to it.
+1. Read all outcomes of the resolved stage.
+2. Advance decisive winners and bye recipients; record eliminated players' stage.
+3. A first same-pair draw creates a reversed-color replay.
+4. After two draws that pair cannot play again; both remain eligible.
+5. Build legal subsequent pairings or complete when no legal pairing remains.
+6. Rank by advancement/elimination stage; apply wins only to ties among final survivors.
 
----
+No Swiss round-count limit and no ordinary Rematch action drive this progression. Creator corrections cannot invalidate a stage that already advanced.
 
-## 4. Disconnect + revision-guarded stale result (design)
+## 7. Engine snapshot and stale-result guard
 
-The current AI move path is synchronous — no stale results happen
-today. This diagram is the design LLD-6.4's revision counter
-supports if a future slice extracts the search into a bounded
-executor.
+Search receives an isolated position/revision snapshot rather than mutable room state. Before applying a result, gameplay checks that the room/revision remains compatible. A resignation, completion or newer position invalidates an obsolete result.
 
-```
-Worker A            GameRoom             Executor pool     Worker B (executor)
-  │                    │                       │                   │
-  │ submit_move        │                       │                   │
-  ├──────────────────▶│                       │                   │
-  │                    │ [lock: room mutex_]   │                   │
-  │                    │  revision_ = R0       │                   │
-  │                    │  human move accepted  │                   │
-  │                    │  build snapshot S     │                   │
-  │                    │   (S.revision = R0)   │                   │
-  │                    │ [unlock]              │                   │
-  │◀───────────────────┤                       │                   │
-  │                                                                │
-  │  submit AI job (S)                                             │
-  ├──────────────────────────────────────────▶│                   │
-  │                                            │ dequeue           │
-  │                                            ├──────────────────▶│
-  │                                            │                   │ SearchLimits from
-  │                                            │                   │  difficulty
-  │                                            │                   │ EngineMoveSelector.select(
-  │                                            │                   │   S.board, limits)
-  │                                            │                   │  (isolated Engine,
-  │                                            │                   │   its own TT)
-  │                                            │                   │
-Meanwhile:                                                          │
-  │ resign(fd)         │                       │                   │
-  ├──────────────────▶│                       │                   │
-  │                    │ [lock]                │                   │
-  │                    │  revision_++          │                   │  ⋯ search still running
-  │                    │  = R1                 │                   │
-  │                    │  finish_game(         │                   │
-  │                    │    RESIGNATION)       │                   │
-  │                    │  build & fire         │                   │
-  │                    │   GameCompleted       │                   │
-  │                    │ [unlock]              │                   │
-  │◀───────────────────┤                       │                   │
-  │                                                                │
-  │                                            │◀──────────────────┤ MoveChoice{from,to,promo}
-  │                                            │                   │
-Worker A picks up the result:                                       │
-  │                    │                       │                   │
-  │ result.snapshot.revision == R0                                  │
-  │ room->revision()   == R1                                        │
-  │ ⇒ STALE, DISCARD                                                │
-  │                    │                       │                   │
-  │  (log line;                                                     │
-  │   no submit_move_ai;                                            │
-  │   no client frame)                                              │
-```
+This boundary supports safe independent search state. It is not evidence of an unbounded asynchronous engine service or distributed job queue.
 
-Three preconditions for this design to be correct — all in place
-today:
+## 8. Pooled identity read
 
-1. **Immutable snapshot.** `GameSnapshot` is a value type; the
-   executor thread never re-reads the room.
-2. **Isolated engine state per job.** `EngineMoveSelector` (LLD-6.2)
-   owns its own `Engine` with private TT. One job per selector.
-3. **Room revision at ingest and dispatch.** `GameSnapshot.revision`
-   pinned under the room mutex at snapshot build; `room->revision()`
-   is an atomic acquire — Worker A can compare without taking the
-   room lock.
+1. Identity extraction validates the application token.
+2. It acquires an exclusive identity-read lease with bounded wait.
+3. The fresh profile/epoch query verifies identity and revocation state.
+4. The lease is returned; unfinished transactions are rolled back before reuse.
+5. Query/checkout failure returns unavailable; an actual epoch mismatch returns unauthorized.
 
-The plan §6.4 also lists: bounded queue depth for the executor,
-admission limits, cancellation on room-state-change, shutdown drain
-that discards pending jobs without applying them. These are the
-work items an async-executor slice would add on top of the current
-groundwork; none of them are needed under the shipping serialized
-path.
+Write transactions retain their existing dedicated guarded sessions. Pooling does not permit two transactions to interleave on one connection.

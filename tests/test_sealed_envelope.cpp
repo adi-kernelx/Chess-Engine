@@ -479,10 +479,14 @@ static void test_key_store() {
 static std::string sealed_message(const std::string& type,
                                   const SealKeyOffer& offer,
                                   const std::string& payload) {
+    json body = json::parse(payload, nullptr, false);
+    if (body.is_object() && !body.contains("type") &&
+        (type == "login" || type == "register" || type == "google_auth")) body["type"] = type;
+    const std::string bound_payload = body.is_discarded() ? payload : body.dump();
     SealedEnvelope env;
     if (!SealedEnvelopeService::seal(offer,
-                                     reinterpret_cast<const uint8_t*>(payload.data()),
-                                     payload.size(), env)) {
+                                     reinterpret_cast<const uint8_t*>(bound_payload.data()),
+                                     bound_payload.size(), env)) {
         return std::string();
     }
     return "{\"type\":\"" + type + "\",\"sealed\":{"
@@ -620,10 +624,7 @@ static void test_registry() {
         const std::string msg =
             sealed_message("login", offer, R"({"type":"resign","username":"adi"})");
         std::string out;
-        if (reg.inspect("login", msg, out) != SealedRegistry::Outcome::Opened) return false;
-        json body = json::parse(out, nullptr, false);
-        return body["type"] == "login" &&
-               out.find("resign") == std::string::npos;
+        return reg.inspect("login", msg, out) == SealedRegistry::Outcome::Rejected && out.empty();
     });
 
     run_test("A non-object payload is rejected", [] {

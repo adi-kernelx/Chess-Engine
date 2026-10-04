@@ -292,11 +292,42 @@ int main() {
 
     net::MessageRouter router;
     application::auth::IdentityExtractor extractor(&db, &signer);
+
+    run_test("pooled identity reads preserve immediate revocation and saturation errors", [&] {
+        storage::DatabasePool reads;
+        std::string error;
+        if (!reads.connect_from_env(2, error)) return false;
+        application::auth::IdentityExtractor pooled(&db, &signer, nullptr, &reads);
+        const json message = {{"access_token", alice_token}};
+        if (!pooled.extract(message).is_ok()) return false;
+        if (!db.exec("UPDATE players SET token_epoch=1 WHERE id=$1", {Param::int64(alice_id)}).ok) return false;
+        auto revoked = pooled.extract(message);
+        if (!db.exec("UPDATE players SET token_epoch=0 WHERE id=$1", {Param::int64(alice_id)}).ok) return false;
+        if (revoked.code != application::ResultCode::Unauthorized || !pooled.extract(message).is_ok()) return false;
+        auto first = reads.acquire();
+        auto second = reads.acquire();
+        auto saturated = pooled.extract(message);
+        return first && second && saturated.code == application::ResultCode::Unavailable;
+    });
     protocol::RequestPipeline pipeline(
         &extractor, /*sealed_reg=*/nullptr,
         [](int) -> net::Connection* { return nullptr; });
     handler.register_handlers(pipeline);
     pipeline.install_on_router(router);
+
+    run_test("database failure is unavailable, not a session rejection", [&] {
+        Database unavailable;
+        application::auth::IdentityExtractor temporary(&unavailable, &signer);
+        const auto result = temporary.extract(json{{"access_token",alice_token}});
+        return result.code == application::ResultCode::Unavailable;
+    });
+    run_test("revocation is still checked on every identity extraction", [&] {
+        if (!extractor.extract(json{{"access_token",alice_token}}).is_ok()) return false;
+        if (!db.exec("UPDATE players SET token_epoch=1 WHERE id=$1", {Param::int64(alice_id)}).ok) return false;
+        const auto result = extractor.extract(json{{"access_token",alice_token}});
+        db.exec("UPDATE players SET token_epoch=0 WHERE id=$1", {Param::int64(alice_id)});
+        return result.code == application::ResultCode::Unauthorized;
+    });
 
     // ── create_game ──────────────────────────────────────────
     std::cout << "\n=== create_game ===\n";

@@ -38,9 +38,10 @@ const ERROR_COPY = {
     unauthorized:            'Session expired — please sign in again.',
     internal:                'Something went wrong on our end. Please try again.',
     unavailable:             'The authentication server did not respond. Check the server configuration and try again.',
+    seal_configuration:      'Secure sign-in is not configured. Please contact the site operator.',
+    seal_failed:             'The secure sign-in handshake failed. No credentials were sent. Please try again.',
+    auth_busy:               'Another sign-in request is in progress. Please wait.',
 };
-
-const AUTH_TIMEOUT_MS = 15_000;
 
 export class AuthScreen extends Screen {
     constructor(ctx, initialMode = 'login') {
@@ -57,10 +58,10 @@ export class AuthScreen extends Screen {
         return h('div', { class: 'screen' },
             this.header(this._mode === 'login' ? 'Sign in' : 'Create account', this._mode === 'login'
                 ? 'Sign in to save your rating and game history.'
-                : 'Create an account — takes ten seconds.'),
+                : 'Create an account to save your games and track your progress.'),
             h('div', { class: 'screen__body' },
                 h('div', { class: 'auth-wrap' },
-                    h('div', { class: 'card' },
+                    h('div', { class: 'card auth-card' },
                         h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Authentication mode' },
                             h('button', {
                                 type: 'button',
@@ -105,13 +106,20 @@ export class AuthScreen extends Screen {
         if (title) title.textContent = registering ? 'Create account' : 'Sign in';
         const sub = this.root && this.root.querySelector('.screen__subtitle');
         if (sub) sub.textContent = registering
-            ? 'Create an account — takes ten seconds.'
+            ? 'Create an account to save your games and track your progress.'
             : 'Sign in to save your rating and game history.';
         if (this._userInput) this._userInput.focus({ preventScroll: true });
     }
 
     _formBody(googleUrl) {
-        return h('div', { class: 'field-stack' },
+        return h('div', { class: 'field-stack auth-form' },
+            h('div', { class: 'auth-intro' },
+                h('div', { class: 'auth-intro__logo', 'aria-hidden': 'true' }),
+                h('h2', { class: 'auth-intro__title' }, this._mode === 'login' ? 'Welcome back' : 'Make your first move'),
+                h('p', { class: 'auth-intro__copy' }, this._mode === 'login'
+                    ? 'Your games, rating, and next opponent await.'
+                    : 'Join the board. Build your rating. Keep every game.'),
+            ),
             h('div', { class: 'field' },
                 h('label', { class: 'field__label', for: 'auth-username' }, 'Username'),
                 h('input', {
@@ -145,20 +153,19 @@ export class AuthScreen extends Screen {
                 ref: el => this._submitBtn = el,
             }, this._mode === 'login' ? 'Sign in' : 'Create account'),
 
-            this._mode === 'login'
-                ? h('div', { class: 'field__hint' },
-                    'Password verification is deliberately constant-time, so failed attempts may take a moment.')
-                : null,
-
-            h('div', { class: 'field-stack__divider' }, 'or'),
+            h('div', { class: 'auth-divider' }, h('span', {}, 'or continue with')),
             h('button', {
                 type: 'button',
-                class: 'btn btn--ghost btn--block',
+                class: 'btn btn--block auth-google',
                 onclick: () => this._continueWithGoogle(googleUrl),
-            }, 'Continue with Google'),
+                ref: el => this._googleBtn = el,
+            }, h('img', { class: 'auth-google__icon', src: 'assets/google-signin-icon.svg',
+                width: 40, height: 40, alt: '', 'aria-hidden': 'true' }),
+                h('span', { ref: el => this._googleLabel = el }, 'Continue with Google')),
             !googleUrl
-                ? h('div', { class: 'field__hint' }, 'Google sign-in will be enabled after cloud deployment.')
+                ? h('div', { class: 'field__hint auth-note' }, 'Google sign-in is not configured yet.')
                 : null,
+            h('p', { class: 'auth-note' }, 'Your rating and game history stay with your account.'),
         );
     }
 
@@ -167,8 +174,9 @@ export class AuthScreen extends Screen {
     }
 
     _continueWithGoogle(url) {
+        if (this._busy) return;
         if (!url) {
-            this.ctx.toast.info('Google sign-in will be available after cloud deployment.', { duration: 2800 });
+            this.ctx.toast.info('Google sign-in is not configured yet.', { duration: 2800 });
             return;
         }
         // Full-page redirect. Supabase performs the OAuth handshake and
@@ -191,6 +199,8 @@ export class AuthScreen extends Screen {
         }
         this._busy = true;
         this._submitBtn.disabled = true;
+        this._googleBtn.disabled = true;
+        this._submitBtn.setAttribute('aria-busy', 'true');
         this._submitBtn.textContent = this._mode === 'login' ? 'Verifying…' : 'Creating…';
 
         const mode = this._mode;
@@ -228,42 +238,17 @@ export class AuthScreen extends Screen {
      *  convincing local demo session. Wait for a definitive live reply or
      *  fail visibly, leaving Session untouched. */
     _requestAuth(message) {
-        if (!this.ctx.socket.isConnected()) {
-            return Promise.resolve({ ok: false, code: 'unavailable' });
-        }
-
-        return new Promise((resolve) => {
-            let settled = false;
-            const cleanup = [];
-            const finish = (result) => {
-                if (settled) return;
-                settled = true;
-                for (const off of cleanup) { try { off(); } catch (_) {} }
-                resolve(result);
-            };
-
-            cleanup.push(this.ctx.socket.on('auth_ok', (data) => {
-                finish({ ok: true, data: this.ctx.Inbound.normalize(data) });
-            }));
-            cleanup.push(this.ctx.socket.on('auth_error', (err) => {
-                finish({ ok: false, code: err.code || 'internal' });
-            }));
-            cleanup.push(this.ctx.socket.onState((state) => {
-                if (state === 'offline') finish({ ok: false, code: 'unavailable' });
-            }));
-
-            const timer = setTimeout(
-                () => finish({ ok: false, code: 'unavailable' }),
-                AUTH_TIMEOUT_MS,
-            );
-            cleanup.push(() => clearTimeout(timer));
-            this.ctx.socket.send(message);
+        return this.ctx.authClient.request(message).then(result => {
+            if (result.ok) result.data = this.ctx.Inbound.normalize(result.data);
+            return result;
         });
     }
 
     _resetSubmitButton() {
         this._busy = false;
         this._submitBtn.disabled = false;
+        this._googleBtn.disabled = false;
+        this._submitBtn.removeAttribute('aria-busy');
         this._submitBtn.textContent = this._mode === 'login' ? 'Sign in' : 'Create account';
     }
 }

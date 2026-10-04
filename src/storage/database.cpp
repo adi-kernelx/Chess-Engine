@@ -40,12 +40,27 @@ Database& Database::operator=(Database&& other) noexcept {
 }
 
 bool Database::connect_from_env(std::string& out_error) {
+    return connect_from_env(out_error, 0);
+}
+
+bool Database::connect_from_env(std::string& out_error, int timeout_seconds) {
     const char* url = std::getenv("DATABASE_URL");
     if (url == nullptr || url[0] == '\0') {
         out_error = "DATABASE_URL is not set";
         return false;
     }
-    return connect(url, out_error);
+    if (timeout_seconds <= 0) return connect(url, out_error);
+    [[maybe_unused]] auto operation = acquire_operation();
+    const auto timeout = std::to_string(timeout_seconds);
+    const char* keywords[] = {"dbname", "connect_timeout", nullptr};
+    const char* values[] = {url, timeout.c_str(), nullptr};
+    conn_.reset(PQconnectdbParams(keywords, values, 1));
+    if (!conn_ || PQstatus(conn_.get()) != CONNECTION_OK) {
+        out_error = safe_error(conn_.get());
+        conn_.reset();
+        return false;
+    }
+    return true;
 }
 
 bool Database::connect(const std::string& conninfo, std::string& out_error) {
@@ -67,6 +82,17 @@ bool Database::connected() const {
     return conn_ != nullptr && PQstatus(conn_.get()) == CONNECTION_OK;
 }
 
+bool Database::reset_for_reuse() {
+    [[maybe_unused]] auto operation = acquire_operation();
+    if (!connected()) return false;
+    const auto status = PQtransactionStatus(conn_.get());
+    if (status == PQTRANS_IDLE) return true;
+    if (status != PQTRANS_INTRANS && status != PQTRANS_INERROR) return false;
+    PGresultPtr result(PQexec(conn_.get(), "ROLLBACK"));
+    return result && PQresultStatus(result.get()) == PGRES_COMMAND_OK &&
+           PQtransactionStatus(conn_.get()) == PQTRANS_IDLE;
+}
+
 std::string Database::last_sqlstate() const {
     [[maybe_unused]] auto operation = acquire_operation();
     return last_sqlstate_;
@@ -74,6 +100,7 @@ std::string Database::last_sqlstate() const {
 
 QueryResult Database::exec(const std::string& sql,
                            const std::vector<Param>& params) {
+    query_count_.fetch_add(1, std::memory_order_relaxed);
     [[maybe_unused]] auto operation = acquire_operation();
     QueryResult result;
     if (!connected()) {

@@ -72,6 +72,8 @@ export function fromBase64(text, expectedLen = 0) {
   if (typeof text !== 'string') return null;
   if (text.length === 0) return expectedLen === 0 ? new Uint8Array(0) : null;
   if (text.length % 4 !== 0) return null;
+  if (expectedLen && text.length !== 4 * Math.ceil(expectedLen / 3)) return null;
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text)) return null;
 
   let pad = 0;
   if (text[text.length - 1] === '=') pad = text[text.length - 2] === '=' ? 2 : 1;
@@ -205,6 +207,7 @@ export function offerSigningInput(offer, context = SEAL_CONTEXT) {
 
 /** Decode a `seal_key` frame into an offer, or null if any field is malformed. */
 export function parseOffer(msg) {
+  if (!msg || typeof msg !== 'object') return null;
   const identityPk = fromBase64(msg.identity_pk, IDENTITY_PK_SIZE);
   const keyId = fromBase64(msg.key_id, KEY_ID_SIZE);
   const kemEk = fromBase64(msg.kem_ek, KEM_EK_SIZE);
@@ -212,7 +215,7 @@ export function parseOffer(msg) {
   const signature = fromBase64(msg.signature, SIG_SIZE);
   const expiresIn = msg.expires_in;
   if (!identityPk || !keyId || !kemEk || !x25519Pk || !signature) return null;
-  if (!Number.isInteger(expiresIn) || expiresIn <= 0) return null;
+  if (!Number.isInteger(expiresIn) || expiresIn <= 0 || expiresIn > 0xffffffff) return null;
   return { identityPk, keyId, kemEk, x25519Pk, signature, expiresIn };
 }
 
@@ -260,32 +263,35 @@ export function createSealer(pqc, pinnedKeys) {
       if (!offer) throw new Error('SEAL_MALFORMED_OFFER');
       if (!(await verifyOffer(offer, pinnedKeys, pqc))) throw new Error('SEAL_UNTRUSTED_KEY');
 
-      const kem = await pqc.mlKemEncapsulate(offer.kemEk);
-      if (!kem || kem.ct.length !== KEM_CT_SIZE) throw new Error('SEAL_KEM_FAILED');
-
-      const eph = await pqc.x25519Generate();
-      const ssClassical = await pqc.x25519Derive(eph.privateKey, offer.x25519Pk);
-
-      // Hybrid: both halves must be broken to recover the payload. HKDF's
-      // extract step mixes all 64 bytes, so half a break yields nothing.
-      const master = concatBytes(kem.sharedSecret, ssClassical);
-
-      const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_SIZE));
-      const payload = utf8.encode(JSON.stringify(payloadObject));
-      const { ct, tag } = await sealWithMaster(master, offer.keyId, iv, payload);
-
-      master.fill(0);
-      ssClassical.fill(0);
-      kem.sharedSecret.fill(0);
-
-      return {
-        key_id: toBase64(offer.keyId),
-        kem_ct: toBase64(kem.ct),
-        x25519_pk: toBase64(eph.publicKey),
-        iv: toBase64(iv),
-        ct: toBase64(ct),
-        tag: toBase64(tag),
-      };
+      let kem, master, ssClassical, payload, keys;
+      try {
+        kem = await pqc.mlKemEncapsulate(offer.kemEk);
+        if (!(kem?.ct instanceof Uint8Array) || kem.ct.length !== KEM_CT_SIZE ||
+            !(kem.sharedSecret instanceof Uint8Array) || kem.sharedSecret.length !== 32) {
+          throw new Error('SEAL_KEM_FAILED');
+        }
+        const eph = await pqc.x25519Generate();
+        if (!(eph.publicKey instanceof Uint8Array) || eph.publicKey.length !== 32) {
+          throw new Error('SEAL_ECDH_FAILED');
+        }
+        ssClassical = await pqc.x25519Derive(eph.privateKey, offer.x25519Pk);
+        if (!(ssClassical instanceof Uint8Array) || ssClassical.length !== 32 ||
+            !ssClassical.some(byte => byte !== 0)) throw new Error('SEAL_ECDH_FAILED');
+        master = concatBytes(kem.sharedSecret, ssClassical);
+        const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_SIZE));
+        payload = utf8.encode(JSON.stringify(payloadObject));
+        const result = await sealWithMaster(master, offer.keyId, iv, payload);
+        keys = result.keys;
+        return {
+          key_id: toBase64(offer.keyId), kem_ct: toBase64(kem.ct),
+          x25519_pk: toBase64(eph.publicKey), iv: toBase64(iv),
+          ct: toBase64(result.ct), tag: toBase64(result.tag),
+        };
+      } finally {
+        for (const bytes of [master, ssClassical, kem?.sharedSecret, payload, keys?.enc, keys?.mac]) {
+          if (bytes instanceof Uint8Array) bytes.fill(0);
+        }
+      }
     },
   };
 }

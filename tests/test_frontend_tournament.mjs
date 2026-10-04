@@ -158,3 +158,42 @@ assert.equal(ranked.standings[0].roundWins, 3);
 assert.equal(ranked.standings[0].roundDraws, 2);
 assert.equal(ranked.standings[0].rank, 1);
 console.log('frontend authoritative registration confirmation and ranking contract tests passed');
+
+const { tournamentRoundHasStarted, tournamentRegistrationCutoff } = await import('../frontend/js/screens/tournament.js');
+assert.equal(tournamentRegistrationCutoff({ registrationDeadline: 1180, firstRoundStartsAt: 1200 }), 1110);
+assert.equal(tournamentRoundHasStarted({ status: 'scheduled', earliestStartAt: 1200 }, 1201), false);
+assert.equal(tournamentRoundHasStarted({ status: 'live', earliestStartAt: 1200 }, 1199), false);
+assert.equal(tournamentRoundHasStarted({ status: 'live', earliestStartAt: 1200 }, 1200), true);
+
+for (const action of ['registration', 'check-in']) {
+    for (const outcome of [{ live: false }, { live: false, error: { message: 'pairings_locked' } },
+        { live: true, data: { roomReady: true, gameId: 999 } }]) {
+        let sends = 0, errors = 0, warnings = 0, entries = 0;
+        let resolveRequest;
+        const screen = new TournamentScreen({ Outbound,
+            session: { accessTokenForRequest: async () => 'token' },
+            capability: { request: (_message, options) => {
+                assert.equal(options.correlated, true);
+                sends++; return new Promise(resolve => resolveRequest = resolve);
+            } }, toast: { success() {}, warning: () => warnings++ },
+        });
+        screen.root = {};
+        screen._renderDetail = () => {};
+        screen._refreshDetail = async () => {};
+        screen._load = async () => {};
+        screen._showError = () => errors++;
+        screen._enterGame = () => entries++;
+        const run = () => action === 'registration' ? screen._setRegistration({ id: 42 }, false)
+            : screen._checkIn({ tournament: { id: 42 } }, { round: 1, status: 'scheduled', earliestStartAt: Date.now() / 1000 + 90 }, {});
+        const pending = run();
+        await Promise.resolve(); await Promise.resolve();
+        await run();
+        assert.equal(sends, 1);
+        resolveRequest(outcome); await pending;
+        assert.equal(errors, outcome.error ? 1 : 0);
+        assert.equal(warnings, !outcome.live && !outcome.error ? 1 : 0);
+        assert.equal(entries, 0, 'an early room-ready response must not enter the board');
+        assert.equal(!!(action === 'registration' ? screen._registrationPending : screen._checkInPending), !outcome.live && !outcome.error);
+    }
+}
+console.log('PASS: registration/check-in pending feedback, duplicate guards and early-entry rejection');

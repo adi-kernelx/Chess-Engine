@@ -29,7 +29,8 @@ public:
     void stop();
     
     // Main event loop
-    void run();
+    // Predicate is polled on the event-loop thread, never in a signal handler.
+    void run(std::function<bool()> stop_requested = {});
 
     // Access the message router to register handlers from outside
     MessageRouter& get_router() { return router_; }

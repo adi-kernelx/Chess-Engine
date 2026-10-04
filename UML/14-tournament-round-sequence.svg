@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2511" height="1801" viewBox="0 0 2511 1801" role="img" aria-labelledby="ttl dsc">
+<title id="ttl">Tournament round — pairing, reserved rooms, check-in and result</title>
+<desc id="dsc">Use case: a scheduled Swiss round. The maintenance tick pairs the round and creates one reserved GameRoom per pairing; each player checks in
+to bind their seat; when the game ends, the persisted result is recorded and standings are recomputed for the next round.</desc>
+<defs>
+<marker id="tri" viewBox="0 0 14 14" refX="13" refY="7" markerWidth="14" markerHeight="14" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L13,7 L1,13 Z" fill="#ffffff" stroke="#4a5a6a" stroke-width="1.3"/></marker>
+<marker id="open" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,6 L1,11" fill="none" stroke="#4a5a6a" stroke-width="1.4"/></marker>
+<marker id="dfill" viewBox="0 0 18 10" refX="17" refY="5" markerWidth="18" markerHeight="10" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+  <path d="M1,5 L9,1 L17,5 L9,9 Z" fill="#4a5a6a" stroke="#4a5a6a" stroke-width="1"/></marker>
+<marker id="dhollow" viewBox="0 0 18 10" refX="17" refY="5" markerWidth="18" markerHeight="10" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+  <path d="M1,5 L9,1 L17,5 L9,9 Z" fill="#ffffff" stroke="#4a5a6a" stroke-width="1.2"/></marker>
+<marker id="sync" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9 Z" fill="#1f2933"/></marker>
+<marker id="ret" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9" fill="none" stroke="#1f2933" stroke-width="1.3"/></marker>
+<marker id="syncL" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9 Z" fill="#8a96a6"/></marker>
+<marker id="retL" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto" markerUnits="userSpaceOnUse">
+  <path d="M1,1 L11,5 L1,9" fill="none" stroke="#8a96a6" stroke-width="1.3"/></marker>
+</defs>
+<rect x="0" y="0" width="2511" height="1801" fill="#ffffff"/>
+<rect x="0" y="0" width="2511" height="6" fill="#2c7a7b"/>
+<text x="40.0" y="36.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">CHESS PLATFORM  ·  UML 14  ·  SEQUENCE DIAGRAM</text>
+<text x="40.0" y="70.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="650" fill="#1f2933" text-anchor="start" xml:space="preserve">Tournament round — pairing, reserved rooms, check-in and result</text>
+<text x="40.0" y="96.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Use case: a scheduled Swiss round. The maintenance tick pairs the round and creates one reserved GameRoom per pairing; each player checks in</text>
+<text x="40.0" y="116.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#5b6b7c" text-anchor="start" xml:space="preserve">to bind their seat; when the game ends, the persisted result is recorded and standings are recomputed for the next round.</text>
+<line x1="40" y1="132" x2="2471" y2="132" stroke="#d8dee6"/>
+<rect x="1315" y="306" width="1116" height="100" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<rect x="1315" y="420" width="1116" height="164" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<rect x="1315" y="598" width="1116" height="90" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<rect x="877" y="796" width="1376" height="165.0" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<rect x="40" y="1265.0" width="2213" height="70.0" rx="10" fill="#fde4d6" fill-opacity="0.5"/>
+<line x1="110" y1="210" x2="110" y2="1653.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<circle cx="110" cy="168" r="7" fill="#d9f2e3" stroke="#2f855a" stroke-width="1.5"/>
+<path d="M110,175 L110,192 M99,181 L121,181 M110,192 L101,204 M110,192 L119,204" stroke="#2f855a" stroke-width="1.5" fill="none"/>
+<rect x="55.0" y="204.0" width="110.0" height="18" fill="#ffffff"/>
+<text x="110.0" y="216.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">Players</text>
+<line x1="443" y1="210" x2="443" y2="1653.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="366.4" y="160" width="153.2" height="50" rx="5" fill="#e6dcfa" stroke="#6b46c1" stroke-width="1.6"/>
+<text x="443.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">TournamentService</text>
+<line x1="621" y1="210" x2="621" y2="1653.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="566.0" y="160" width="110.0" height="50" rx="5" fill="#fbe8c4" stroke="#b7791f" stroke-width="1.6"/>
+<text x="621.0" y="182.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">TcpServer</text>
+<text x="621.0" y="198.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">maintenance</text>
+<line x1="947" y1="210" x2="947" y2="1653.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="870.4" y="160" width="153.2" height="50" rx="5" fill="#e6dcfa" stroke="#6b46c1" stroke-width="1.6"/>
+<text x="947.0" y="182.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">TournamentRuntime</text>
+<text x="947.0" y="198.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#5b6b7c" text-anchor="middle" xml:space="preserve">Service</text>
+<line x1="1385" y1="210" x2="1385" y2="1653.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="1308.4" y="160" width="153.2" height="50" rx="5" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="1385.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">TournamentManager</text>
+<line x1="1697" y1="210" x2="1697" y2="1653.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="1642.0" y="160" width="110.0" height="50" rx="5" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="1697.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">swiss</text>
+<line x1="1875" y1="210" x2="1875" y2="1653.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="1820.0" y="160" width="110.0" height="50" rx="5" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="1875.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">RoomManager</text>
+<line x1="2183" y1="905.0" x2="2183" y2="1653.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="2128.0" y="855.0" width="110.0" height="50" rx="5" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.6"/>
+<text x="2183.0" y="885.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">GameRoom</text>
+<line x1="2361" y1="210" x2="2361" y2="1653.0" stroke="#a0aec0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<rect x="2306.0" y="160" width="110.0" height="50" rx="5" fill="#e2e8f0" stroke="#4a5568" stroke-width="1.6"/>
+<text x="2361.0" y="190.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="700" fill="#1f2933" text-anchor="middle" xml:space="preserve">PostgreSQL</text>
+<rect x="2356" y="340" width="10" height="44" fill="#e2e8f0" stroke="#4a5568" stroke-width="1.2"/>
+<rect x="1692" y="454" width="10" height="44" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="2356" y="518" width="10" height="44" fill="#e2e8f0" stroke="#4a5568" stroke-width="1.2"/>
+<rect x="1386" y="650" width="10" height="28" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="1380" y="272" width="10" height="440" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="2356" y="732" width="10" height="44" fill="#e2e8f0" stroke="#4a5568" stroke-width="1.2"/>
+<rect x="1870" y="830" width="10" height="109.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="942" y="238" width="10" height="747.0" fill="#e6dcfa" stroke="#6b46c1" stroke-width="1.2"/>
+<rect x="2356" y="1107.0" width="10" height="44.0" fill="#e2e8f0" stroke="#4a5568" stroke-width="1.2"/>
+<rect x="1380" y="1073.0" width="10" height="108.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="2178" y="1201.0" width="10" height="44.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="942" y="1039.0" width="10" height="320.0" fill="#e6dcfa" stroke="#6b46c1" stroke-width="1.2"/>
+<rect x="438" y="1035.0" width="10" height="374.0" fill="#e6dcfa" stroke="#6b46c1" stroke-width="1.2"/>
+<rect x="942" y="1473.0" width="10" height="28.0" fill="#e6dcfa" stroke="#6b46c1" stroke-width="1.2"/>
+<rect x="2356" y="1543.0" width="10" height="44.0" fill="#e2e8f0" stroke="#4a5568" stroke-width="1.2"/>
+<rect x="1380" y="1509.0" width="10" height="108.0" fill="#d3eeee" stroke="#2c7a7b" stroke-width="1.2"/>
+<rect x="1315" y="306" width="1116" height="100" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M1325,306 L1318,309 Q1315,312 1315,316 L1315,396 Q1315,400 1318,403 L1325,406 L1321,406 L1321,306 Z" fill="#c2410c"/>
+<rect x="1329" y="312" width="44" height="18" rx="9" fill="#c2410c"/>
+<text x="1351.0" y="325.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">OPT</text>
+<rect x="1315" y="420" width="1116" height="164" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M1325,420 L1318,423 Q1315,426 1315,430 L1315,574 Q1315,578 1318,581 L1325,584 L1321,584 L1321,420 Z" fill="#c2410c"/>
+<rect x="1329" y="426" width="44" height="18" rx="9" fill="#c2410c"/>
+<text x="1351.0" y="439.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">OPT</text>
+<rect x="1315" y="598" width="1116" height="90" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M1325,598 L1318,601 Q1315,604 1315,608 L1315,678 Q1315,682 1318,685 L1325,688 L1321,688 L1321,598 Z" fill="#c2410c"/>
+<rect x="1329" y="604" width="44" height="18" rx="9" fill="#c2410c"/>
+<text x="1351.0" y="617.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">OPT</text>
+<rect x="877" y="796" width="1376" height="165.0" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M887,796 L880,799 Q877,802 877,806 L877,951.0 Q877,955.0 880,958.0 L887,961.0 L883,961.0 L883,796 Z" fill="#c2410c"/>
+<rect x="891" y="802" width="52" height="18" rx="9" fill="#c2410c"/>
+<text x="917.0" y="815.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">LOOP</text>
+<rect x="40" y="1265.0" width="2213" height="70.0" rx="10" fill="none" stroke="#c2410c" stroke-width="1.6"/>
+<path d="M50,1265.0 L43,1268.0 Q40,1271.0 40,1275.0 L40,1325.0 Q40,1329.0 43,1332.0 L50,1335.0 L46,1335.0 L46,1265.0 Z" fill="#c2410c"/>
+<rect x="54" y="1271.0" width="44" height="18" rx="9" fill="#c2410c"/>
+<text x="76.0" y="1284.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" xml:space="preserve">OPT</text>
+<text x="1381.0" y="325.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[registration deadline reached]</text>
+<text x="1381.0" y="439.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[round start time reached]</text>
+<text x="1381.0" y="617.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[check-in window closed]</text>
+<text x="951.0" y="815.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[each pairing without a live room]</text>
+<text x="106.0" y="1284.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#8f2f08" text-anchor="start" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">[both seats bound: game starts]</text>
+<path d="M80,1411.0 L2203,1411.0 L2213,1421.0 L2213,1439.0 L80,1439.0 Z" fill="#fffbea" stroke="#c9a227" stroke-width="1.1"/>
+<text x="90.0" y="1429.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5c4813" text-anchor="start" xml:space="preserve">the game is played as in UML 11 and saved as in UML 12</text>
+<path d="M621.0,244 L942.0,244" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="781.5" y="238.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">maintenance_tick()  (at most 1 per s)</text>
+<path d="M952.0,278 L1380.0,278" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1166.0" y="272.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">maintenance_tick()</text>
+<path d="M1390.0,346 L2356.0,346" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1873.0" y="340.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">UPDATE status = &#x27;scheduled&#x27;</text>
+<path d="M2356.0,380 L1390.0,380" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<path d="M1390.0,460 L1692.0,460" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1541.0" y="454.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">pair_swiss_round(standings, played)</text>
+<path d="M1692.0,494 L1390.0,494" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1541.0" y="488.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">vector&lt;Pairing&gt;</text>
+<path d="M1390.0,524 L2356.0,524" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1873.0" y="518.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">INSERT tournament_pairings</text>
+<path d="M2356.0,558 L1390.0,558" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<path d="M1395,638 L1436,638 L1436,664 L1401,664" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1442.0" y="646.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">adjudicate_no_shows(): forfeits</text>
+<path d="M1380.0,708 L952.0,708" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<path d="M952.0,738 L2356.0,738" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1654.0" y="732.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">get_live_pending_pairings()</text>
+<path d="M2356.0,772 L952.0,772" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1654.0" y="766.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">pairings</text>
+<path d="M952.0,836 L1870.0,836" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1411.0" y="830.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">create_reserved_tournament_room(...)</text>
+<path d="M1880.0,880 L2128.0,880" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<rect x="1944.5" y="863" width="175.5" height="14" fill="#ffffff" opacity="0.9"/>
+<text x="2120.0" y="874.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="end" xml:space="preserve">&lt;&lt;create&gt;&gt; reserved seats</text>
+<path d="M1870.0,935.0 L952.0,935.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1411.0" y="929.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">room</text>
+<path d="M942.0,981.0 L621.0,981.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<path d="M110.0,1011.0 L443.0,1011.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="276.5" y="1005.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">check_in_tournament_round {tid, round}</text>
+<path d="M448.0,1045.0 L942.0,1045.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="695.0" y="1039.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">check_in_and_bind(tid, round, actor, fd)</text>
+<path d="M952.0,1079.0 L1380.0,1079.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1166.0" y="1073.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">check_in(tid, round, player)</text>
+<path d="M1390.0,1113.0 L2356.0,1113.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1873.0" y="1107.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">record check-in</text>
+<path d="M2356.0,1147.0 L1390.0,1147.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<path d="M1380.0,1177.0 L952.0,1177.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1166.0" y="1171.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">ok</text>
+<path d="M952.0,1207.0 L2178.0,1207.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1565.0" y="1201.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">bind_reserved_player(db_id, pid, fd)</text>
+<path d="M2178.0,1241.0 L952.0,1241.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1565.0" y="1235.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">ReservedBindResult{started}</text>
+<path d="M942.0,1305.0 L110.0,1305.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="526.0" y="1299.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">tournament_game_ready {game_id, color}</text>
+<path d="M942.0,1355.0 L448.0,1355.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="695.0" y="1349.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">TournamentCheckInResult</text>
+<path d="M438.0,1385.0 L110.0,1385.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#retL)"/>
+<text x="274.0" y="1379.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">tournament_round_checked_in</text>
+<path d="M952,1461.0 L993,1461.0 L993,1487.0 L958,1487.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="999.0" y="1469.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">on_tournament_game_persisted(pairing, result, id)</text>
+<path d="M947.0,1515.0 L1380.0,1515.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1163.5" y="1509.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">record_game_result(pairing, result)</text>
+<path d="M1390.0,1549.0 L2356.0,1549.0" stroke="#8a96a6" stroke-width="1.3" fill="none" marker-end="url(#syncL)"/>
+<text x="1873.0" y="1543.0" font-family="Consolas, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="12" font-weight="400" fill="#1f2933" text-anchor="middle" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">UPDATE pairing; recompute standings</text>
+<path d="M2356.0,1583.0 L1390.0,1583.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<path d="M1380.0,1613.0 L947.0,1613.0" stroke="#8a96a6" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#retL)"/>
+<text x="1163.5" y="1607.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b7c" text-anchor="middle" font-style="italic" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke" xml:space="preserve">ok</text>
+<text x="40.0" y="1687.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Legend</text>
+<rect x="40" y="1697.0" width="16" height="12" rx="2" fill="#d9f2e3" stroke="#2f855a"/>
+<text x="62.0" y="1708.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Browser frontend</text>
+<rect x="230" y="1697.0" width="16" height="12" rx="2" fill="#fbe8c4" stroke="#b7791f"/>
+<text x="252.0" y="1708.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Transport / concurrency</text>
+<rect x="420" y="1697.0" width="16" height="12" rx="2" fill="#e6dcfa" stroke="#6b46c1"/>
+<text x="442.0" y="1708.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Application service</text>
+<rect x="610" y="1697.0" width="16" height="12" rx="2" fill="#d3eeee" stroke="#2c7a7b"/>
+<text x="632.0" y="1708.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">Game domain</text>
+<rect x="40" y="1719.0" width="16" height="12" rx="2" fill="#e2e8f0" stroke="#4a5568"/>
+<text x="62.0" y="1730.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">External system</text>
+<text x="810.0" y="1687.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6b7c" text-anchor="start" xml:space="preserve">Messages</text>
+<path d="M810,1705.0 L856,1705.0" stroke="#1f2933" stroke-width="1.3" fill="none" marker-end="url(#sync)"/>
+<text x="866.0" y="1709.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">synchronous call (caller waits)</text>
+<path d="M1100,1705.0 L1146,1705.0" stroke="#1f2933" stroke-width="1.3" fill="none" marker-end="url(#ret)"/>
+<text x="1156.0" y="1709.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">asynchronous (no wait)</text>
+<path d="M810,1727.0 L856,1727.0" stroke="#1f2933" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#ret)"/>
+<text x="866.0" y="1731.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">return / reply</text>
+<path d="M1100,1727.0 L1146,1727.0" stroke="#1f2933" stroke-width="1.3" fill="none" stroke-dasharray="6 4" marker-end="url(#ret)"/>
+<text x="1156.0" y="1731.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">&lt;&lt;create&gt;&gt; new object</text>
+<path d="M825,1740.0 L841,1756.0 M841,1740.0 L825,1756.0" stroke="#c53030" stroke-width="2.4"/>
+<text x="866.0" y="1753.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">&lt;&lt;destroy&gt;&gt;: lifeline ends</text>
+<text x="1100.0" y="1753.0" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#1f2933" text-anchor="start" xml:space="preserve">alt = if / else    opt = if    loop = repeat</text>
+</svg>

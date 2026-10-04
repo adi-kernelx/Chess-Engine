@@ -81,6 +81,8 @@ struct TournamentState {
     std::vector<StandingRow>            standings;    ///< sorted best-first
     std::vector<StoredPairing>          all_pairings; ///< every round, in DB order
     std::vector<StoredTournamentRound>  rounds;
+    std::map<int64_t, std::string> usernames;
+    std::vector<std::pair<int, int64_t>> check_ins;
 };
 
 // ── Result / error types ─────────────────────────────────────────────

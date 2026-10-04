@@ -104,9 +104,15 @@ SealedRegistry::Outcome SealedRegistry::inspect(const std::string& type,
     json body = json::parse(text, nullptr, /*allow_exceptions=*/false);
     if (body.is_discarded() || !body.is_object()) return Outcome::Rejected;
 
-    // A sealed payload must not smuggle its own "type": the routing decision
-    // was already made from the outer frame, and letting the inside override it
-    // would mean one registered type could be opened and dispatched as another.
+    // Authenticate the routing action too: relabelling an encrypted register
+    // request as login must not leave a valid envelope for a different action.
+    auto inner_type = body.find("type");
+    const bool auth_type = type == "login" || type == "register" || type == "google_auth";
+    if (inner_type == body.end()) {
+        if (auth_type) return Outcome::Rejected;
+    } else if (!inner_type->is_string() || inner_type->get<std::string>() != type) {
+        return Outcome::Rejected;
+    }
     body.erase("type");
 
     const std::string dumped = body.dump();          // "{...}", keys escaped

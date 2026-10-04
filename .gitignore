@@ -23,6 +23,10 @@ Makefile
 compile_commands.json
 
 # Dependencies
+node_modules/
+.venv/
+venv/
+.npm/
 third_party/*
 !third_party/json.hpp
 !third_party/README.md
@@ -55,8 +59,22 @@ docs/*
 !docs/ARCHITECTURE.md
 !docs/BENCHMARKS.md
 !docs/SEQUENCES.md
-!docs/lld_baseline.md
+!docs/PROTOCOL.md
+!docs/SECURITY.md
 !docs/.gitkeep
+# Explicit local-only records/setup notes, even if the whitelist grows.
+docs/implementation_log.md
+docs/SUPABASE_GOOGLE_AUTH_SETUP.md
+docs/lld_baseline.md
+docs/POOL_AND_SUPABASE_ADVISOR_REVIEW_2026-10-03.md
+docs/architecture_uml.svg
+docs/DOCKER_RELEASE_VERIFICATION_2026-10-04.md
+docs/LOCAL_RELEASE_VERIFICATION_2026-10-03.md
+docs/CLOUD_CONSOLE_RELEASE_SETUP.md
+docs/frontend_growth_plan.md
+docs/frontend_implementation.md
+docs/new_things_to_learn.docx
+docs/TEST_FILE_INVENTORY.md
 
 # Local Test Files
 test.html
@@ -67,6 +85,36 @@ secrets/
 *.key
 *.pem
 .env
+.env.*
+!.env.example
+
+# Generated caches, logs and test reports (not source tests or vendor bundles).
+__pycache__/
+*.py[cod]
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+*.log
+
+# Historical diagrams and generation code remain local. Publish UML SVGs only.
+/design/uml/
+/UML/_source/
+
+# One-off operational probe and internal planning/verification records.
+/tools/verify_tournament_correction.cpp
+/lld_implementation_plan.md
+/tournament_live_play_implementation_plan.md
+/MANUAL_VERIFICATION_CHECKLIST.md
+
+# Standalone local release/process probes; keep core regressions and benchmarks.
+/tests/test_docker_runtime.py
+/tests/test_server_config.py
+/tests/test_server_shutdown.py
+/tests/test_release_preflight.mjs
+/tests/test_release_schema_audit.py
+/tests/release_security_migration.sql
 
 # AI-assistant tool configuration and per-phase plan drafts —
 # these are working notes, not something the repo should carry.

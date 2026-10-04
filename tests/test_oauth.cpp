@@ -496,12 +496,22 @@ static void test_service(Database& db) {
 // main
 // ============================================================
 
-int main() {
+int test_es256();
+int test_es256_service(Database& db);
+int main(int argc, char** argv) {
+    if (argc == 3 && std::string(argv[1]) == "--probe-jwks") {
+        Es256JwksVerifier jwks(argv[2]);
+        const bool ok = jwks.refresh() && jwks.key_count() > 0;
+        std::cout << "Verified HTTPS Supabase ES256 JWKS import: " << (ok ? "PASS" : "FAIL")
+                  << "; trusted public keys=" << jwks.key_count() << std::endl;
+        return ok ? 0 : 1;
+    }
     std::cout << "========================================" << std::endl;
     std::cout << " Google Sign-In via Supabase - Phase 7.8" << std::endl;
     std::cout << "========================================" << std::endl;
 
     test_verifier();
+    g_failed += test_es256();
 
     if (std::getenv("DATABASE_URL") == nullptr) {
         std::cout << "\n  DATABASE_URL is not set — skipping service tests.\n";
@@ -513,6 +523,7 @@ int main() {
             return 1;
         }
         test_service(db);
+        g_failed += test_es256_service(db);
     }
 
     std::cout << "\n========================================" << std::endl;

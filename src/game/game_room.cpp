@@ -342,7 +342,8 @@ bool GameRoom::join(PlayerId player_id, const std::string& player_name, int conn
 }
 
 GameRoom::ReservedBindResult GameRoom::bind_reserved_player(
-        int64_t db_player_id, PlayerId local_player_id, int connection_fd) {
+        int64_t db_player_id, PlayerId local_player_id, int connection_fd,
+        bool replace_existing, uint64_t generation) {
     ReservedBindResult result;
     GameStarted ev;
     bool fire_started = false;
@@ -369,7 +370,10 @@ GameRoom::ReservedBindResult GameRoom::bind_reserved_player(
             result.error = "round_check_in_required";
             return result;
         }
-        if (seat->connected && seat->connection_fd != connection_fd) {
+        if (generation < seat->connection_generation) {
+            result.error = "connection_replaced"; return result;
+        }
+        if (seat->connected && seat->connection_fd != connection_fd && !replace_existing) {
             result.error = "seat_already_connected";
             return result;
         }
@@ -380,6 +384,7 @@ GameRoom::ReservedBindResult GameRoom::bind_reserved_player(
             seat->connected = true;
             seat->disconnected_at = {};
         }
+        seat->connection_generation = generation;
         if (reserved_open_ && state_ == RoomState::WAITING
             && white_.connected && black_.connected) {
             state_ = RoomState::IN_PROGRESS;
@@ -913,10 +918,10 @@ bool GameRoom::on_reconnect(PlayerId player_id, int new_fd) {
     return false;
 }
 
-bool GameRoom::on_reconnect_db_player(int64_t db_player_id, int new_fd) {
+bool GameRoom::on_reconnect_db_player(int64_t db_player_id, int new_fd, uint64_t generation) {
     if (is_tournament_game()) {
         return bind_reserved_player(db_player_id,
-            static_cast<PlayerId>(db_player_id), new_fd).ok;
+            static_cast<PlayerId>(db_player_id), new_fd, true, generation).ok;
     }
     LockAndDrain lock(*this);
     if (db_player_id <= 0) return false;
@@ -925,18 +930,19 @@ bool GameRoom::on_reconnect_db_player(int64_t db_player_id, int new_fd) {
     if (white_.db_player_id == db_player_id) seat = &white_;
     else if (black_.db_player_id == db_player_id) seat = &black_;
     if (!seat) return false;
+    if (generation < seat->connection_generation) return false;
     // State requests are intentionally idempotent. The already-bound socket
     // may request another snapshot after authentication refresh/reconciliation.
     if (seat->connected) {
-        if (seat->connection_fd == new_fd) return true;
-        // Only finished-room rematch recovery may replace an apparently-live
-        // old descriptor by durable identity. Active games retain their
-        // stricter disconnect-then-rebind contract.
-        if (state_ != RoomState::FINISHED) return false;
+        if (seat->connection_fd == new_fd) { seat->connection_generation = generation; return true; }
+        // Authenticated durable identity owns the seat, not TCP teardown
+        // timing. Replacing the descriptor atomically removes the old
+        // socket's move authority; its later disconnect cannot detach this one.
     }
 
     revision_.fetch_add(1, std::memory_order_release);
     seat->connection_fd = new_fd;
+    seat->connection_generation = generation;
     seat->connected = true;
     seat->disconnected_at = {};
     return true;

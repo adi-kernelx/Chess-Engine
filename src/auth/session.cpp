@@ -127,7 +127,8 @@ SessionTokens refresh_session(Database& db, const TokenSigner& signer,
     // Fetch what we need to sign the new access token.
     auto p = db.exec("SELECT username, token_epoch FROM players WHERE id=$1",
                      {Param::int64(player_id)});
-    if (!p.ok || p.rows.empty()) {
+    if (!p.ok) { outcome = RefreshOutcome::DatabaseError; return t; }
+    if (p.rows.empty()) {
         // Player deleted underneath us — treat as invalid, no useful successor.
         auto del = db.exec("DELETE FROM sessions WHERE family_id=$1::uuid",
                            {Param::text(family)});

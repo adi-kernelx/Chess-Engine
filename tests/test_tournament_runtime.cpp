@@ -7,6 +7,8 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <future>
 #include <vector>
 
 #include "application/game_completion_service.h"
@@ -243,6 +245,53 @@ int main() {
     const int64_t black = add_player(db, "RuntimeBlack", 1450);
     const int64_t third = add_player(db, "RuntimeThird", 1400);
     const int64_t fourth = add_player(db, "RuntimeFourth", 1350);
+
+    test("simultaneous check-ins stay outside the board until the scheduled start", [&] {
+        ports::FakeClock clock;
+        game::RoomManager rooms;
+        TournamentRuntimeService runtime(&db, rooms, [](int, const std::string&) {}, clock);
+        auto cr = create_tournament(db, "Concurrent Join", 1, 60000, 0, white, 170, 200, 60);
+        TournamentManager manager(db, clock);
+        if (!cr.ok || !manager.join(cr.id, white, 1500).ok || !manager.join(cr.id, black, 1450).ok) return false;
+        clock.advance(std::chrono::seconds(110));
+        runtime.maintenance_tick();
+        const auto pairs = get_pairings_for_round(db, cr.id, 1);
+        if (pairs.size() != 1 || pairs[0].game_id || rooms.room_count()) return false;
+        ports::TournamentCheckInResult w, b;
+        std::thread first([&] { w = runtime.check_in_and_bind(cr.id, 1, {white,"RuntimeWhite",1500}, 81, 1); });
+        std::thread second([&] { b = runtime.check_in_and_bind(cr.id, 1, {black,"RuntimeBlack",1450}, 82, 2); });
+        first.join(); second.join();
+        if (!w.ok || !b.ok || w.room_ready || b.room_ready || rooms.room_count()) return false;
+        clock.advance(std::chrono::seconds(90));
+        runtime.maintenance_tick();
+        const auto room = rooms.find_room_by_pairing(pairs[0].id);
+        if (!room || rooms.room_count() != 1 || room->get_state() != game::RoomState::IN_PROGRESS) return false;
+        std::thread rejoin_white([&] { w = runtime.check_in_and_bind(cr.id, 1, {white,"RuntimeWhite",1500}, 83, 3); });
+        std::thread rejoin_black([&] { b = runtime.check_in_and_bind(cr.id, 1, {black,"RuntimeBlack",1450}, 84, 4); });
+        rejoin_white.join(); rejoin_black.join();
+        room->on_disconnect(81); room->on_disconnect(82);
+        return w.ok && b.ok && w.room_ready && b.room_ready && w.game_id == b.game_id
+            && rooms.room_count() == 1 && room->get_player_fd(w.color) == 83 && room->get_player_fd(b.color) == 84
+            && room->is_connected(w.color) && room->is_connected(b.color)
+            && !room->on_reconnect_db_player(white, 81, 1)
+            && !room->submit_move(81, Squares::E2, make_square(3,4)).success
+            && manager.record_game_result(pairs[0].id, "1-0").ok;
+    });
+
+    test("a blocked tournament PG session does not block an independent auth session", [&] {
+        Database auth_db; std::string err;
+        if (!auth_db.connect_from_env(err)) return false;
+        std::promise<void> held, release;
+        auto released = release.get_future();
+        std::thread bulk([&] { auto operation = db.acquire_operation(); held.set_value(); released.wait(); });
+        held.get_future().wait();
+        auto lookup = std::async(std::launch::async, [&] {
+            return auth_db.exec("SELECT token_epoch FROM players WHERE id=$1", {Param::int64(white)}).ok;
+        });
+        const bool independent = lookup.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+        release.set_value(); bulk.join();
+        return lookup.get() && independent;
+    });
 
     test("early check-ins bind one persisted room and completion resolves pairing", [&] {
         ports::FakeClock clock;
