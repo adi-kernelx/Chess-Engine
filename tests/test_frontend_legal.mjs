@@ -33,7 +33,9 @@ for (const name of ['index.html', 'privacy.html', 'terms.html']) {
     }
 }
 const privacy = await read('privacy.html');
-assert.match(privacy, /Password registration does not collect an email address/);
+assert.match(privacy, /New password accounts require email verification/);
+assert.match(privacy, /single-use email links/);
+assert.match(privacy, /Gmail SMTP/);
 assert.doesNotMatch(privacy, /email address where supplied through account creation/);
 for (const disclosure of ['Supabase', 'Vercel', 'Google Cloud Run', 'openid',
     'refresh token', 'move timings', 'deletion', 'anti-cheat']) {

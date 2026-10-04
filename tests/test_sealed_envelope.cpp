@@ -573,6 +573,25 @@ static void test_registry() {
                out.empty();
     });
 
+    run_test("Email recovery and linking actions require bound inner types", [] {
+        for(const std::string type:{"request_password_reset","reset_password","verify_email","set_recovery_email","link_google"}) {
+            SealedKeyStore store;
+            SealedRegistry reg(identity(),store);reg.require_sealed(type);
+            std::string out;
+            if(reg.inspect(type,"{\"type\":\""+type+"\"}",out)!=SealedRegistry::Outcome::Rejected) return false;
+            auto mint=[&]{
+                auto msg=json::parse(reg.handle_seal_request("1.2.3.4"));SealKeyOffer offer;
+                decode_base64(msg["key_id"],offer.key_id,seal::KEY_ID_SIZE);
+                decode_base64(msg["kem_ek"],offer.kem_ek,mlkem768::PUBLIC_KEY_SIZE);
+                decode_base64(msg["x25519_pk"],offer.x25519_pk,x25519::PUBLIC_KEY_SIZE);return offer;
+            };
+            if(reg.inspect(type,sealed_message(type,mint(),"{}"),out)!=SealedRegistry::Outcome::Rejected) return false;
+            if(reg.inspect(type,sealed_message(type,mint(),R"({"type":"login"})"),out)!=SealedRegistry::Outcome::Rejected) return false;
+            if(reg.inspect(type,sealed_message(type,mint(),json({{"type",type}}).dump()),out)!=SealedRegistry::Outcome::Opened) return false;
+        }
+        return true;
+    });
+
     run_test("Replaying a sealed message fails the second time", [] {
         SealedKeyStore store;
         SealedRegistry reg(identity(), store);

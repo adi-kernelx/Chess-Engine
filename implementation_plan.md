@@ -177,6 +177,10 @@ Engine strength is not a certified rating. Bot labels are product choices mapped
 - [x] Migration 0011 rotation timestamps and bounded refresh recovery.
 - [x] Client restoration distinguishes connection trouble from definitive authentication failure.
 - [x] Rate limiting and non-enumerating credential errors.
+- [x] Verified-email activation and single-use password recovery with transactional session revocation.
+- [x] Legacy password accounts can add a recovery email with current-password proof.
+- [x] Bounded Gmail SMTP worker with mandatory STARTTLS and secret-backed configuration.
+- [ ] Apply migration 0015, configure SMTP on the hosted revision and verify real email delivery.
 
 ### 7.2 Google sign-in
 
@@ -185,7 +189,7 @@ Engine strength is not a certified rating. Bot labels are product choices mapped
 - [x] Issuer, audience, provider, identity and token-claim checks.
 - [x] Bounded key cache, fetch timeout, response size and refresh cooldown.
 - [x] No automatic downgrade from ES256 to legacy HS256.
-- [x] Stable Google identity mapping without duplicate accounts or automatic email-based linking.
+- [x] Stable Google identity mapping; reuse a password account only when both stored and Google email ownership are verified.
 - [x] Local Google login, repeat login, refresh and sign-out checks reported passed.
 
 Supabase private signing keys are not required. Its project URL and public key information are configuration, not application secrets.
@@ -346,3 +350,4 @@ This section summarizes the substantial additions and revised design decisions a
 7. **Security hardening:** ES256 public-key Google verification, browser sealed authentication, strict text-safe identity loading and backend-only database access are implemented in Phase 7.
 8. **Release packaging:** non-root Docker, constrained local runtime checks, public benchmark methodology and separate deployment validation gates.
 9. **Frontend expansion:** landing/invite/puzzle/bot journeys and live release screens are consolidated in the root frontend plan; unfinished growth/accessibility work is explicitly separated.
+10. **Verified email recovery:** pending password registration, mailbox-owner password activation, expiring reset links, session revocation, legacy recovery-email enrollment and verified Google/password account reuse. Hosted rollout and real SMTP delivery remain a separate acceptance gate.

@@ -10,14 +10,13 @@
  *   ← { type: "seal_key",     key_id, master_b64, expires_in, offer_sig,
  *                             identity_pk }
  *
- *   → { type: "register",     username, password }
- *   ← { type: "auth_ok",      username, elo, access_token, refresh_token,
- *                             access_expires_in }
+ *   → { type: "register",     username, email, password }
+ *   ← { type: "email_sent" } — pending activation, never a session
  *   ← { type: "auth_error",   code: "invalid_username" | "weak_password" |
  *                                   "username_taken" | "internal" }
  *
  *   → { type: "login",        username, password }
- *   ← { type: "auth_ok", ... }   as above
+ *   ← { type: "auth_ok", username, elo, access_token, refresh_token, access_expires_in }
  *   ← { type: "auth_error", code: "invalid_credentials" | "rate_limited" | "internal" }
  *
  *   → { type: "refresh",      refresh_token }
@@ -41,6 +40,11 @@
  *   → { type: "unlink_google", access_token }
  *   ← { type: "link_ok" } | { type: "auth_error", code: "last_login_method" | ... }
  *
+ * Sealed email routes: request_password_reset{email}, verify_email{email_token,
+ * password for activation}, reset_password{email_token,password}, and
+ * set_recovery_email{access_token,password,email}. Replies are email_sent,
+ * auth_action_ok or auth_error. Email confirmation never auto-signs in.
+ *
  * Deliberate discipline:
  *   - All string values pass through nlohmann::json::dump() — no
  *     hand-concatenation, same rule as build_match_found in §7.9.
@@ -61,6 +65,7 @@
  */
 
 #pragma once
+#include "auth/email_recovery.h"
 
 #include "auth/rate_limiter.h"
 #include "auth/oauth_verify.h"
@@ -90,7 +95,8 @@ public:
     AuthHandler(storage::Database& db,
                 TokenSigner& signer,
                 SupabaseVerifier* google,
-                crypto::SealedRegistry* sealed_reg);
+                crypto::SealedRegistry* sealed_reg,
+                EmailRecovery* email = nullptr);
 
     /// LLD-5.3: register every auth route on the shared pipeline via
     /// `register_raw_route`. The pipeline handles the SealOpen stage
@@ -101,6 +107,7 @@ public:
     void register_handlers(protocol::RequestPipeline& pipeline);
 
 private:
+    void handle_email(net::Connection& conn, const std::string& message, const std::string& type);
     void handle_seal_request(net::Connection& conn, const std::string& message);
     void handle_register    (net::Connection& conn, const std::string& message);
     void handle_login       (net::Connection& conn, const std::string& message);
@@ -115,6 +122,9 @@ private:
     TokenSigner&              signer_;
     SupabaseVerifier*         google_;
     crypto::SealedRegistry*   sealed_reg_;
+    EmailRecovery* email_;
+    RateLimiter rl_email_ip_{RateLimit::per(5,std::chrono::minutes(1))};
+    RateLimiter rl_email_address_{RateLimit::per(3,std::chrono::hours(1))};
 
     // One limiter per surface, keyed as §7.9 specifies. Constructed once,
     // BEFORE any handler runs — this is the rate-limit-first ordering rule.

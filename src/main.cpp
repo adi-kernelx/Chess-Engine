@@ -24,6 +24,7 @@
 #include "application/auth/identity_extractor.h"
 #include "application/ports/null_persistence.h"
 #include "auth/auth_handler.h"
+#include "auth/smtp_mailer.h"
 #include "auth/oauth_verify.h"
 #include "auth/token.h"
 #include "concurrent/thread_pool.h"
@@ -202,6 +203,8 @@ int main() {
     std::unique_ptr<crypto::SealedKeyStore>               seal_store;
     std::unique_ptr<crypto::SealedRegistry>               sealed_reg;
     std::unique_ptr<auth::AuthHandler>                    auth_handler;
+    std::unique_ptr<auth::SmtpMailer> smtp_mailer;
+    std::unique_ptr<auth::EmailRecovery> email_recovery;
     // LLD-3.3 — persistence ports; always non-null. Real adapter when
     // the DB is up, Null adapter (capability-disabled) otherwise.
     std::unique_ptr<application::ports::GameStore>        game_store;
@@ -264,6 +267,8 @@ int main() {
             sealed_reg->require_sealed("login");
             sealed_reg->require_sealed("register");
             sealed_reg->require_sealed("google_auth");
+            for(const std::string type:{"request_password_reset","reset_password","verify_email","set_recovery_email","link_google"})
+                sealed_reg->require_sealed(type);
             // LLD-5.3: seal opening now lives inside the request
             // pipeline (see below). The old `set_pre_dispatch` hook
             // is gone.
@@ -360,8 +365,11 @@ int main() {
                                        lookup);
 
     if (auth_enabled) {
+        smtp_mailer=std::make_unique<auth::SmtpMailer>();
+        email_recovery=std::make_unique<auth::EmailRecovery>(*db,smtp_mailer->sender(),smtp_mailer->public_url());
+        core::Logger::info("main","startup",smtp_mailer->enabled()?"Email recovery enabled":"Email registration/recovery disabled (SMTP configuration required)");
         auth_handler = std::make_unique<auth::AuthHandler>(
-            *db, *signer, google.get(), sealed_reg.get());
+            *db, *signer, google.get(), sealed_reg.get(), email_recovery.get());
         auth_handler->register_handlers(pipeline);
         core::Logger::info("main", "startup", "Auth handlers registered");
     }

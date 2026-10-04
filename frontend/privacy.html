@@ -24,12 +24,13 @@
 
         <h2>Information we handle</h2>
         <ul>
-            <li><strong>Account information:</strong> your username, account identifier and rating. Password accounts store a password hash, not a readable password. If you sign in with Google, we also store your verified email address. Password registration does not collect an email address.</li>
+            <li><strong>Account information:</strong> your username, account identifier, email address and rating. New password accounts require email verification. Password accounts store a password hash, not a readable password. Google sign-in also supplies a verified email address. Older password accounts can add a recovery email after proving account ownership.</li>
             <li><strong>Google sign-in:</strong> Google and Supabase process your sign-in. The requested permissions are basic identity scopes: openid, email and profile. Supabase may receive your name and profile picture; the chess backend uses your verified email and stable Supabase identity identifier to create or recover your chess account. Your initial chess username may be derived from the part of your email before the @ symbol.</li>
             <li><strong>Gameplay:</strong> player identifiers, moves, move timings, results, ratings, game history, tournament registrations, check-ins, pairings, standings and result corrections.</li>
             <li><strong>Safety and diagnostics:</strong> connection information such as IP addresses, request and error logs, and gameplay-based anti-cheat analysis or reports.</li>
         </ul>
         <p>We do not receive your Google password. Google sign-in does not request access to your Gmail messages, Drive files or contacts.</p>
+        <p>Verification and password-recovery requests use expiring, single-use email links. The database stores token digests rather than usable link tokens. Verification links expire after 30 minutes and password links after 15 minutes; expired challenge records are cleaned up during later email requests. The email sender processes the recipient address and link to deliver the message through Gmail SMTP.</p>
 
         <h2>How information is used</h2>
         <p>We use information to authenticate you, maintain sessions, match players, operate games and tournaments, save results and replays, calculate ratings, investigate unfair play, and diagnose service failures. Google identity information is used for account authentication and account management, not advertising.</p>

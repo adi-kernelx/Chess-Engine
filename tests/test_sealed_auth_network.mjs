@@ -36,8 +36,8 @@ try {
     const username = process.env.SEALED_TEST_USERNAME;
     assert.match(username, /^seal_[0-9a-f]{12}$/);
     const password = 'Disposable-Seal-Test-42!';
-    const registered = await client.request({ type: 'register', username, password });
-    assert.equal(registered.ok, true, registered.code);
+    const registered = await client.request({ type: 'register', username, password, email: 'synthetic@example.invalid' });
+    assert.equal(registered.code, 'email_unavailable'); // No real SMTP credentials in this fixture.
     const registeredFrame = frames.at(-1);
     await silent(registeredFrame); // One-time-key replay denial.
     await silent({ type: 'login', username, password }); // No cleartext fallback on server.
@@ -53,6 +53,12 @@ try {
     assert.equal(google.code, 'invalid_google'); // Reaches Google route only after valid opening.
     const googleLogin = await client.request({ type: 'google_auth', supabase_jwt: process.env.SEALED_TEST_GOOGLE_JWT });
     assert.equal(googleLogin.ok, true, googleLogin.code);
+    for(const type of ['request_password_reset','reset_password','verify_email','set_recovery_email']) {
+        const result=await client.request({type,email:'synthetic@example.invalid',email_token:'a'.repeat(43),password,
+            access_token:login.data.access_token});
+        assert.equal(result.code,'email_unavailable'); // Only after correct seal opening.
+        await silent({type});
+    }
     const offer = await once('seal_key', { type: 'seal_request' });
     const sealed = await createSealer(pqcProvider, [pin]).seal(offer, { type: 'login', username, password });
     const tag = fromBase64(sealed.tag); tag[0] ^= 1;
@@ -67,7 +73,7 @@ try {
     assert.equal(JSON.stringify(frames).includes(password), false);
     assert.equal(JSON.stringify(frames).includes('invalid-test-jwt'), false);
     assert.equal(JSON.stringify(frames).includes(process.env.SEALED_TEST_GOOGLE_JWT), false);
-    console.log('PASS C++/JS ML-DSA + ML-KEM interoperability; sealed registration/login/Google routing, wrong-password handling, refresh, tamper, replay and downgrade denial');
+    console.log('PASS C++/JS ML-DSA + ML-KEM interoperability; sealed email/login/Google routing, missing SMTP denial, wrong-password handling, refresh, tamper, replay and downgrade denial');
 } finally {
     socket.close();
 }

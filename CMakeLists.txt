@@ -102,6 +102,8 @@ set(SOURCES
     src/game/match_notify.cpp
     # Phase 7.10 — auth surface glued into the router
     src/auth/auth_handler.cpp
+    src/auth/email_recovery.cpp
+    src/auth/smtp_mailer.cpp
     # Phase 8.2 — game persistence repositories
     src/storage/player_repo.cpp
     src/storage/game_repo.cpp
@@ -1132,3 +1134,13 @@ add_executable(test_transport_maintenance
     src/core/logger.cpp src/concurrent/thread_pool.cpp)
 target_include_directories(test_transport_maintenance PRIVATE src third_party)
 target_link_libraries(test_transport_maintenance PRIVATE Threads::Threads OpenSSL::Crypto)
+
+add_executable(test_email_recovery
+    tests/test_email_recovery.cpp
+    src/auth/email_recovery.cpp src/auth/smtp_mailer.cpp src/core/logger.cpp src/auth/oauth_verify.cpp src/auth/jwks_verifier.cpp
+    src/auth/service.cpp src/auth/password.cpp src/auth/username.cpp src/auth/session.cpp src/auth/token.cpp
+    src/storage/database.cpp src/storage/transaction.cpp src/storage/storage_error.cpp
+    src/crypto/random.cpp src/crypto/base64.cpp src/crypto/sha256.cpp src/crypto/sha512.cpp)
+target_include_directories(test_email_recovery PRIVATE src third_party)
+target_compile_definitions(test_email_recovery PRIVATE CHESS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_email_recovery PRIVATE Threads::Threads OpenSSL::Crypto PostgreSQL::PostgreSQL CURL::libcurl)

@@ -19,6 +19,8 @@ bool contains_sensitive_json(const std::string& message) {
            message.find("\"access_token\"")  != std::string::npos ||
            message.find("\"refresh_token\"") != std::string::npos ||
            message.find("\"supabase_jwt\"")   != std::string::npos ||
+           message.find("\"email_token\"")    != std::string::npos ||
+           message.find("\"email\"")          != std::string::npos ||
            message.find("\"sealed\"")         != std::string::npos;
 }
 

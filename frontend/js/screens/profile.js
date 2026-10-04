@@ -129,6 +129,10 @@ export class ProfileScreen extends Screen {
                         this._stat('Win rate', winRate + '%'),
                         this._stat('Rating',  formatElo(p.elo)),
                     ),
+                    h('div',{class:'card'},h('div',{class:'card__body'},
+                        h('div',{class:'card__title'},'Account recovery'),
+                        h('p',{class:'auth-note'},'Older password accounts can add a verified recovery email. Google accounts already have a verified address.'),
+                        h('a',{class:'btn btn--ghost',href:'#/recovery-email'},'Add recovery email'))),
 
                     h('div', { class: 'card' },
                         h('div', { class: 'card__header' },

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS players (
     -- give one, and a Google-only user's email lives in google_sub. UNIQUE
     -- with NULL means as many NULLs as we like, so this does not conflict.
     email         TEXT UNIQUE,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
 
     -- password_hash is NULL for Google-only accounts, google_sub is NULL for
     -- password-only accounts. The CHECK below prevents an account with

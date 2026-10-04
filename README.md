@@ -16,6 +16,7 @@ Built as an educational systems project: networking, concurrency, chess rules, s
 - Scheduled **Swiss** and **Winners Advance** tournaments: registration locks, check-in, start gates, byes, no-shows and automatic results.
 - Advancement-based Winners Advance placement, reversed-color draw replay and a two-draw same-pair cap.
 - Password accounts and Google sign-in through Supabase identity verification.
+- Verified-email activation, single-use password recovery and verified Google/password account reuse; optional Gmail SMTP configuration required for new password registrations.
 - Single-use post-quantum hybrid sealed authentication alongside production TLS.
 - Engine analysis and statistical anti-cheat reports for review, not automatic bans.
 - Invite/result sharing, daily bundled puzzles, local streaks and named bot choices.
@@ -100,6 +101,9 @@ Database-backed features require the matching schema migrations. Review migratio
 | SUPABASE_AUDIENCE | authenticated |
 | AUTH_READ_POOL_SIZE | Identity-read pool size 0–4; default 2 |
 | SERVER_WORKER_THREADS | Worker count 1–8; default 4 |
+| SMTP_USERNAME | Gmail account used to send verification/recovery emails |
+| SMTP_PASSWORD | Secret Gmail App Password, supplied at runtime |
+| AUTH_PUBLIC_URL | Public HTTPS frontend origin without trailing slash |
 
 ES256 uses verified HTTPS public JWKS; no Supabase private signing key/shared JWT secret is needed. See [Security](docs/SECURITY.md) for legacy compatibility and operational details.
 

@@ -17,6 +17,7 @@ HTTPS/WSS is required in production. The sealed authentication layer complements
 | Password storage | OpenSSL Argon2id |
 | Application access tokens | HMAC-SHA-384 |
 | Refresh tokens | CSPRNG-generated opaque tokens; SHA-384 hashes in storage |
+| Email verification/password links | 256-bit CSPRNG tokens; SHA-256 digests in storage |
 | Google identity | ES256/P-256 signatures, public HTTPS JWKS |
 | Sealed payload agreement | ML-KEM-768 + X25519 hybrid |
 | Sealed payload encryption/integrity | HKDF, AES-256-CTR + HMAC-SHA-384 |
@@ -41,7 +42,7 @@ Production must verify refresh recovery beyond the access-token lifetime. Deploy
 
 Supabase performs the OAuth redirect flow. The backend validates the returned identity and exchanges it for an application session.
 
-ES256 mode verifies signature, issuer, audience, supported Google provider and identity/claim requirements. Stable provider identity maps repeat logins to the same account. Accounts are not silently linked solely because emails match.
+ES256 mode verifies signature, issuer, audience, supported Google provider and identity/claim requirements. Stable provider identity maps repeat logins to the same account. A password account is reused only when its stored email was verified and the verified Google identity has the same case-insensitive address. Merely typing an address never grants ownership, and a different existing Google binding is never replaced. Pending registration cannot install its requester-chosen password: the mailbox owner chooses the active password after opening the activation link.
 
 Public keys are fetched only from the configured standard Supabase project endpoint using verified HTTPS. Custom auth domains and RS256 are not supported by the current verifier.
 
@@ -53,7 +54,7 @@ Production OAuth origins/redirect allowlists and browser CSP must match the actu
 
 ## 5. Sealed authentication
 
-When sealing is configured, login, registration and google_auth require a sealed payload.
+When sealing is configured, login, registration, google_auth, link_google, request_password_reset, reset_password, verify_email and set_recovery_email require sealed, action-bound payloads.
 
 1. Client requests a fresh offer containing one-time public key material and a server identity signature.
 2. Client verifies the pinned public identity and offer signature before transmitting credentials.
@@ -83,8 +84,50 @@ Temporary byte secrets are wiped best-effort; JavaScript strings and garbage col
 | SUPABASE_JWT_SECRET | Secret, legacy HS256 only; unused in explicit ES256 |
 | AUTH_READ_POOL_SIZE | 0–4, default 2 |
 | SERVER_WORKER_THREADS | 1–8, default 4; intended one-vCPU starting point: 2 |
+| SMTP_USERNAME | Operator-controlled Gmail sender address |
+| SMTP_PASSWORD | Secret Gmail App Password; never the normal Google password |
+| AUTH_PUBLIC_URL | HTTPS frontend origin without trailing slash, path, query or fragment |
 
 A configured malformed identity fails startup even in compatibility mode. Only an explicit local profile without required sealing/identity can run unsealed auth. Production frontend pin failure is fail-closed.
+
+### Verified email and password recovery
+
+Migration 0015 adds a case-insensitive unique email index, verified-address state
+and backend-only/RLS-protected email challenges. Existing Google addresses are
+marked verified; legacy password accounts are not changed or deleted. If old
+emails collide case-insensitively the migration fails, rather than guessing
+which accounts to merge. Email identity folding does not remove Gmail dots or
+plus aliases. Already-separate accounts/histories are not retrospectively merged.
+
+Registration is pending until mailbox activation; it returns email_sent, not a
+session. Activation asks the mailbox owner to choose the active password.
+Registering with an existing verified email sends a password-setting link for
+that existing account instead of overwriting its password or creating a new one.
+Legacy password accounts without email can add one after session and current
+password checks. Replacing an already-bound email is deliberately unsupported.
+
+Verification tokens expire in 30 minutes; reset tokens in 15. Only token digests
+are persisted, and locked transactions enforce single-use consumption. Password
+reset changes the password hash and token epoch, deletes refresh sessions and
+invalidates sibling email challenges atomically. Confirmation never auto-signs
+in. Expired challenges older than an hour are swept during later issuance; this
+is not a scheduled retention guarantee during idle periods.
+
+Recovery returns the same email_sent response for unknown/unverified addresses.
+Unknown-address jobs use the same bounded persistence/enqueue path but send no
+message. Per-IP/address limits and a short outstanding-challenge cap limit abuse;
+these are not distributed infrastructure-wide quotas. Transport tokens are
+scrubbed from the URL immediately, kept only in screen memory, and require an
+explicit button click so email-link scanners cannot activate/reset by GET.
+
+Gmail SMTP runs on one bounded worker (64 waiting jobs), outside SQL transactions
+and gameplay workers. STARTTLS is required on port 587 with certificate/hostname
+verification, bounded connect/send timeouts and no verbose credential logging.
+SMTP diagnostics never print credentials, recipient or message bodies. A missing
+or invalid email configuration disables new email registration/recovery, not
+existing login. The queue is in memory: accepted mail is not a delivery guarantee;
+restart or delivery failure can require requesting another link. Gmail limits,
+spam filtering and actual delivery need a manual hosted check.
 
 Pooling is narrow: default two identity-read sessions plus three dedicated write/tournament/persistence sessions. Leases preserve transaction ownership and rollback unfinished transactions. This does not parallelize all writes or guarantee capacity.
 

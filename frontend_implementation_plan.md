@@ -83,6 +83,10 @@ Route changes must unsubscribe listeners, cancel screen-owned work and release o
 - [x] Real profile, rating, history and leaderboard data.
 - [x] Honest empty states in place of demonstration records.
 - [x] Busy-state prevention of duplicate form submission.
+- [x] Registration email collection and no implicit session before mailbox activation.
+- [x] Forgot-password, activation/reset and legacy recovery-email forms using sealed auth.
+- [x] Single-use link tokens scrubbed from history and kept out of browser storage.
+- [ ] Manual email-delivery/form acceptance after backend migration/configuration rollout.
 - [x] Inline field errors and focused summaries for multi-error forms.
 
 **Acceptance:** expired access tokens trigger refresh recovery; temporary network trouble alone does not erase credentials; an explicit invalid/revoked session returns to sign-in.

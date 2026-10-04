@@ -32,6 +32,8 @@ import { PuzzleScreen } from './screens/puzzle.js';
 import { GameScreen } from './screens/game.js';
 import { SettingsScreen }   from './screens/settings.js';
 import { AuthScreen }       from './screens/auth.js';
+import { EmailRecoveryScreen } from './screens/email-recovery.js';
+import { consumeEmailCallback } from './net/email-callback.js';
 import { ProfileScreen }    from './screens/profile.js';
 import { LeaderboardScreen } from './screens/leaderboard.js';
 import { SpectateListScreen, SpectateWatchScreen } from './screens/spectate.js';
@@ -104,7 +106,10 @@ function boot() {
     });
     session.on('expired', () => {
         toast.warning('Signed out — please sign in again.', { duration: 3200 });
-        if (location.hash !== '#/login') location.hash = '#/login';
+        // A stale saved session must not discard a public recovery/activation
+        // link while the browser is restoring that unrelated session.
+        const recovering=/^#\/(forgot-password|verify-email|activate-account|reset-password)(?:\/|$)/.test(location.hash);
+        if (!recovering && location.hash !== '#/login') location.hash = '#/login';
     });
 
     // Store used to persist a separate demo identity. Session is now the only
@@ -143,6 +148,7 @@ function boot() {
 
     // ── Ctx passed to every screen ──
     const ctx = { store, bus, toast, modal, router: null, setConn, socket, capability, session, authClient, Outbound, Inbound, sound };
+    ctx.emailAction=consumeEmailCallback(location,history);
 
     // Google-callback handler runs AFTER router is built (below); factored
     // out so the code that needs `router` is defined after it exists.
@@ -206,6 +212,8 @@ function boot() {
     router.add('/profile',       (ctx) => new ProfileScreen(ctx),                                        { navKey: 'profile' });
     router.add('/login',         (ctx) => new AuthScreen(ctx));
     router.add('/register',      (ctx) => new AuthScreen(ctx, 'register'));
+    for(const mode of ['forgot-password','verify-email','activate-account','reset-password','recovery-email'])
+        router.add('/'+mode,ctx=>new EmailRecoveryScreen(ctx,mode));
     router.add('/settings',      (ctx) => new SettingsScreen(ctx),                                       { navKey: 'settings' });
     router.add('/board-test',    (ctx) => new BoardTestScreen(ctx));
 

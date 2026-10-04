@@ -29,6 +29,8 @@ import { googleAuthorizeUrl } from '../config.js';
 const ERROR_COPY = {
     invalid_username:        'Username must be 3–20 letters, digits, or underscores.',
     weak_password:           'Password must be at least 8 characters.',
+    invalid_email:           'Enter a valid email address.',
+    email_unavailable:       'Email delivery is not configured or is busy. Please try again later.',
     username_taken:          'That username is already in use.',
     invalid_credentials:     'Wrong username or password.',
     rate_limited:            'Too many attempts. Please wait a minute and try again.',
@@ -138,6 +140,7 @@ export class AuthScreen extends Screen {
                     id: 'auth-password',
                     class: 'input',
                     type: 'password',
+                    maxlength: 256,
                     autocomplete: this._mode === 'login' ? 'current-password' : 'new-password',
                     ref: el => this._passInput = el,
                     onkeydown: (e) => { if (e.key === 'Enter') this._submit(); },
@@ -146,12 +149,19 @@ export class AuthScreen extends Screen {
                     ? h('div', { class: 'field__hint' }, '8 characters or more.')
                     : null
             ),
+            this._mode === 'register' ? h('div', { class: 'field' },
+                h('label', { class: 'field__label', for: 'auth-email' }, 'Email'),
+                h('input', { id: 'auth-email', class: 'input', type: 'email', autocomplete: 'email', maxlength: 254, 'aria-describedby':'auth-status',
+                    ref: el => this._emailInput = el, onkeydown: e => { if(e.key==='Enter') this._submit(); } }),
+                h('div', { class: 'field__hint' }, 'Open the email link and confirm your password there to activate your account. This address also supports password recovery.')) : null,
             h('button', {
                 type: 'button',
                 class: 'btn btn--primary btn--block',
                 onclick: () => this._submit(),
                 ref: el => this._submitBtn = el,
             }, this._mode === 'login' ? 'Sign in' : 'Create account'),
+            this._mode === 'login' ? h('a', { class: 'btn btn--ghost', href: '#/forgot-password' }, 'Forgot password?') : null,
+            h('div', { id:'auth-status', role: 'status', 'aria-live': 'polite', class: 'auth-note', ref: el => this._status = el }),
 
             h('div', { class: 'auth-divider' }, h('span', {}, 'or continue with')),
             h('button', {
@@ -197,7 +207,13 @@ export class AuthScreen extends Screen {
             this.ctx.toast.warning('Password should be at least 8 characters.', { duration: 2400 });
             return;
         }
+        const email=this._mode==='register'?(this._emailInput.value||'').trim():'';
+        if(this._mode==='register' && (!email || !this._emailInput.checkValidity())) {
+            this._status.textContent='Enter a valid email address.';this._status.setAttribute('role','alert');
+            this.ctx.toast.warning('Enter a valid email address.'); this._emailInput.focus(); return;
+        }
         this._busy = true;
+        this._status.textContent='';this._status.setAttribute('role','status');
         this._submitBtn.disabled = true;
         this._googleBtn.disabled = true;
         this._submitBtn.setAttribute('aria-busy', 'true');
@@ -206,16 +222,23 @@ export class AuthScreen extends Screen {
         const mode = this._mode;
         const msg = mode === 'login'
             ? this.ctx.Outbound.login(username, password)
-            : this.ctx.Outbound.register(username, password);
+            : this.ctx.Outbound.register(username, password, email);
 
         try {
             const result = await this._requestAuth(msg);
             if (!result.ok) {
                 const copy = ERROR_COPY[result.code] || 'Sign in failed.';
+                this._status.textContent=copy;this._status.setAttribute('role','alert');
                 this.ctx.toast.error(copy, { duration: 3600 });
                 return;
             }
 
+            if(mode==='register') {
+                this._passInput.value='';
+                this._status.textContent='Check your inbox. If this address can be used, you will receive a verification or set-password link. Your account is not signed in yet.';
+                this._status.setAttribute('tabindex','-1'); this._status.focus();
+                return;
+            }
             this.ctx.session.adopt(result.data);
             this.ctx.toast.success(
                 mode === 'login'
@@ -239,7 +262,7 @@ export class AuthScreen extends Screen {
      *  fail visibly, leaving Session untouched. */
     _requestAuth(message) {
         return this.ctx.authClient.request(message).then(result => {
-            if (result.ok) result.data = this.ctx.Inbound.normalize(result.data);
+            if (result.ok && ['login','google_auth'].includes(message.type)) result.data = this.ctx.Inbound.normalize(result.data);
             return result;
         });
     }

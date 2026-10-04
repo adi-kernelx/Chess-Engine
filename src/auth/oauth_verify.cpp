@@ -315,14 +315,23 @@ GoogleSignInResult google_sign_in(Database& db, const SupabaseVerifier& verifier
         return r;
     }
 
-    // First-time sign-in. Refuse if the email is already taken — auto-linking
-    // on email is the classical takeover vector.
-    auto by_email = db.exec("SELECT 1 FROM players WHERE email=$1 LIMIT 1",
+    // A typed/unverified address never grants access. Both the stored address
+    // and Google's JWT must prove ownership before reusing a password account.
+    auto by_email = db.exec("SELECT id,username,elo_rating,token_epoch,email_verified,google_sub FROM players WHERE lower(email)=lower($1) LIMIT 1",
                             {Param::text(id.email)});
     if (!by_email.ok) { r.status = GoogleSignInStatus::DatabaseError; return r; }
     if (!by_email.rows.empty()) {
-        r.status = GoogleSignInStatus::EmailCollision;
-        return r;
+        const auto& row=by_email.first();
+        if(row.at(4)!="t" || (!row.is_null(5) && row.at(5)!=id.sub)) {
+            r.status=GoogleSignInStatus::EmailCollision; return r;
+        }
+        auto linked=db.exec("UPDATE players SET google_sub=$1,last_login=now() WHERE id=$2 AND email_verified=TRUE"
+            " AND lower(email)=lower($3) AND (google_sub IS NULL OR google_sub=$1) RETURNING id",
+            {Param::text(id.sub),Param::text(row.at(0)),Param::text(id.email)});
+        if(!linked.ok) {r.status=GoogleSignInStatus::DatabaseError;return r;}
+        if(linked.empty()) {r.status=GoogleSignInStatus::EmailCollision;return r;}
+        r.status=GoogleSignInStatus::Ok; r.player_id=std::stoll(row.at(0)); r.username=row.at(1);
+        r.elo_rating=std::stoi(row.at(2)); r.token_epoch=std::stoi(row.at(3)); return r;
     }
 
     // Derive a username. The whitelist means most emails yield something
@@ -334,8 +343,8 @@ GoogleSignInResult google_sign_in(Database& db, const SupabaseVerifier& verifier
     if (username.empty()) { r.status = GoogleSignInStatus::InternalError; return r; }
 
     auto ins = db.exec(
-        "INSERT INTO players(username, username_ci, email, google_sub, elo_rating)"
-        " VALUES($1,$2,$3,$4,$5) RETURNING id, elo_rating, token_epoch",
+        "INSERT INTO players(username, username_ci, email, google_sub, elo_rating,email_verified)"
+        " VALUES($1,$2,lower($3),$4,$5,TRUE) RETURNING id, elo_rating, token_epoch",
         {Param::text(username), Param::text(to_lower_ascii(username)),
          Param::text(id.email), Param::text(id.sub), Param::int64(INITIAL_ELO)});
     if (!ins.ok) {
@@ -380,14 +389,17 @@ LinkStatus link_google(Database& db, const SupabaseVerifier& verifier,
     if (!other.ok) return LinkStatus::DatabaseError;
     if (!other.rows.empty()) return LinkStatus::AlreadyLinkedElsewhere;
 
-    auto up = db.exec("UPDATE players SET google_sub=$1 WHERE id=$2",
-                      {Param::text(id.sub), Param::int64(player_id)});
+    auto up = db.exec("UPDATE players SET google_sub=$1,email=COALESCE(email,lower($3)),"
+                      "email_verified=CASE WHEN email IS NULL OR lower(email)=lower($3) THEN TRUE ELSE email_verified END"
+                      " WHERE id=$2 AND (google_sub IS NULL OR google_sub=$1) RETURNING id",
+                      {Param::text(id.sub), Param::int64(player_id),Param::text(id.email)});
     if (!up.ok) {
         if (up.sqlstate == storage::pg_errors::UNIQUE_VIOLATION) {
             return LinkStatus::AlreadyLinkedElsewhere;
         }
         return LinkStatus::DatabaseError;
     }
+    if(up.empty()) return LinkStatus::AlreadyHasGoogle;
     return LinkStatus::Ok;
 }
 

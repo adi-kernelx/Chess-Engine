@@ -107,7 +107,9 @@ SealedRegistry::Outcome SealedRegistry::inspect(const std::string& type,
     // Authenticate the routing action too: relabelling an encrypted register
     // request as login must not leave a valid envelope for a different action.
     auto inner_type = body.find("type");
-    const bool auth_type = type == "login" || type == "register" || type == "google_auth";
+    const bool auth_type = type == "login" || type == "register" || type == "google_auth" ||
+        type == "request_password_reset" || type == "reset_password" || type == "verify_email" ||
+        type == "set_recovery_email" || type == "link_google";
     if (inner_type == body.end()) {
         if (auth_type) return Outcome::Rejected;
     } else if (!inner_type->is_string() || inner_type->get<std::string>() != type) {

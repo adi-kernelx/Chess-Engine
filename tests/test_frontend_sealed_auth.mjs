@@ -51,7 +51,7 @@ const make = options => {
     const socket = new Socket();
     return { socket, client: new AuthClient(socket, { pinnedKeys: [pin], timeoutMs: 500, ...options }) };
 };
-for (const type of ['login', 'register', 'google_auth']) {
+for (const type of ['login', 'register', 'google_auth','request_password_reset','reset_password','verify_email','set_recovery_email','link_google']) {
     const { socket, client } = make();
     const result = client.request(type === 'google_auth' ? { type, supabase_jwt: 'test-jwt-only' } : { ...credentials, type });
     socket.emit('seal_key', offer);
@@ -60,7 +60,8 @@ for (const type of ['login', 'register', 'google_auth']) {
     assert.deepEqual(Object.keys(socket.sent[1]), ['type', 'sealed']);
     assert.equal(JSON.stringify(socket.sent).includes(credentials.password), false);
     assert.equal(JSON.stringify(socket.sent).includes('test-jwt-only'), false);
-    socket.emit('auth_ok', { username: 'sealed_test' });
+    socket.emit(['register','request_password_reset','set_recovery_email'].includes(type)?'email_sent':
+        type==='link_google'?'link_ok':['reset_password','verify_email'].includes(type)?'auth_action_ok':'auth_ok', { username: 'sealed_test' });
     assert.equal((await result).ok, true);
     socket.assertClean();
 }
@@ -147,6 +148,7 @@ for (const options of [{ pinnedKeys: ['wrong'] }, { provider: async () => { thro
     screen._userInput = { value: 'test_user' }; screen._passInput = { value: '' };
     screen._submitBtn = { disabled: false, textContent: 'Sign in', setAttribute() {}, removeAttribute() {} };
     screen._googleBtn = { disabled: false };
+    screen._status = { textContent: '', setAttribute() {} };
     screen.ctx = { Outbound: { login: (username, password) => ({ type: 'login', username, password }) },
         toast: { warning() { warnings++; }, error() { errors++; }, success() {} },
         session: { adopt() { adopted++; } }, router: { go() { navigated++; } } };

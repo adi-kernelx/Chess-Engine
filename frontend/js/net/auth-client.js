@@ -1,6 +1,7 @@
 import { createSealer } from './sealed.js';
 
-const AUTH_TYPES = new Set(['login', 'register', 'google_auth']);
+const AUTH_TYPES = new Set(['login', 'register', 'google_auth', 'request_password_reset',
+    'reset_password', 'verify_email', 'set_recovery_email', 'link_google']);
 const loadProvider = async () => (await import('./pqc-provider.js')).pqcProvider;
 
 /** One authentication exchange at a time. Never queue credentials/replay an
@@ -46,7 +47,10 @@ export class AuthClient {
                 if (settled) return;
                 if (!this.socket.sendImmediate(frame)) finish({ ok: false, code: 'unavailable' });
             };
-            cleanup.push(this.socket.on('auth_ok', data => {
+            const expected = message.type === 'register' || message.type === 'request_password_reset' ||
+                message.type === 'set_recovery_email' ? 'email_sent' : message.type === 'link_google' ? 'link_ok' :
+                ['login','google_auth'].includes(message.type) ? 'auth_ok' : 'auth_action_ok';
+            cleanup.push(this.socket.on(expected, data => {
                 if (phase === 'sent') finish({ ok: true, data });
             }));
             cleanup.push(this.socket.on('auth_error', error =>

@@ -27,6 +27,19 @@ env['AUTH_READ_POOL_SIZE'] = '2'
 env['SEALED_TEST_USERNAME'] = 'seal_' + uuid.uuid4().hex[:12]
 for name in ('SUPABASE_JWT_SECRET', 'SUPABASE_ISSUER', 'SUPABASE_AUDIENCE'):
     env.pop(name, None)
+for name in ('SMTP_PASSWORD','SMTP_USERNAME','AUTH_PUBLIC_URL'):
+    env.pop(name,None)
+
+# Seed only the unique local password fixture. Network registration now needs
+# an email activation; this transport probe deliberately has no mail service.
+test_hash = subprocess.run([str(root/'build_release/test_email_recovery'), '--synthetic-password-hash'],
+    capture_output=True,text=True,check=True,env=env).stdout
+assert re.fullmatch(r'\$argon2id\$v=19\$m=\d+,t=\d+,p=\d+\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+',test_hash)
+fixture_name=env['SEALED_TEST_USERNAME']
+subprocess.run(['psql',env['DATABASE_URL'],'-Xq','-v','ON_ERROR_STOP=1','-c',
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE; "
+    f"INSERT INTO players(username,username_ci,password_hash,elo_rating) VALUES('{fixture_name}','{fixture_name}','{test_hash}',800);"],
+    env=env,capture_output=True,check=True,timeout=10)
 google_secret = os.urandom(32)
 env['SUPABASE_JWT_SECRET'] = base64.b64encode(google_secret).decode()
 env['SUPABASE_ISSUER'] = 'https://sealed-test.invalid/auth/v1'

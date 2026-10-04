@@ -112,11 +112,12 @@ std::string build_auth_ok(const std::string& username, int elo,
 AuthHandler::AuthHandler(storage::Database& db,
                          TokenSigner& signer,
                          SupabaseVerifier* google,
-                         crypto::SealedRegistry* sealed_reg)
+                         crypto::SealedRegistry* sealed_reg, EmailRecovery* email)
     : db_(db),
       signer_(signer),
       google_(google),
       sealed_reg_(sealed_reg),
+      email_(email),
       rl_login_ip_     (rate_presets::login_per_ip()),
       rl_login_account_(rate_presets::login_per_account()),
       rl_register_ip_  (rate_presets::register_per_ip()),
@@ -168,6 +169,10 @@ void AuthHandler::register_handlers(protocol::RequestPipeline& pipeline) {
                    chess::application::MessageSink&) { handle_unlink_google(c, m); });
     }
     (void)raw;  // helper kept for future use if migration wants it
+    for(const std::string type:{"request_password_reset","reset_password","verify_email","set_recovery_email"}) {
+        pipeline.register_raw_route(RoutePolicy{type},
+            [this,type](net::Connection& c,const std::string& m,chess::application::MessageSink&){handle_email(c,m,type);});
+    }
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -196,28 +201,63 @@ void AuthHandler::handle_register(net::Connection& conn, const std::string& mess
     json j;
     if (!parse_or_fail(conn, message, j)) return;
 
-    std::string username, password;
+    std::string username, password, email;
     if (!require_string(conn, j, "username", username)) return;
     if (!require_string(conn, j, "password", password)) return;
 
-    auto r = register_password_user(db_, username, password);
-    switch (r.status) {
-        case RegisterResult::Status::InvalidUsername:
-            send_auth_error(conn, "invalid_username"); return;
-        case RegisterResult::Status::WeakPassword:
-            send_auth_error(conn, "weak_password"); return;
-        case RegisterResult::Status::UsernameTaken:
-            send_auth_error(conn, "username_taken"); return;
-        case RegisterResult::Status::DatabaseError:
-        case RegisterResult::Status::InternalError:
-            send_auth_error(conn, "internal"); return;
-        case RegisterResult::Status::Ok:
-            break;
+    if (!require_string(conn,j,"email",email)) return;
+    if(!email_ || !email_->enabled()) {send_auth_error(conn,"email_unavailable");return;}
+    const auto address=canonical_email(email);
+    if(!address.empty() && !rl_email_address_.try_take(address)) {
+        send_json(conn,serialize_type_first("email_sent",json::object())); return;
     }
-    // Fresh account: token_epoch starts at 0.
-    auto tokens = issue_session(db_, signer_, r.player_id, r.username, 0, now_seconds());
-    if (!tokens.ok) { send_auth_error(conn, "internal"); return; }
-    send_json(conn, build_auth_ok(r.username, r.elo_rating, tokens));
+    const auto status=email_->register_user(username,email,password,now_seconds());
+    if(status==EmailStatus::Ok) send_json(conn,serialize_type_first("email_sent",json::object()));
+    else send_auth_error(conn,status==EmailStatus::InvalidEmail?"invalid_email":
+        status==EmailStatus::InvalidUsername?"invalid_username":status==EmailStatus::WeakPassword?"weak_password":
+        status==EmailStatus::Unavailable?"email_unavailable":"internal");
+}
+
+void AuthHandler::handle_email(net::Connection& conn,const std::string& message,const std::string& type) {
+    if(!rl_email_ip_.try_take(conn.get_ip())) {send_auth_error(conn,"rate_limited");return;}
+    json j; if(!parse_or_fail(conn,message,j)) return;
+    if(!email_ || !email_->enabled()) {send_auth_error(conn,"email_unavailable");return;}
+    EmailStatus status=EmailStatus::InvalidToken;
+    std::string token,password,email;
+    if(type=="reset_password") {
+        if(!require_string(conn,j,"email_token",token) || !require_string(conn,j,"password",password)) return;
+        status=email_->reset_password(token,password,now_seconds());
+    } else if(type=="verify_email") {
+        if(!require_string(conn,j,"email_token",token)) return;
+        if(j.contains("password") && !require_string(conn,j,"password",password)) return;
+        status=email_->confirm_email(token,now_seconds(),password);
+    } else {
+        if(!require_string(conn,j,"email",email)) return;
+        const auto address=canonical_email(email);
+        if(type=="set_recovery_email") {
+            std::string access;
+            if(!require_string(conn,j,"access_token",access) || !require_string(conn,j,"password",password)) return;
+            AccessClaims claims;
+            if(authorize_access_token(db_,signer_,access,now_seconds(),claims)!=GateOutcome::Ok) {
+                send_auth_error(conn,"unauthorized");return;
+            }
+            if(!address.empty() && !rl_email_address_.try_take(address)) {
+                send_json(conn,serialize_type_first("email_sent",json::object()));return;
+            }
+            status=email_->request_recovery_email(claims.player_id,email,password,now_seconds());
+        } else {
+            if(!address.empty() && !rl_email_address_.try_take(address)) {
+                send_json(conn,serialize_type_first("email_sent",json::object()));return;
+            }
+            status=email_->request_reset(email,now_seconds());
+        }
+    }
+    if(status==EmailStatus::Ok) send_json(conn,serialize_type_first(
+        type=="reset_password" || type=="verify_email"?"auth_action_ok":"email_sent",json::object()));
+    else send_auth_error(conn,status==EmailStatus::InvalidEmail?"invalid_email":
+        status==EmailStatus::WeakPassword?"weak_password":status==EmailStatus::InvalidToken?"invalid_email_token":
+        status==EmailStatus::Unauthorized?"invalid_credentials":status==EmailStatus::Conflict?"email_conflict":
+        status==EmailStatus::Unavailable?"email_unavailable":"internal");
 }
 
 void AuthHandler::handle_login(net::Connection& conn, const std::string& message) {

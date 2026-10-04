@@ -59,13 +59,12 @@
  * project. Migrating to a different Supabase project would break the
  * mapping; that is a deliberate boundary, not a bug.
  *
- * EMAIL COLLISION DOES NOT AUTO-LINK
+ * VERIFIED EMAIL LINKING
  *
- * If a new Google identity's email matches an existing password account,
- * we REFUSE the sign-in and tell the user to log in normally and link
- * from Settings. Auto-linking on email alone is the classical account-
- * takeover vector: a Google account someone else controls with the same
- * email would silently absorb the target's chess account.
+ * A matching password account is reused only when its stored email was
+ * verified and the validated Google JWT proves the same email. A typed or
+ * unverified email never authorizes linking. Another Google sub is never
+ * replaced. Existing Google mappings remain keyed by stable Supabase sub.
  */
 
 #pragma once
@@ -170,7 +169,8 @@ struct GoogleSignInResult {
  * Sign in (or first-sign-up) with a Google identity via its Supabase JWT.
  *
  * If the `sub` is known, the existing account is returned. If not:
- *   - a colliding-email account exists  → EmailCollision (do NOT link)
+ *   - matching verified password email → safely attach Google to that row
+ *   - unverified email/different Google identity → EmailCollision
  *   - otherwise                          → create a new row
  *
  * The generated username derives from the email local-part, filtered to the

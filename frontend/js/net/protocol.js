@@ -108,7 +108,7 @@ export const Outbound = {
     // ── Identity and query routes (live backend) ──────────────
 
     login(username, password)    { return { type: 'login',    username, password }; },
-    register(username, password) { return { type: 'register', username, password }; },
+    register(username, password, email) { return { type: 'register', username, password, email }; },
     refresh(refreshToken)        { return { type: 'refresh',  refresh_token: refreshToken }; },
     logout(refreshToken)         { return { type: 'logout',   refresh_token: refreshToken }; },
     logoutAll(accessToken)       { return { type: 'logout_all', access_token: accessToken }; },
