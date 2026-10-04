@@ -41,7 +41,7 @@ export const CONFIG = {
     // frontend/vercel.json AND rejected by browsers as mixed content.
     wsUrl: IS_LOCAL
         ? 'ws://localhost:9000'
-        : 'wss://<cloud-run-host>',
+        : 'wss://chess-server-591282043392.asia-northeast1.run.app',
 
     // Server ML-DSA-65 identity fingerprints. Compare bytewise to
     // base64(SHA-384(offer.identity_pk)) received in `seal_key`.
