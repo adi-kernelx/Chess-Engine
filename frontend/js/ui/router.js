@@ -114,7 +114,7 @@ export class Router {
         const label = route.meta.navKey
             ? route.meta.navKey.charAt(0).toUpperCase() + route.meta.navKey.slice(1)
             : path.slice(1) || 'Lobby';
-        document.title = `${label} — Chess Platform`;
+        document.title = `${label} — Multiplayer Chess`;
 
         this._listeners.forEach(fn => fn(path, route.meta));
     }

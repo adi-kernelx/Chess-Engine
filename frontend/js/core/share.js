@@ -78,7 +78,7 @@ export function buildPGN({ white, black, result = '*', event = 'Casual game', si
     const yyyymmdd = date ? date : formatPgnDate(new Date());
     const tags = [
         ['Event',  event],
-        ['Site',   site || location.host || 'Chess Platform'],
+        ['Site',   site || location.host || 'Multiplayer Chess'],
         ['Date',   yyyymmdd],
         ['Round',  '-'],
         ['White',  white || '?'],

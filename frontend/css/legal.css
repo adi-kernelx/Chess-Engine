@@ -1,0 +1,68 @@
+/* Public documents share the app palette without requiring its runtime. */
+.site-footer {
+    padding: var(--sp-6);
+    border-top: 1px solid var(--border-subtle);
+    text-align: center;
+    font-size: var(--fs-lg);
+}
+.site-footer nav {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--sp-2) var(--sp-6);
+    margin-top: var(--sp-2);
+}
+.site-footer a, .legal-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--sp-12);
+}
+.site-footer a:focus-visible, .legal-page a:focus-visible {
+    outline-color: var(--accent);
+}
+.legal-page {
+    font-size: var(--fs-lg);
+    overflow-wrap: anywhere;
+}
+.legal-header, .legal-content {
+    width: min(100%, 72ch);
+    margin-inline: auto;
+    padding: var(--sp-6);
+}
+.legal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--sp-2) var(--sp-6);
+    border-bottom: 1px solid var(--border-subtle);
+}
+.legal-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-height: var(--sp-12);
+    font-weight: var(--fw-semibold);
+}
+.legal-content { flex: 1; padding-block: var(--sp-10); }
+.legal-content h1 { font-size: var(--fs-4xl); }
+.legal-content h2 { margin-top: var(--sp-8); font-size: var(--fs-2xl); }
+.legal-content p, .legal-content ul { margin-top: var(--sp-4); }
+.legal-content p, .legal-content li { line-height: 1.75; color: var(--text-secondary); }
+.legal-content ul { padding-left: var(--sp-6); }
+.legal-content li + li { margin-top: var(--sp-2); }
+.legal-content a { text-decoration: underline; text-underline-offset: 0.2em; }
+.legal-nav { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.legal-skip {
+    position: absolute;
+    top: var(--sp-2);
+    left: var(--sp-2);
+    padding: var(--sp-3);
+    background: var(--surface-2);
+    transform: translateY(-200%);
+}
+.legal-skip:focus { transform: translateY(0); }
+@media (max-width: 480px) {
+    .legal-content h1 { font-size: var(--fs-3xl); }
+    .legal-header, .legal-content { padding-inline: var(--sp-4); }
+}

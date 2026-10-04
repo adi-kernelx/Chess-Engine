@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="How Multiplayer Chess handles account, Google sign-in and gameplay information." />
+    <meta name="color-scheme" content="dark" />
+    <title>Privacy policy — Multiplayer Chess</title>
+    <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/base.css" />
+    <link rel="stylesheet" href="css/legal.css" />
+</head>
+<body class="legal-page">
+    <a class="legal-skip" href="#content">Skip to content</a>
+    <header class="legal-header">
+        <a class="legal-brand" href="./"><img src="assets/logo.svg" width="28" height="28" alt="" />Multiplayer Chess</a>
+        <nav class="legal-nav" aria-label="Document navigation"><a href="./">Back to chess</a><a href="terms.html">Terms</a></nav>
+    </header>
+    <main id="content" class="legal-content" tabindex="-1">
+        <h1>Privacy policy</h1>
+        <p>Last updated: <time datetime="2026-10-04">4 October 2026</time></p>
+        <p>Multiplayer Chess is an online chess platform operated by Aditya Gupta. This policy describes information handled when you play games, create an account, sign in with Google or participate in tournaments.</p>
+
+        <h2>Information we handle</h2>
+        <ul>
+            <li><strong>Account information:</strong> your username, account identifier and rating. Password accounts store a password hash, not a readable password. If you sign in with Google, we also store your verified email address. Password registration does not collect an email address.</li>
+            <li><strong>Google sign-in:</strong> Google and Supabase process your sign-in. The requested permissions are basic identity scopes: openid, email and profile. Supabase may receive your name and profile picture; the chess backend uses your verified email and stable Supabase identity identifier to create or recover your chess account. Your initial chess username may be derived from the part of your email before the @ symbol.</li>
+            <li><strong>Gameplay:</strong> player identifiers, moves, move timings, results, ratings, game history, tournament registrations, check-ins, pairings, standings and result corrections.</li>
+            <li><strong>Safety and diagnostics:</strong> connection information such as IP addresses, request and error logs, and gameplay-based anti-cheat analysis or reports.</li>
+        </ul>
+        <p>We do not receive your Google password. Google sign-in does not request access to your Gmail messages, Drive files or contacts.</p>
+
+        <h2>How information is used</h2>
+        <p>We use information to authenticate you, maintain sessions, match players, operate games and tournaments, save results and replays, calculate ratings, investigate unfair play, and diagnose service failures. Google identity information is used for account authentication and account management, not advertising.</p>
+
+        <h2>What other players can see</h2>
+        <p>Your chess username, rating, game participation, moves, results and tournament standings may be visible in leaderboards, tournament pages, live spectating and replays. Do not choose a username that contains information you want to keep private. Your email address, password hash and session tokens are not intended to be public player information.</p>
+
+        <h2>Service providers and sharing</h2>
+        <p>The frontend is hosted on Vercel, the backend on Google Cloud Run, and the database and Google sign-in service on Supabase. Google also processes the Google sign-in itself. These providers handle information needed to deliver and secure their services under their own policies. Hosting and database services may process information outside your country.</p>
+        <p>We do not sell Google user data or use it for targeted advertising. Access may be needed by the operator to support the service, investigate abuse or respond to lawful requests.</p>
+        <p>Provider policies: <a href="https://policies.google.com/privacy">Google</a>, <a href="https://supabase.com/privacy">Supabase</a>, and <a href="https://vercel.com/legal/privacy-policy">Vercel</a>.</p>
+
+        <h2>Browser storage and sessions</h2>
+        <p>The app uses browser local storage for its refresh token, preferences and local progress such as puzzle streaks and onboarding state. It also uses temporary browser storage and memory for navigation and active sessions. Signing out revokes the current application session. Clearing site storage removes local settings and sign-in recovery information, but does not delete server-side account or game records. Google and our hosting providers may use their own cookies or storage.</p>
+
+        <h2>Retention and your choices</h2>
+        <p>Account and gameplay records remain in the service database unless removed by the operator; there is no automatic account-deletion schedule in the current release. Operational logs and provider backups have separate retention settings. Removing browser storage or revoking Google access does not by itself delete your chess account or saved games.</p>
+        <p>To request access, correction or deletion of your information, email <a href="mailto:aditya.gupta.cloud.1@gmail.com">aditya.gupta.cloud.1@gmail.com</a>. We may need to verify account ownership before acting. We will explain any records that need to remain for security, shared game or tournament integrity, or legal obligations. There is no self-service account-deletion button in this release.</p>
+        <p>You can stop using Google sign-in or revoke its access through your Google Account's third-party connections settings.</p>
+
+        <h2>Security</h2>
+        <p>The service uses HTTPS/WSS in production, password hashing, session revocation and restricted database access. Authentication payloads also use a sealed-envelope layer. These controls reduce risk but cannot guarantee absolute security. Never send passwords, private keys or session tokens in a support email.</p>
+
+        <h2>Policy updates and contact</h2>
+        <p>Changes will be published here with an updated date. For privacy questions, contact <a href="mailto:aditya.gupta.cloud.1@gmail.com">aditya.gupta.cloud.1@gmail.com</a>.</p>
+    </main>
+    <footer class="site-footer"><nav aria-label="Legal and support"><a href="./">Home</a><a href="privacy.html" aria-current="page">Privacy policy</a><a href="terms.html">Terms of service</a></nav></footer>
+</body>
+</html>

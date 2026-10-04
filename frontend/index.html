@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Multiplayer chess platform — real-time games, AI opponent, tournaments." />
     <meta name="color-scheme" content="dark" />
-    <title>Chess Platform</title>
+    <title>Multiplayer Chess</title>
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="assets/logo-180.png" />
 
@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="css/screens.css" />
     <link rel="stylesheet" href="css/landing.css" />
     <link rel="stylesheet" href="css/responsive.css" />
+    <link rel="stylesheet" href="css/legal.css" />
 </head>
 <body>
 
@@ -96,9 +97,9 @@
          ============================================================ -->
     <div class="app">
         <nav class="nav" role="navigation" aria-label="Primary">
-            <a href="#/" class="nav__brand" aria-label="Chess Platform home">
+            <a href="#/" class="nav__brand" aria-label="Multiplayer Chess home">
                 <img class="nav__brand-logo" src="assets/logo.svg" width="28" height="28" alt="" />
-                <span>Chess Platform</span>
+                <span>Multiplayer Chess</span>
             </a>
 
             <button id="nav-toggle" class="nav__toggle" aria-label="Open menu" aria-expanded="false" aria-controls="nav-links">
@@ -133,6 +134,14 @@
         <main id="outlet" class="app-outlet">
             <!-- Router mounts screens here -->
         </main>
+        <footer class="site-footer">
+            <p>Multiplayer Chess — online games, puzzles and tournaments.</p>
+            <nav aria-label="Legal and support">
+                <a href="privacy.html">Privacy policy</a>
+                <a href="terms.html">Terms of service</a>
+                <a href="mailto:aditya.gupta.cloud.1@gmail.com">Contact</a>
+            </nav>
+        </footer>
     </div>
 
     <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
